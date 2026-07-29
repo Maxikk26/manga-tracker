@@ -1,6 +1,6 @@
 # One-pager V1a — "El cron que sí funciona"
 
-Versión 1.3 — cerrada el 2026-07-28. (Cambio vs 1.2: intervalo del feed fijado en 1 hora por la medición de la ventana, que dio 41 minutos en hora pico; el barrido de activos queda designado como mecanismo principal de detección y no como red de seguridad; renombre de los barridos por población. Cambio 1.1→1.2: nomenclatura alineada al glosario de la spec de modelo de datos —`latest_chapter_num` reemplaza a `latest_chapter_seen`/`latest_chapter_available`— y conteo de tablas actualizado a 7. Cambio 1.0→1.1: se agrega barrido diario de activos como piso de detección garantizado; el barrido semanal ya no incluye activos; se agrega tarea de Fase 0 de medir la ventana del feed; ejemplos de mensajes Telegram.) Documento de alcance para SDD en Claude Code sobre el repo nuevo `manga-tracker` (Python). Las specs detalladas (modelo de datos, cliente de fuente, importador, bot) se derivan de este documento; este define QUÉ entra, QUÉ no, y los criterios de terminado.
+Versión 1.4 — 2026-07-28. (Cambio vs 1.3: se cierran dos huecos de tooling que ninguna spec cubría — pytest para tests y uv para dependencias/entorno; se corrige la sección de Scheduler, que decía "dos jobs (detección cada 3-4h, barrido semanal)" y contradecía la tabla de tres mecanismos de este mismo documento, el intervalo de 1 hora fijado en la v1.3 y la restricción CHECK de `job_runs`; se corrige el criterio de terminado #2 por el mismo motivo; se actualiza la lista de "Documentos siguientes", que había quedado desactualizada desde la v1.0 y afirmaba que la spec del bot seguía pendiente. Cambio vs 1.2: intervalo del feed fijado en 1 hora por la medición de la ventana, que dio 41 minutos en hora pico; el barrido de activos queda designado como mecanismo principal de detección y no como red de seguridad; renombre de los barridos por población. Cambio 1.1→1.2: nomenclatura alineada al glosario de la spec de modelo de datos —`latest_chapter_num` reemplaza a `latest_chapter_seen`/`latest_chapter_available`— y conteo de tablas actualizado a 7. Cambio 1.0→1.1: se agrega barrido diario de activos como piso de detección garantizado; el barrido semanal ya no incluye activos; se agrega tarea de Fase 0 de medir la ventana del feed; ejemplos de mensajes Telegram.) Documento de alcance para SDD en Claude Code sobre el repo nuevo `manga-tracker` (Python). Las specs detalladas (modelo de datos, cliente de fuente, importador, bot) se derivan de este documento; este define QUÉ entra, QUÉ no, y los criterios de terminado.
 
 ## Objetivo
 
@@ -108,15 +108,17 @@ No hay más tipos de mensaje en V1a.
 
 ## Decisiones de plataforma cerradas en este documento
 
-- **Scheduler**: APScheduler dentro del proceso Python. Un solo contenedor, sin cron del host. Los dos jobs (detección cada 3-4h, barrido semanal) viven en el mismo scheduler.
+- **Scheduler**: APScheduler dentro del proceso Python. Un solo contenedor, sin cron del host. Los **tres** jobs viven en el mismo scheduler: `feed_check` (cada hora), `active_sweep` (diario) y `onhold_sweep` (semanal). Las frecuencias autoritativas son las de la tabla de mecanismos de este documento y de `spec-cliente-fuente-descubrimiento.md`; los valores de `job_name` están fijados por la restricción CHECK del modelo de datos.
 - **IDs**: PK propios de SQLite (autoincrement). IDs externos (kitsu_id, source_key/slug) como columnas de referencia.
 - **Edición de estados en V1a**: directa en SQLite (DB Browser o asistida por IA). Cero features de edición.
 - **Anti-bot**: curl-cffi con impersonation de Chrome, según lo verificado en la auditoría de la fuente. Referer orgánico en el endpoint JSON. Delays 5-15s en el barrido. Sin Playwright.
+- **Tests**: pytest. Se usa por sus fixtures para los HTML/JSON recortados de la fuente, su parametrización para los casos de número de capítulo (enteros, decimales tipo 45.5, y la forma `chapter-45-5` de la URL) y su monkeypatch para que ningún test le pegue a la fuente real. Dependencia de desarrollo; no viaja al contenedor.
+- **Dependencias y entorno**: uv, con lockfile versionado. El motivo es el pinning **transitivo**: esto corre desatendido por años, y sin lockfile un bump menor de curl-cffi puede romper la impersonation en silencio. Descartados `pip + requirements.txt` (deja las transitivas sueltas sin pip-compile) y Poetry (más pesado sin beneficio a esta escala).
 
 ## Criterio de terminado de V1a
 
 1. El seed manual corrió y la DB tiene mis lecturas activas reales con slug y progreso correcto.
-2. El cron de detección y el barrido semanal corren solos en Docker en el mini-PC, sin intervención, con APScheduler.
+2. Los tres jobs (`feed_check`, `active_sweep`, `onhold_sweep`) corren solos en Docker en el mini-PC, sin intervención, con APScheduler. El barrido de activos es el que no puede faltar: es el mecanismo principal de detección, no un complemento.
 3. Recibí al menos una notificación de capítulo nuevo real, verificada como correcta (el capítulo existe y no lo había leído).
 4. El import de Kitsu corrió y el histórico está en DB, con la lista de slugs pendientes documentada (no necesariamente vacía).
 
@@ -133,8 +135,10 @@ Tras cumplir 1-4: 1-2 semanas de uso real antes de abrir la spec de V1b.
 
 ## Documentos siguientes (orden de producción en Fase 0)
 
-1. Spec del modelo de datos (esquema SQLite completo: 7 tablas, estados, índices, campos de cadencia futuros). ✅ cerrada v1.4.
-2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada v1.0.
-3. Spec del bot Telegram (formato exacto de digest y heartbeat, manejo del token). ← pendiente, última que bloquea el corazón.
-4. Spec del seed manual (formato del archivo de entrada, validaciones). ✅ cerrada v2.0.
+1. Spec del modelo de datos (esquema SQLite completo: 7 tablas, estados, índices, campos de cadencia futuros). ✅ cerrada v1.6.
+2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada v1.2.
+3. Spec del bot Telegram (formato exacto de digest y heartbeat, manejo del token). ✅ cerrada v1.1. **Ya no bloquea el corazón.**
+4. Spec del seed manual (formato del archivo de entrada, validaciones). ✅ cerrada v2.1.
 5. Spec del importador Kitsu + matching de slugs. Pendiente; no bloquea el arranque del corazón.
+
+**Nota de mantenimiento de esta lista**: las versiones de arriba son un espejo, no la fuente. La fuente es el encabezado de cada documento. Esta lista quedó desactualizada entre la v1.0 y la v1.3 de este one-pager —llegó a decir que la spec del bot seguía pendiente cuando ya estaba cerrada— así que al versionar cualquier spec hay que revisar también esta sección.

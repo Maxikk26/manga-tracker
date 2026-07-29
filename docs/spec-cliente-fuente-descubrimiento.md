@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.2 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.3), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
+Versión 1.2 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.4), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
 
 Cambios vs 1.1: pin actualizado al modelo v1.6 (barrido de consistencia del paquete).
 Cambios vs 1.0: intervalo del feed fijado en 1 hora por la medición de la ventana (pendiente #1 resuelto); renombre `daily_sweep`→`active_sweep` y `weekly_sweep`→`onhold_sweep`; nota sobre el papel real del feed tras la medición.
