@@ -1,0 +1,140 @@
+# One-pager V1a — "El cron que sí funciona"
+
+Versión 1.3 — cerrada el 2026-07-28. (Cambio vs 1.2: intervalo del feed fijado en 1 hora por la medición de la ventana, que dio 41 minutos en hora pico; el barrido de activos queda designado como mecanismo principal de detección y no como red de seguridad; renombre de los barridos por población. Cambio 1.1→1.2: nomenclatura alineada al glosario de la spec de modelo de datos —`latest_chapter_num` reemplaza a `latest_chapter_seen`/`latest_chapter_available`— y conteo de tablas actualizado a 7. Cambio 1.0→1.1: se agrega barrido diario de activos como piso de detección garantizado; el barrido semanal ya no incluye activos; se agrega tarea de Fase 0 de medir la ventana del feed; ejemplos de mensajes Telegram.) Documento de alcance para SDD en Claude Code sobre el repo nuevo `manga-tracker` (Python). Las specs detalladas (modelo de datos, cliente de fuente, importador, bot) se derivan de este documento; este define QUÉ entra, QUÉ no, y los criterios de terminado.
+
+## Objetivo
+
+Recibir en Telegram, de forma automática y confiable, un aviso cuando sale un capítulo nuevo de un manga que estoy leyendo, con link directo para abrirlo. Todo corriendo solo en Docker en el mini-PC casero.
+
+V1a termina el día que llegue la primera notificación real, correcta y no provocada manualmente.
+
+## Principio rector de esta versión
+
+**El corazón primero.** El intento anterior (Go, 2025) murió con el cron comentado y toda la infraestructura alrededor construida. V1a invierte el orden: la cadena seed → cron → detección → Telegram se construye y se pone en producción ANTES que cualquier otra cosa (incluido el import de Kitsu). Cualquier tarea que no acerque el primer mensaje de Telegram se pospone dentro de V1a o se va al backlog.
+
+## Alcance
+
+### SÍ entra en V1a
+
+1. **Seed manual curado** de las lecturas activas reales (<20 títulos): título + URL de manganato + capítulo actual de lectura. Formato de entrada simple (archivo editable a mano); el slug se extrae de la URL. Es el dataset con el que arranca el corazón. La data de Kitsu NO participa aquí (está desactualizada).
+2. **SQLite** con el modelo relacional completo (7 tablas: mangas, sites, manga_sites, bookmarks, reading_history, chapter_history, job_runs; más el trigger de captura de progreso). El esquema se cierra en `spec-modelo-de-datos.md` y se crea completo desde el inicio aunque el seed solo llene una parte.
+3. **Cliente de la fuente manganato** con las 3 operaciones del contrato (§8 de `manganato-fuente-actual.md`): fetch_latest_feed, fetch_chapters, fetch_manga_details. Los fixtures de `samples/` sirven para tests de parseo.
+4. **Cron de detección frecuente vía feed** (cada hora, fijado por la medición de Fase 0): un request al feed latest-manga, intersección con manga_sites, detección de capítulos nuevos. Capa de latencia baja sin garantías.
+5. **Barrido diario de activos** (`active_sweep`; **mecanismo principal de detección**): fetch_chapters por cada manga en estado reading/want_to_read con slug (<20 títulos, ~20 requests secuenciales con delay 5-15s, corrida de minutos). Pasa por la misma lógica de detección y notificación que el feed; el dedupe vía `latest_chapter_num` garantiza que nada se notifica dos veces. Este barrido hace que la latencia máxima de detección para activos sea ~24h por diseño, aunque el feed se desborde.
+6. **Barrido semanal silencioso de on-hold** (`onhold_sweep`, domingo de madrugada): fetch_chapters por cada manga no-terminal NO activo con slug (on-hold, esencialmente), actualización de `latest_chapter_num` sin notificar. Única vía de frescura para on-hold.
+7. **Registro de chapter_history** desde el día uno: cada capítulo detectado (por feed o barridos) se guarda con timestamp. Es solo escritura; ninguna lógica lee esta tabla en V1a.
+8. **Bot de Telegram emisor** (polling): digest por corrida con novedades + heartbeat semanal.
+9. **Import de Kitsu como backfill** (última fase interna, post-corazón): trae el histórico (~340) con estados mapeados y progreso aproximado. Incluye matching híbrido de slugs (automático + completado manual por tandas de prioridad).
+10. **Docker** en el mini-PC: un solo contenedor con APScheduler interno. Volumen para el archivo SQLite. Variables de entorno para el token y chat de Telegram.
+11. **Tarea de Fase 0: medir la ventana del feed.** ✅ Hecha el 2026-07-28 (ver `medicion-ventana-feed.md`). Resultado: 41 minutos de historia en la página 1 en hora pico, con 21 items reales. Consecuencia: el intervalo del feed queda en 1 hora (el piso definido) y el feed pasa a ser oportunista — captura del orden de dos tercios de las publicaciones en pico y más fuera de él, pero no garantiza nada. El barrido diario de activos queda como mecanismo principal de detección. El diseño en capas absorbió el resultado sin cambios estructurales.
+
+### NO entra en V1a (backlog, con destino tentativo)
+
+| Ítem | Destino |
+|---|---|
+| Detección de hiatus (`hiatus_detected`) y notificación de vuelta de hiatus | V1b o posterior, cuando chapter_history tenga meses de data real |
+| Detección de fin de publicación (`finished`) y su notificación | Igual que el anterior; utilidad dudosa según revisión de sesión |
+| Cadencia aprendida (estimar frecuencia por manga y ajustar chequeos) | Post-V1a; chapter_history se registra desde ya para alimentarla |
+| Comandos interactivos del bot (/status, /check, /estado) | V1b+; en V1a el bot solo emite y la edición de estados es directa en SQLite |
+| Cacheo local de portadas | V1b (cuando exista UI que las muestre) |
+| Panel web | V1b |
+| Extensión Firefox | V1c |
+| Segunda fuente | V2 |
+| Re-sincronización periódica con Kitsu | Sin fecha; kitsu_id guardado lo deja abierto |
+
+## Fases internas de V1a (orden de construcción)
+
+1. **Fase corazón**: esquema SQLite + seed manual (<20) + cliente de fuente + cron de detección + digest Telegram + deploy en Docker. Hito: primera notificación real.
+2. **Fase red de seguridad**: barrido diario de activos + barrido semanal + heartbeat. Hito: un ciclo semanal completo (7 barridos diarios + 1 semanal) corrido solo.
+3. **Fase backfill**: import Kitsu + matching de slugs por tandas. Hito: histórico en DB con pendientes de slug documentados.
+
+Las fases 2 y 3 pueden intercalarse; la fase 1 no se comparte con nada.
+
+## Arquitectura de descubrimiento (frecuencias cerradas)
+
+| Mecanismo | Qué usa | Frecuencia | Población | Efecto |
+|---|---|---|---|---|
+| Detección por feed (`feed_check`) | fetch_latest_feed (1 request) | Cada hora (medido) | Matches del feed contra manga_sites | reading/want_to_read → notifica; otros no-terminales → actualiza silencioso |
+| Barrido de activos (`active_sweep`) — **principal** | fetch_chapters (1 request por manga, delay random 5-15s) | Diario | reading/want_to_read con slug (<20 títulos) | Misma lógica que el feed: notifica si hay cap nuevo; dedupe vía `latest_chapter_num` evita duplicados con el feed |
+| Barrido de on-hold (`onhold_sweep`) | fetch_chapters (1 request por manga, delay random 5-15s) | Semanal, domingo madrugada | No-terminales NO activos con slug (on-hold) | Actualiza `latest_chapter_num`; nunca notifica |
+| Ficha HTML | fetch_manga_details | Solo fallback de portada | Excepcional | — |
+
+Justificación del diseño en capas, ya con la medición hecha: el feed muestra las últimas ~20 actualizaciones DE TODO EL SITIO y la paginación está prohibida por robots.txt. La medición del 2026-07-28 mostró que esa página cubre **41 minutos** de historia en hora pico — el sitio publica del orden de un capítulo cada dos minutos —, así que la ventana se desborda de forma sistemática ante cualquier intervalo razonable. Conclusión: el feed es una capa oportunista que baja la latencia típica cuando alcanza, y **la detección real la garantiza el barrido diario de activos**, que a escala real (<20 lecturas activas) cuesta ~20 requests, corre en minutos y acota la latencia máxima a ~24h independientemente del tráfico del sitio. Costo total diario: 24 requests de feed + ~20 del barrido. Trivial y ético. Si la latencia de 24h molesta en uso real, la palanca es subir la frecuencia del barrido de activos (a cada 6-8h son ~60-80 requests diarios), no tocar el feed.
+
+Sin concurrencia en V1a: todos los requests son secuenciales. A esta escala la concurrencia es el antipatrón identificado en el repo viejo.
+
+## Estados
+
+- **Estado del bookmark (manual, mío)**: reading, want_to_read, completed, on_hold, dropped. Semántica Kenmei.
+- **Estado de publicación (automático, del sistema)**: el campo `publication_status` existe en el esquema desde V1a (valores: ongoing, hiatus_detected, finished) pero en V1a nadie lo escribe salvo el valor por defecto ongoing. La lógica que lo mueve es post-V1a.
+- Estados terminales para el sistema de chequeo: completed y dropped no reciben ningún request, nunca.
+
+## Mensajes de Telegram
+
+**Digest de novedades** (por corrida de detección, solo si hubo novedades; corrida sin novedades = silencio):
+
+- Encabezado breve con la cantidad de novedades de la corrida.
+- Una línea por manga: título — capítulo nuevo detectado vs capítulo por el que voy — link directo a la URL del capítulo nuevo.
+- Si un manga acumuló más de un capítulo desde la última detección, la línea lo indica (rango o cantidad) y el link apunta al primero no leído (mi capítulo + 1) si su URL es derivable, o al más nuevo en su defecto. Detalle fino en la spec del bot.
+
+Ejemplo ilustrativo del digest (el formato exacto — negritas, modo de link, orden — se cierra en la spec del bot; esto fija la intención):
+
+> 📬 3 novedades — 21 jul, 18:40
+>
+> • Solo Leveling — Cap 214 salió (vas por el 210, acumulas 4) → link al Cap 211
+>
+> • Accidental Romance — Cap 81 salió (vas por el 80) → link al Cap 81
+>
+> • Omniscient Reader — Cap 145.5 salió (vas por el 144, acumulas 2) → link al Cap 145
+
+Reglas visibles en el ejemplo: una línea por manga, con línea en blanco separando cada manga del siguiente (legibilidad en pantalla de teléfono; regla dura del formato); siempre aparece mi progreso al lado del cap nuevo; el link apunta al primer capítulo NO leído (mi cap + 1) cuando su URL es derivable del patrón de la fuente, y al más nuevo en su defecto; los decimales tipo 145.5 se muestran tal cual.
+
+**Heartbeat semanal** (tras el barrido del domingo): confirmación de que el sistema vive — cantidad de mangas barridos, cantidad de actualizaciones silenciosas aplicadas, y timestamp de la última corrida de detección exitosa. Su ausencia un lunes = señal de que algo murió (el anti-"cron comentado" en runtime).
+
+Ejemplo ilustrativo del heartbeat:
+
+> ✅ Barrido semanal OK — dom 21 jul, 03:15
+> Mangas barridos: 112 · Actualizaciones silenciosas: 6
+> Última detección exitosa: dom 02:00
+
+No hay más tipos de mensaje en V1a.
+
+## Import de Kitsu (backfill, fase 3)
+
+- **Campos por manga**: kitsu_id (referencia externa, nullable, nunca PK), título canónico, títulos alternativos (insumo del matching de slugs), URL de portada, sinopsis, total de capítulos si existe, estado de publicación según Kitsu (informativo), mi estado, mi progreso, fecha de última actividad.
+- **Mapping de estados** Kitsu → local: current→reading, planned→want_to_read, completed→completed, on_hold→on_hold, dropped→dropped.
+- **El progreso importado se marca como aproximado** (flag o convención a definir en la spec del importador): la data de Kitsu está desactualizada y no debe pisar el progreso del seed manual. Regla dura del import: si un manga ya existe en DB (vino del seed), el import NO toca su bookmark; solo completa metadata de catálogo (portada, sinopsis, kitsu_id).
+- **Matching de slugs (híbrido)**: primera pasada automática por normalización de título (canónico y alternativos) contra el endpoint JSON de capítulos (respuesta válida = match, 404 = siguiente candidato). Los fallidos van a una lista de pendientes donde yo pego la URL de manganato a mano; segunda pasada extrae slugs de esas URLs. Orden de prioridad para el trabajo manual: want_to_read primero, on_hold después; completed y dropped no necesitan slug jamás. La lista de pendientes puede quedar parcialmente sin resolver sin bloquear el cierre de V1a.
+
+## Decisiones de plataforma cerradas en este documento
+
+- **Scheduler**: APScheduler dentro del proceso Python. Un solo contenedor, sin cron del host. Los dos jobs (detección cada 3-4h, barrido semanal) viven en el mismo scheduler.
+- **IDs**: PK propios de SQLite (autoincrement). IDs externos (kitsu_id, source_key/slug) como columnas de referencia.
+- **Edición de estados en V1a**: directa en SQLite (DB Browser o asistida por IA). Cero features de edición.
+- **Anti-bot**: curl-cffi con impersonation de Chrome, según lo verificado en la auditoría de la fuente. Referer orgánico en el endpoint JSON. Delays 5-15s en el barrido. Sin Playwright.
+
+## Criterio de terminado de V1a
+
+1. El seed manual corrió y la DB tiene mis lecturas activas reales con slug y progreso correcto.
+2. El cron de detección y el barrido semanal corren solos en Docker en el mini-PC, sin intervención, con APScheduler.
+3. Recibí al menos una notificación de capítulo nuevo real, verificada como correcta (el capítulo existe y no lo había leído).
+4. El import de Kitsu corrió y el histórico está en DB, con la lista de slugs pendientes documentada (no necesariamente vacía).
+
+El heartbeat semanal es nice-to-have: deseable antes de cerrar, no bloqueante.
+
+Tras cumplir 1-4: 1-2 semanas de uso real antes de abrir la spec de V1b.
+
+## Riesgos aceptados
+
+- El feed se desborda entre corridas de forma sistemática (medido: 41 minutos de ventana en hora pico). Mitigado por diseño: el barrido diario de activos garantiza latencia máxima ~24h para lo que leo; el feed solo mejora esa latencia cuando alcanza.
+- La notificación no es instantánea (latencia de horas en el mejor caso, ~24h en el peor). Aceptado: el objetivo es no perder capítulos, no enterarme al minuto.
+- El matching automático de slugs puede acertar poco. Aceptado: el trabajo manual está fuera del camino crítico y priorizado por tandas.
+- Si manganato cambia de dominio/UI/API, se sigue el playbook del §9 de `manganato-fuente-actual.md`. Solo el cliente de la fuente se toca.
+
+## Documentos siguientes (orden de producción en Fase 0)
+
+1. Spec del modelo de datos (esquema SQLite completo: 7 tablas, estados, índices, campos de cadencia futuros). ✅ cerrada v1.4.
+2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada v1.0.
+3. Spec del bot Telegram (formato exacto de digest y heartbeat, manejo del token). ← pendiente, última que bloquea el corazón.
+4. Spec del seed manual (formato del archivo de entrada, validaciones). ✅ cerrada v2.0.
+5. Spec del importador Kitsu + matching de slugs. Pendiente; no bloquea el arranque del corazón.

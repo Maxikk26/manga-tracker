@@ -1,0 +1,149 @@
+# =============================================================
+# Local data — never versioned
+# =============================================================
+
+# SQLite database plus its WAL/SHM sidecars. Per spec-modelo-de-datos.md the
+# database is a single file mounted as a Docker volume: it is local state,
+# rebuildable from the seed CSV. Committing it would also leak reading data.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Docker volume directory for the database file.
+# Contents ignored, directory kept so the volume mount point exists on clone.
+data/*
+!data/.gitkeep
+
+# =============================================================
+# Personal data
+# =============================================================
+
+# The filled seed CSV is my real reading list (data/seed.csv per
+# spec-seed-manual.md). Blanket-ignore every CSV, then re-include only the
+# versioned template. spec-seed-manual.md fixes its name as seed-plantilla.csv;
+# the generic patterns are kept so a renamed template still works.
+*.csv
+!seed-plantilla.csv
+!*-plantilla.csv
+!*.template.csv
+!*.example.csv
+!*-template.csv
+!*-example.csv
+
+# =============================================================
+# Secrets
+# =============================================================
+
+# Telegram bot token and chat id.
+.env
+.env.*
+!.env.example
+!.env.template
+
+# =============================================================
+# Source fixtures
+# =============================================================
+
+# Raw audit dumps from manganato (samples/, catalogued in section 10 of
+# manganato-fuente-actual.md). A single feed page is ~155 KB and every file
+# here is re-downloadable, so the whole folder stays out by default.
+#
+# Two ways to keep parse-test fixtures:
+#   - preferred: trimmed fixtures under tests/fixtures/, which is versioned;
+#   - or un-ignore specific files here, e.g.
+#       !samples/api_chapters_accidental-romance.json
+samples/*
+
+# =============================================================
+# Throwaway exploration
+# =============================================================
+
+# Disposable scripts that are not part of the application — the feed-window
+# measurement script is the reference case. Kept out deliberately so nothing
+# here can be mistaken for application code.
+scratchpad/
+scratch/
+explore/
+
+# =============================================================
+# Python
+# =============================================================
+
+# Bytecode caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build and packaging artifacts
+build/
+dist/
+wheels/
+*.egg
+*.egg-info/
+.eggs/
+
+# Test, coverage and type-check caches
+.pytest_cache/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Stray log files. Application logging goes to stdout by design
+# (see the logging strategy in spec-modelo-de-datos.md).
+*.log
+
+# =============================================================
+# Operating system
+# =============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# =============================================================
+# Agent tooling
+# =============================================================
+
+# Auto-generated skill index. Contains absolute paths from one machine's
+# home directory, so it is neither portable nor useful to anyone else.
+# Regenerate with: gentle-ai skill-registry refresh --force
+.atl/
+
+# =============================================================
+# Editors and IDEs
+# =============================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Session.vim
+.netrwhist

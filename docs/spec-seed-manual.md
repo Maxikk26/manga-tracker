@@ -1,0 +1,59 @@
+# Spec: Seed manual — manga-tracker V1a
+
+Versión 2.1 — 2026-07-28. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.6) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.2).
+
+Cambios vs 2.0: se nombran los archivos y rutas concretas (plantilla versionada, archivo real, carpeta ignorada), que antes quedaban como blancos que el implementador tenía que adivinar; pines corregidos.
+
+Utilidad de arranque, invocable a mano, fuera del scheduler: lee un CSV que yo lleno con mis lecturas activas reales (<20 títulos) y puebla la base. Sin esto no hay nada que chequear.
+
+## El archivo
+
+CSV con cabecera, UTF-8. Rutas y nombres concretos, para que no queden a criterio del implementador:
+
+| Archivo | Ruta | ¿Se versiona? |
+|---|---|---|
+| Plantilla (cabecera + filas de ejemplo marcadas para borrar) | `seed-plantilla.csv` en la raíz del repositorio | Sí |
+| Mi lista real | `data/seed.csv` | **No**: `data/` va completa al `.gitignore` |
+| Base de datos | `data/manga-tracker.db` (la crea la aplicación; misma carpeta se monta como volumen en Docker) | **No** |
+
+La ruta del CSV se pasa como argumento al cargador; el valor por defecto es `data/seed.csv`.
+
+| Columna | Obligatoria | Contenido |
+|---|---|---|
+| `title` | sí | Título como yo lo reconozco. No necesita ser el canónico; Kitsu lo puede reemplazar después. |
+| `url` | sí | URL de manganato, de ficha o de capítulo (ambas sirven). |
+| `last_chapter_read` | no | Capítulo por el que voy. Acepta decimales. Vacío = null. |
+| `status` | no | Vacío = `reading`. Permitidos: los cinco del modelo. |
+
+Nada más: portada, sinopsis, géneros y demás llegan con el import de Kitsu.
+
+**Slug**: se extrae del segmento posterior a `/manga/` (patrones del §5 de `manganato-fuente-actual.md`), tolerando `www`, barra final, query y fragmento. Si la URL es de capítulo, el segmento del capítulo se ignora: **el progreso nunca se deriva de la URL**, solo de la columna.
+
+## Validación (pasada en seco, antes de escribir nada)
+
+Se validan todas las filas y se imprime el reporte; solo si no hay errores se procede a cargar (o se invoca explícitamente omitiendo las filas con error). Nunca una carga a medias.
+
+**Errores** (bloquean la fila): `title` vacío; `url` vacía o sin slug extraíble; `last_chapter_read` no numérico; `status` fuera de los cinco valores; slug repetido en el archivo; slug que en la base ya apunta a otro manga.
+
+**Avisos** (no bloquean): título repetido con slugs distintos; `reading` sin capítulo; más de 30 filas (señal de que estoy metiendo aquí lo que le toca al import de Kitsu).
+
+## Carga, por cada fila válida
+
+1. Crea o localiza la fila en `mangas` con el título tecleado; el resto del catálogo queda nulo.
+2. Crea la fila en `manga_sites` para manganato con el slug y la URL de ficha reconstruida desde el slug (canónica, no la que pegué).
+3. Llama a `fetch_chapters` para ese slug: fija `latest_chapter_num`, `latest_chapter_url`, `latest_chapter_at` y `last_checked_at`; vuelca los capítulos devueltos (hasta 50) a `chapter_history` con `detected_via = seed_backfill`.
+4. Crea la fila en `bookmarks`: status de la columna o `reading`, `last_chapter_read` de la columna, `origin = seed`, `progress_is_approx = 0`, `last_read_at` nulo.
+
+Llamadas secuenciales con delay random 5-15s, imprimiendo progreso. Con <20 filas son pocos minutos.
+
+**Fila con 404 o error de la fuente**: se reporta y se descarta completa (ni manga, ni mapeo, ni bookmark). Casi siempre significa URL mal pegada; prefiero corregir y re-correr que arrastrar una fila coja. Las demás filas continúan.
+
+## Re-ejecución
+
+El archivo es la fuente de verdad y re-correrlo es seguro: los mangas y mapeos existentes se reutilizan por slug, el bookmark se actualiza con el status y progreso del archivo, y la unicidad de `chapter_history` evita duplicar historia. Si el progreso cambió, el trigger de `reading_history` captura el evento; si es igual, no dispara. Agregar títulos y re-correr cuesta una llamada por fila y es irrelevante a esta escala.
+
+Los bookmarks nacidos aquí llevan `origin = seed`, que es lo que impide que el import de Kitsu los pise.
+
+## Pendientes abiertos
+
+Ninguno. No se puede probar de punta a punta hasta que exista `fetch_chapters` (documento 3).
