@@ -1,7 +1,8 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.2 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.5), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
+Versión 1.3 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.6), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
 
+Cambios vs 1.2: se corrige una contradicción interna en la regla de detección. El paso 3 afirmaba que la publicación se registra "antes de cualquier decisión", mientras que el paso 4 decía que los estados terminales no registran historia; leído en orden, un match del feed contra un manga `dropped` habría escrito en `chapter_history` lo que la propia spec prohíbe. El filtro de terminales pasa a ser el paso 3, antes del registro, y "antes de cualquier decisión" se precisa como "antes de la decisión de notificar". Pasos renumerados a seis.
 Cambios vs 1.1: pin actualizado al modelo v1.6 (barrido de consistencia del paquete).
 Cambios vs 1.0: intervalo del feed fijado en 1 hora por la medición de la ventana (pendiente #1 resuelto); renombre `daily_sweep`→`active_sweep` y `weekly_sweep`→`onhold_sweep`; nota sobre el papel real del feed tras la medición.
 
@@ -101,12 +102,14 @@ Dado un mapeo de `manga_sites` y un capítulo observado (número, URL, timestamp
 
 1. **Sellar el chequeo**: se actualiza `last_checked_at` del mapeo. Ocurre siempre, haya novedad o no.
 2. **Comparar**: si el número observado es menor o igual a `latest_chapter_num`, no hay novedad; fin. (Caso especial: si es *menor*, la fuente renumeró o borró capítulos; se registra en log y NO se retrocede el valor guardado.)
-3. **Registrar la publicación**: el capítulo se inserta en `chapter_history` con su `detected_via` correspondiente. La restricción de unicidad hace la operación idempotente. Este paso ocurre **antes** de cualquier decisión de notificación y es independiente de ella: la historia de publicaciones es un hecho, no depende de si el mensaje salió.
-4. **Decidir según el estado del bookmark**:
-   - `reading` / `want_to_read` → **candidato a notificación**: se acumula en el lote de la corrida (paso 5).
+3. **Descartar los terminales primero**: si el bookmark está en `completed` o `dropped`, la secuencia termina aquí. No se registra historia y no se actualiza el mapeo. Solo el sello de `last_checked_at` del paso 1 ya ocurrió, porque el chequeo sí pasó.
+4. **Registrar la publicación**: el capítulo se inserta en `chapter_history` con su `detected_via` correspondiente. La restricción de unicidad hace la operación idempotente. Este paso ocurre **antes de la decisión de notificar** y es independiente de ella: la historia de publicaciones es un hecho, no depende de si el mensaje salió.
+
+   Precisión de orden (corregida en la v1.3): "antes de cualquier decisión" se refiere a la decisión de **notificar**, no a la de estado terminal. El filtro de terminales del paso 3 va primero, porque la regla de estados terminales es absoluta — no consumen requests y su data no alimenta nada, `chapter_history` incluida. Redactado al revés, un match del feed contra un manga `dropped` habría escrito historia que la spec prohíbe.
+5. **Decidir según el estado del bookmark restante** (los terminales ya salieron en el paso 3):
+   - `reading` / `want_to_read` → **candidato a notificación**: se acumula en el lote de la corrida (paso 6).
    - `on_hold` → **actualización silenciosa**: se actualiza `latest_chapter_num`, `latest_chapter_url` y `latest_chapter_at` de inmediato. Nunca notifica.
-   - `completed` / `dropped` → **se ignora por completo**: ni se actualiza el mapeo ni se registra historia. Son terminales; su data no alimenta nada.
-5. **Cierre de corrida para los candidatos** (ver orden de operaciones abajo).
+6. **Cierre de corrida para los candidatos** (ver orden de operaciones abajo).
 
 ## Orden de operaciones: notificar antes de actualizar
 
