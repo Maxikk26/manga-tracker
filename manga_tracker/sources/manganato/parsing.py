@@ -51,7 +51,7 @@ def parse_feed(html: str, logger: logging.Logger | None = None) -> list[FeedItem
             updated_at_hint=None,
         ))
     if not items:
-        raise Unexpected("zero real items after ad filtering — feed structure likely changed")
+        raise Unexpected("zero real items after ad filtering: feed structure likely changed")
     return items
 
 

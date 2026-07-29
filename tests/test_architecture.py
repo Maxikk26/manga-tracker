@@ -26,6 +26,17 @@ CONFINEMENT_RULES = {
 SQLITE_MODULE = "sqlite3"
 SQLITE_PACKAGE = "storage"
 
+# The composition root is the ONE place allowed to wire layers together: it
+# builds the transport, the client, the connection and hands them to the
+# layers. Naming it explicitly matters, because DIRECTIONAL_RULES is keyed on
+# subpackage names, so any module sitting at the top level of the package is
+# outside every rule by accident. Without this list, dropping a `detection.py`
+# next to cli.py would silently escape the whole boundary.
+COMPOSITION_ROOT = {"cli.py", "__main__.py"}
+
+# Concrete implementations only the composition root may name.
+CONCRETE_IMPLEMENTATIONS = {"sources.manganato", "notifier.telegram"}
+
 
 def _imports(path: Path) -> set[str]:
     """Absolute module names imported by this file.
@@ -83,6 +94,30 @@ def test_directional_boundaries():
                 continue
             if any(_matches(internal, prefix) for prefix in forbidden):
                 violations.append(f"{rel} imports forbidden module {module!r}")
+    assert not violations, "\n".join(violations)
+
+
+def test_only_the_composition_root_wires_layers_together():
+    """Top-level modules are outside DIRECTIONAL_RULES, so name the exception.
+
+    `cli.py` legitimately imports the concrete client, storage and seed at
+    once — that is what a composition root is for. But the rule table is keyed
+    on subpackage names, so *every* top-level module inherits that freedom by
+    accident. This pins the exemption to the composition root alone.
+    """
+    violations = []
+    for path in PKG.glob("*.py"):
+        rel = path.name
+        if rel in COMPOSITION_ROOT or rel == "__init__.py":
+            continue
+        for module in _imports(path):
+            internal = _internal(module)
+            if internal is None:
+                continue
+            if any(_matches(internal, prefix) for prefix in CONCRETE_IMPLEMENTATIONS):
+                violations.append(
+                    f"{rel} imports concrete {module!r}; only {sorted(COMPOSITION_ROOT)} may"
+                )
     assert not violations, "\n".join(violations)
 
 

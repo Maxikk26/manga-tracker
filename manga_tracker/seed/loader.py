@@ -49,7 +49,7 @@ def load_seed(csv_path, conn, client: SourceClient, *, site_id: int, dry_run: bo
             print(f"  - {msg}")
 
     if dry_run or any(errors for _, errors in report):
-        print("Dry run: nothing written." if dry_run else "Nothing written — fix the errors above and re-run.")
+        print("Dry run: nothing written." if dry_run else "Nothing written - fix the errors above and re-run.")
         return False
 
     results = [_load_row(conn, row, client, site_id=site_id) for row, _ in report]
