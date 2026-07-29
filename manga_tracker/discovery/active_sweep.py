@@ -96,7 +96,7 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
         if candidate is not None:
             candidates.append(candidate)
 
-    outcome = send_and_advance(conn, candidates, sender, now=now)
+    outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     close_run(
         conn, run_id, status="partial" if outcome.failed else "ok", items_checked=items_checked,
         updates_found=len(candidates), notifications_sent=outcome.sent, now=now,

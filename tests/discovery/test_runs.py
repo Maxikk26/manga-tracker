@@ -89,3 +89,45 @@ def test_send_result_gates_advance_and_run_status(sender, expect_num, expect_sen
     assert stored == expect_num
     row = conn.execute("SELECT status, notifications_sent FROM job_runs WHERE id = ?", (run_id,)).fetchone()
     assert row == ("partial" if expect_failed else "ok", expect_sent)
+
+
+class CapturingSender:
+    """Records the DigestLines it was handed, so the URL can be asserted."""
+
+    def __init__(self):
+        self.lines = None
+
+    def send_digest(self, lines):
+        self.lines = lines
+        return True
+
+
+class UrlClient:
+    def build_chapter_url(self, source_key, chapter_num):
+        return f"GUESS-{source_key}-{chapter_num}"
+
+
+def test_digest_link_comes_from_the_resolution_hierarchy_not_the_detected_chapter():
+    """Proves the link hierarchy is actually reached on the production path.
+
+    resolve_link had full unit coverage and passed, yet nothing called it from
+    send_and_advance: every digest linked to the chapter just detected, which is
+    the hierarchy's last resort. The suite stayed green because the tests called
+    the function directly. This asserts through the real path instead, so the
+    feature cannot go dead again without a failure.
+    """
+    conn = connect(":memory:")
+    ms_id = _seed_manga_site(conn)
+    conn.execute(
+        "INSERT INTO chapter_history (manga_site_id, chapter_num, chapter_url, detected_at, detected_via) "
+        "VALUES (?, 101, 'https://real/101', ?, 'feed')",
+        (ms_id, NOW),
+    )
+    conn.commit()
+    sender = CapturingSender()
+
+    # Progress 100, newest detected 104: the first unread is the registered 101.
+    candidate = Candidate(ms_id, "OP", 104, "https://real/104", NOW, 100)
+    send_and_advance(conn, [candidate], sender, now=NOW, client=UrlClient())
+
+    assert sender.lines[0].url == "https://real/101"  # not the detected 104

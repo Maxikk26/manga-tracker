@@ -4,6 +4,7 @@ single digest per run, mappings advance only after a successful send."""
 
 import logging
 from typing import NamedTuple
+from manga_tracker.discovery.links import resolve_link
 from manga_tracker.notifier.contracts import DigestLine
 
 
@@ -44,7 +45,30 @@ class SendOutcome(NamedTuple):
     failed: bool
 
 
-def send_and_advance(conn, candidates: list, sender, *, now: str) -> SendOutcome:
+def _digest_url(conn, client, candidate) -> str:
+    """The link the digest should point at, per BOT's hierarchy.
+
+    Without this the digest always linked to the chapter that was just
+    detected, which is the hierarchy's *last* resort. resolve_link existed and
+    passed its own tests, but nothing on the production path called it - the
+    unit tests exercised the function directly, so the whole feature was dead
+    while the suite stayed green. `client` is passed in rather than imported:
+    discovery never names a concrete source.
+    """
+    if client is None:
+        return candidate.url
+    row = conn.execute(
+        "SELECT source_key FROM manga_sites WHERE id = ?", (candidate.manga_site_id,)
+    ).fetchone()
+    if row is None:
+        return candidate.url
+    return resolve_link(
+        conn, client, manga_site_id=candidate.manga_site_id, source_key=row[0],
+        newest_url=candidate.url, last_chapter_read=candidate.last_chapter_read,
+    )
+
+
+def send_and_advance(conn, candidates: list, sender, *, now: str, client=None) -> SendOutcome:
     """Zero candidates or a failed send: nothing advances. Success: advances
     every candidate's latest_chapter_* and reports the sent count.
 
@@ -57,7 +81,15 @@ def send_and_advance(conn, candidates: list, sender, *, now: str) -> SendOutcome
     """
     if not candidates:
         return SendOutcome(0, failed=False)
-    lines = [DigestLine(c.manga_title, c.chapter_num, c.url, c.last_chapter_read) for c in candidates]
+    lines = [
+        DigestLine(
+            c.manga_title,
+            c.chapter_num,
+            _digest_url(conn, client, c),
+            c.last_chapter_read,
+        )
+        for c in candidates
+    ]
     try:
         delivered = sender.send_digest(lines)
     except Exception:
