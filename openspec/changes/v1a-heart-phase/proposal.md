@@ -6,7 +6,7 @@ Build the chain seed → detection → Telegram digest → Docker until the firs
 
 | Alias | Document |
 |---|---|
-| OP | `docs/one-pager-v1a.md` v1.4 |
+| OP | `docs/one-pager-v1a.md` v1.6 |
 | DM | `docs/spec-modelo-de-datos.md` v1.6 |
 | CD | `docs/spec-cliente-fuente-descubrimiento.md` v1.2 |
 | BOT | `docs/spec-bot-telegram.md` v1.1 |
@@ -113,7 +113,7 @@ No prior code exists, so rollback is deletion, not a revert of behaviour:
 - No code dependency. All five specs are closed and their version pins are currently consistent.
 - `data/seed.csv` must exist locally before any end-to-end run. It is not in the repo and must not be committed.
 - Telegram bot token and chat id as env vars; the process must fail fast at startup if either is missing (BOT §"Configuración y token").
-- **Doc follow-through**: pulling `active_sweep` into phase 1 makes OP §"Fases internas de V1a" stale — it still assigns it to phase 2. Bump OP to v1.5 recording the new phase boundary, then re-check the pins of DM, CD and BOT per `README.md` §"Mapa de dependencias entre documentos". A stale pin is a defect, not cosmetic.
+- **Doc follow-through — RESOLVED.** Pulling `active_sweep` into phase 1 left OP §"Fases internas de V1a" stale, still assigning it to phase 2. Closed in OP v1.5, which records the new phase boundary with its rationale and the dead-slug consequence; OP v1.6 then added the dependency set and the runtime/base-image pin. Pins of DM, CD and BOT were re-checked and cascaded per `README.md` §"Mapa de dependencias entre documentos" after each bump. CD also went to v1.3 to fix an internal contradiction the design phase surfaced, and SEED to v2.2 for the empty-chapters rule.
 
 ## Success Criteria
 
