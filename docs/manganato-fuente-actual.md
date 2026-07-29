@@ -1,6 +1,6 @@
 # Fuente: manganato.gg (verificado 2026-07-20; re-verificado 2026-07-28)
 
-Versión 1.3 — 2026-07-28. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.6).
+Versión 1.3 — 2026-07-28. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.7).
 
 Cambios vs 1.2: se registra que el feed **no** trae elemento de fecha, verificado sobre una página real, y la trampa del atributo `title` del link de capítulo, que contiene el nombre del capítulo y no una fecha. Consecuencia: `updated_at_hint` del contrato del §8 es siempre nulo en esta fuente.
 
