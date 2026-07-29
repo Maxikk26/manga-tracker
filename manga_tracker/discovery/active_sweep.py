@@ -5,11 +5,15 @@ Also owns the dead-slug counter: only a not-found classification increments
 it, any success resets it, and a mapping at the threshold consumes zero
 requests."""
 
-from manga_tracker.discovery.detection import Mapping, apply_detection
+from manga_tracker.discovery.detection import DETECTED_VIA_VALUES, Mapping, apply_detection
 from manga_tracker.discovery.runs import RunAlreadyOpen, close_run, open_run, send_and_advance
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 
 JOB_NAME = "active_sweep"
+# job_runs.job_name and chapter_history.detected_via happen to share a spelling
+# for this job. They do not for feed_check, so they are kept as separate names.
+DETECTED_VIA = "active_sweep"
+assert DETECTED_VIA in DETECTED_VIA_VALUES
 DEAD_SLUG_THRESHOLD = 5
 
 
@@ -83,12 +87,12 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
                 "INSERT OR IGNORE INTO chapter_history "
                 "(manga_site_id, chapter_num, chapter_url, source_published_at, detected_at, detected_via) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (ms_id, chapter.chapter_num, chapter.url, chapter.published_at, now, JOB_NAME),
+                (ms_id, chapter.chapter_num, chapter.url, chapter.published_at, now, DETECTED_VIA),
             )
         conn.commit()
 
         mapping = Mapping(ms_id, manga_id, title, status, latest, last_read)
-        candidate = apply_detection(conn, mapping, chapters[0], detected_via=JOB_NAME, now=now, logger=logger)
+        candidate = apply_detection(conn, mapping, chapters[0], detected_via=DETECTED_VIA, now=now, logger=logger)
         if candidate is not None:
             candidates.append(candidate)
 

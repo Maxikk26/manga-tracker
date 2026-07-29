@@ -110,3 +110,20 @@ def test_on_hold_updates_silently_without_notifying():
         "SELECT latest_chapter_num, latest_chapter_url FROM manga_sites WHERE id = ?", (mapping.id,)
     ).fetchone()
     assert row == (101, "https://x/101")  # applied immediately, not gated behind any digest
+
+
+def test_invalid_detected_via_fails_loudly_instead_of_dropping_history():
+    """INSERT OR IGNORE hides CHECK violations, so the value is guarded here.
+
+    Without this, a bad `detected_via` produces no error and no row: history
+    disappears with nothing logged. It is a live trap because a job's own
+    job_name is the obvious thing to pass, and for active_sweep that happens to
+    be a legal value while for feed_check it is not.
+    """
+    conn = connect(":memory:")
+    mapping = Mapping(1, 1, "T", "reading", 100, 90)
+    chapter = Chapter(chapter_num=101, url="u", published_at=None)
+
+    with pytest.raises(ValueError, match="detected_via"):
+        apply_detection(conn, mapping, chapter, detected_via="feed_check",
+                        now="2026-07-29T06:00:00Z", logger=logging.getLogger("t"))

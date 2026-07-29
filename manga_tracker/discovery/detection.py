@@ -29,7 +29,22 @@ class Candidate:
     last_chapter_read: float | None
 
 
+DETECTED_VIA_VALUES = frozenset({"feed", "active_sweep", "onhold_sweep", "seed_backfill"})
+
+
 def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: str, logger) -> Candidate | None:
+    # chapter_history is written with INSERT OR IGNORE, which the spec requires
+    # so that reprocessing a feed or repeating a sweep is idempotent. The same
+    # clause also swallows CHECK violations: an invalid `detected_via` produces
+    # no error and no row, so history would vanish with nothing logged anywhere.
+    # This already happened once — a job passed its own job_name ("feed_check")
+    # where the column wants "feed". It reads as harmless because for
+    # active_sweep the two strings coincide by accident.
+    if detected_via not in DETECTED_VIA_VALUES:
+        raise ValueError(
+            f"detected_via {detected_via!r} is not one of {sorted(DETECTED_VIA_VALUES)}; "
+            "INSERT OR IGNORE would drop the history row silently"
+        )
     conn.execute("UPDATE manga_sites SET last_checked_at = ? WHERE id = ?", (now, mapping.id))  # step 1: always
 
     if mapping.bookmark_status in ("completed", "dropped"):
