@@ -46,6 +46,16 @@ The digest MUST use HTML formatting (not Markdown), list one manga per line sepa
 - WHEN its digest line is built
 - THEN the "vas por el" clause is omitted and the link targets the newest chapter
 
+### Requirement: Link previews are suppressed
+
+Every outgoing digest message MUST disable link previews. With several linked lines a message full of previews is unreadable on a phone, which is the screen this format is designed for (spec-bot-telegram.md v1.1 §"Resolución del enlace": "La vista previa de enlaces se desactiva en el mensaje").
+
+#### Scenario: A multi-line digest sends with previews off
+
+- GIVEN a digest containing two or more linked manga lines
+- WHEN the message is sent
+- THEN link previews are disabled on every part of the message, including each part of a size-split send
+
 ### Requirement: Link resolution hierarchy
 
 The link for each digest line MUST be resolved in this order, taking the first that applies: (1) the real URL of the first unread chapter from `chapter_history` if registered; (2) the pattern-built URL from the source client's URL-construction operation; (3) the URL of the newest chapter (spec-bot-telegram.md §"Resolución del enlace").
