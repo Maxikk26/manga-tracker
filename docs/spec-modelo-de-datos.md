@@ -1,6 +1,6 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.6 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.4). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.6 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.5). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
 
 Cambios vs 1.5: corrección del pin de dependencia (apuntaba al one-pager v1.1, que es anterior al renombre de barridos y al glosario).
 Cambios vs 1.4: renombre de los valores de job/detección para que describan la POBLACIÓN y no la frecuencia (`daily_sweep`→`active_sweep`, `weekly_sweep`→`onhold_sweep`); motivo en la nota bajo la tabla `job_runs`.

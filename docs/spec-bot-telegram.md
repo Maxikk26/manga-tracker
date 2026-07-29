@@ -1,6 +1,6 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.1 — 2026-07-28. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.4) y `spec-cliente-fuente-descubrimiento.md` (v1.2).
+Versión 1.1 — 2026-07-28. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.5) y `spec-cliente-fuente-descubrimiento.md` (v1.2).
 
 Cambios vs 1.0: adopción del renombre de barridos (`daily_sweep`→`active_sweep`), que esta spec se había perdido por tener el pin desactualizado; pines corregidos.
 
