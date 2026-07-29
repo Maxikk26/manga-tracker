@@ -3,6 +3,7 @@
 single digest per run, mappings advance only after a successful send."""
 
 import logging
+from datetime import datetime, timezone
 from typing import NamedTuple
 from manga_tracker.discovery.links import resolve_link
 from manga_tracker.notifier.contracts import DigestLine
@@ -27,11 +28,26 @@ def open_run(conn, job_name: str, now: str) -> int:
     return run_id
 
 
-def close_run(conn, run_id, *, status, items_checked, updates_found, notifications_sent, now, error_summary=None):
+def close_run(conn, run_id, *, status, items_checked, updates_found, notifications_sent,
+              now=None, error_summary=None):
+    """`now` defaults to the real closing instant, and callers should let it.
+
+    A run threads one `now` through everything it writes, which is right for
+    detected_at and last_checked_at — one run, one observation timestamp. But
+    finished_at means when the run *ended*, and reusing the opening timestamp
+    made every run report zero duration. That was observed live: a sweep that
+    actually took 166 seconds recorded started_at and finished_at in the same
+    second. job_runs is the diagnostic table, and the case it exists for is a
+    sweep degrading into timeouts — up to roughly 35 minutes at 16 mappings
+    with a 30s timeout plus retries. That is invisible if duration is always
+    zero. Passing `now` explicitly stays available so tests can be
+    deterministic.
+    """
+    finished_at = now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn.execute(
         "UPDATE job_runs SET finished_at = ?, status = ?, items_checked = ?, updates_found = ?, "
         "notifications_sent = ?, error_summary = ? WHERE id = ?",
-        (now, status, items_checked, updates_found, notifications_sent, error_summary, run_id),
+        (finished_at, status, items_checked, updates_found, notifications_sent, error_summary, run_id),
     )
     conn.commit()
 

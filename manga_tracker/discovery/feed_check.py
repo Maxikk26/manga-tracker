@@ -43,7 +43,7 @@ def feed_check(conn, client, sender, *, site_id: int, now: str, logger) -> None:
         # Same reasoning as active_sweep's wrapper: close the row so nothing is
         # left with finished_at NULL, then re-raise so the failure still surfaces.
         close_run(conn, run_id, status="error", items_checked=0, updates_found=0,
-                  notifications_sent=0, now=now, error_summary=f"{type(exc).__name__}: {exc}"[:200])
+                  notifications_sent=0, error_summary=f"{type(exc).__name__}: {exc}"[:200])
         raise
 
 
@@ -66,5 +66,5 @@ def _check(conn, client, sender, site_id: int, run_id, *, now: str, logger) -> N
     outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     close_run(
         conn, run_id, status="partial" if outcome.failed else "ok", items_checked=len(items),
-        updates_found=len(candidates), notifications_sent=outcome.sent, now=now,
+        updates_found=len(candidates), notifications_sent=outcome.sent,
     )

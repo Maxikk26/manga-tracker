@@ -51,7 +51,7 @@ def active_sweep(conn, client, sender, *, now: str, logger) -> None:
         # is closed here so nothing is left with finished_at NULL, then the
         # exception is re-raised so it still surfaces.
         close_run(conn, run_id, status="error", items_checked=0, updates_found=0,
-                  notifications_sent=0, now=now, error_summary=f"{type(exc).__name__}: {exc}"[:200])
+                  notifications_sent=0, error_summary=f"{type(exc).__name__}: {exc}"[:200])
         raise
 
 
@@ -99,5 +99,5 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     close_run(
         conn, run_id, status="partial" if outcome.failed else "ok", items_checked=items_checked,
-        updates_found=len(candidates), notifications_sent=outcome.sent, now=now,
+        updates_found=len(candidates), notifications_sent=outcome.sent,
     )
