@@ -1,5 +1,4 @@
-"""ManganatoClient.fetch_chapters — JSON path only this slice.
-fetch_latest_feed / fetch_manga_details land with the HTML path next."""
+"""ManganatoClient — JSON chapters path and HTML feed/manga-details path."""
 
 from pathlib import Path
 
@@ -55,3 +54,28 @@ def test_fetch_chapters_missing_array_is_unexpected():
 
     with pytest.raises(Unexpected):
         client.fetch_chapters("weird-manga")
+
+
+def test_fetch_latest_feed_requests_the_feed_url_and_parses_items():
+    client, transport = _client(200, "feed_page.html")
+
+    items = client.fetch_latest_feed()
+
+    assert [i.source_key for i in items] == ["one-piece", "solo-leveling"]
+    assert transport.calls[0]["url"] == f"{BASE_URL}/manga-list/latest-manga"
+
+
+def test_fetch_manga_details_requests_the_manga_page():
+    client, transport = _client(200, "manga_details.html")
+
+    details = client.fetch_manga_details("one-piece")
+
+    assert details.title == "One Piece"
+    assert transport.calls[0]["url"] == f"{BASE_URL}/manga/one-piece"
+
+
+def test_fetch_manga_details_not_found():
+    client, _ = _client(404, None)
+
+    with pytest.raises(NotFound):
+        client.fetch_manga_details("gone-manga")

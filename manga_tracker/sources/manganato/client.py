@@ -1,16 +1,14 @@
-"""Manganato source client.
-
-JSON chapters path only this slice: `fetch_chapters` + `build_chapter_url`.
-`fetch_latest_feed` and `fetch_manga_details` land with the HTML path next.
-Knows manganato's URLs and JSON shape; nothing about the reading list,
-bookmark states, or the DB (CD Parte A / CLAUDE.md structural boundary).
-"""
+"""Manganato source client: JSON chapters endpoint plus HTML feed and
+manga-details pages. Knows manganato's URLs/JSON/HTML selectors; nothing
+about the reading list, bookmark states, or the DB (CD Parte A / CLAUDE.md)."""
 
 import json
 
-from manga_tracker.sources.contracts import Chapter, NotFound, Transport, Unexpected
+from manga_tracker.sources.contracts import Chapter, FeedItem, MangaDetails, NotFound, Transport, Unexpected
+from manga_tracker.sources.manganato.parsing import parse_feed, parse_manga_details
 
 BASE_URL = "https://www.manganato.gg"
+FEED_PATH = "/manga-list/latest-manga"
 DEFAULT_TIMEOUT = 30.0
 
 
@@ -28,10 +26,23 @@ def build_chapter_url(slug: str, chapter_num: float | str) -> str:
 
 
 class ManganatoClient:
-    """JSON-path operations only this slice."""
+    """All three CD operations: feed, chapters, manga details."""
 
     def __init__(self, transport: Transport):
         self._transport = transport
+
+    def fetch_latest_feed(self) -> list[FeedItem]:
+        """CD Op. 1: one isolated request — the transport's inter-request
+        delay never applies here (it only fires from a 2nd+ call)."""
+        response = self._transport.get(f"{BASE_URL}{FEED_PATH}", headers={}, timeout=DEFAULT_TIMEOUT)
+        return parse_feed(response.text)
+
+    def fetch_manga_details(self, slug: str) -> MangaDetails:
+        """CD Operacion 3: fallback-only, never called by any detection mechanism."""
+        response = self._transport.get(f"{BASE_URL}/manga/{slug}", headers={}, timeout=DEFAULT_TIMEOUT)
+        if response.status == 404:
+            raise NotFound(f"manga details 404 for slug {slug!r}")
+        return parse_manga_details(response.text)
 
     def fetch_chapters(self, slug: str, *, limit: int = 50) -> list[Chapter]:
         """CD Operacion 2: GET the JSON chapters endpoint with an organic

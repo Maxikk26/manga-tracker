@@ -46,9 +46,14 @@ class Chapter:
 
 @dataclass(frozen=True)
 class MangaDetails:
+    # CD Operacion 3's actual return shape: title, cover URL (fallback-only),
+    # publication-status text, last-updated text. No source_key/url — those
+    # were carried over before fetch_manga_details was implemented against
+    # the real contract.
     title: str
-    source_key: str
-    url: str
+    cover_url: str | None
+    publication_status_text: str | None
+    last_updated_text: str | None
 
 
 class NotFound(Exception):

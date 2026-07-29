@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.3 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.6), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
+Versión 1.3 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.6), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (v1.3).
 
 Cambios vs 1.2: se corrige una contradicción interna en la regla de detección. El paso 3 afirmaba que la publicación se registra "antes de cualquier decisión", mientras que el paso 4 decía que los estados terminales no registran historia; leído en orden, un match del feed contra un manga `dropped` habría escrito en `chapter_history` lo que la propia spec prohíbe. El filtro de terminales pasa a ser el paso 3, antes del registro, y "antes de cualquier decisión" se precisa como "antes de la decisión de notificar". Pasos renumerados a seis.
 Cambios vs 1.1: pin actualizado al modelo v1.6 (barrido de consistencia del paquete).
