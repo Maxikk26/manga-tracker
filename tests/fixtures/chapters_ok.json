@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "data": {
+    "chapters": [
+      { "chapter_num": 46, "chapter_slug": "chapter-46", "chapter_name": "Chapter 46", "updated_at": "2026-07-22T03:10:00.000000Z", "view": 4210 },
+      { "chapter_num": 45.5, "chapter_slug": "chapter-45-5", "chapter_name": "Chapter 45.5", "updated_at": "2026-07-21T00:23:02.000000Z", "view": 5830 }
+    ],
+    "pagination": { "total": 46, "limit": 50, "offset": 0, "has_more": false }
+  }
+}

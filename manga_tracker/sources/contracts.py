@@ -2,7 +2,6 @@
 no URLs, HTML, or JSON shape — only the contract a client must satisfy."""
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Protocol, Sequence
 
 
@@ -26,14 +25,23 @@ class FeedItem:
     title: str
     chapter_num: float
     url: str
-    published_at: datetime | None
+    cover_url: str | None
+    # SRC section 8 names this field `updated_at_hint`, and CD Operacion 1 is
+    # explicit that the feed's date is "el texto tal cual, sin convertir" — the
+    # feed gives no reliable timestamp. Kept as raw text under the documented
+    # name: calling it `published_at: datetime` would invite treating a vague
+    # string as authoritative, which is why chapter_history.source_published_at
+    # stays NULL for feed detections and is only filled by a sweep.
+    updated_at_hint: str | None
 
 
 @dataclass(frozen=True)
 class Chapter:
     chapter_num: float
     url: str
-    published_at: datetime | None
+    # CD Operacion 2: the JSON endpoint already gives UTC ISO-8601; passed
+    # through as-is, never reparsed into a datetime (would change format).
+    published_at: str | None
 
 
 @dataclass(frozen=True)
