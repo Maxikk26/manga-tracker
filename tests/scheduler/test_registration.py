@@ -41,7 +41,7 @@ def test_run_job_once_dispatches_exactly_one_job(tmp_path):
             return []
 
     class FakeSender:
-        def send_digest(self, lines):
+        def send_digest(self, lines, *, now):
             return True
 
     run_job_once(FEED_CHECK, db_path=db_path, site_id=1, client=FakeClient(), sender=FakeSender())

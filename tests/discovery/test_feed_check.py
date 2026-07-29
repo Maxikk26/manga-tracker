@@ -23,7 +23,7 @@ class FakeSender:
     def __init__(self, ok: bool = True):
         self.ok = ok
 
-    def send_digest(self, lines):
+    def send_digest(self, lines, *, now):
         return self.ok
 
 

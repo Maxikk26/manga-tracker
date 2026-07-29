@@ -8,7 +8,9 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Callable, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from manga_tracker.notifier.contracts import DigestLine
 
@@ -16,6 +18,7 @@ TELEGRAM_API_BASE = "https://api.telegram.org"
 MESSAGE_LIMIT = 4096  # verified live (task 5.1): 1-4096 chars after entity parsing
 RETRY_WAIT_SECONDS = 5  # brief wait before the single retry on a non-rate-limit failure
 TITLE_MAX_LENGTH = 60  # keeps one manga line readable on a phone screen
+DEFAULT_TIMEZONE = "America/Caracas"  # BOT: "hora local... configurable si me mudo"
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +41,23 @@ def _format_line(line: DigestLine) -> str:
     chapter = _format_chapter_num(line.chapter_num)
     progress = ""
     if line.last_chapter_read is not None:
-        progress = f" (you are on {_format_chapter_num(line.last_chapter_read)})"
+        progress = f" (you are on {_format_chapter_num(line.last_chapter_read)}"
+        if line.accumulated_count > 1:  # BOT "acumulas N": only shown on actual accumulation
+            progress += f", {line.accumulated_count} accumulated"
+        progress += ")"
     return f'<b>{title}</b> - chapter {chapter} is out{progress} -&gt; <a href="{url}">open chapter {chapter}</a>'
+
+
+def _format_header(count: int, now: str, timezone_name: str) -> str:
+    """Run's local time in the header (BOT "Encabezado"). Falls back to UTC
+    with a marker instead of raising if the configured zone's tz data is
+    unavailable - a digest with an odd timestamp beats one that never sends."""
+    run_time = datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    try:
+        stamp = run_time.astimezone(ZoneInfo(timezone_name)).strftime("%d %b, %H:%M")
+    except ZoneInfoNotFoundError:
+        stamp = run_time.strftime("%d %b, %H:%M") + " UTC (tz data unavailable)"
+    return f"{count} update(s) - {stamp}"
 
 
 def _split_message(header: str, body_lines: list[str], limit: int) -> list[str]:
@@ -75,18 +93,20 @@ class TelegramSender:
     """Implements notifier.contracts.DigestSender - no DB, no source URL knowledge (BOT spec)."""
 
     def __init__(self, bot_token: str, chat_id: str, *,
+                 timezone_name: str = DEFAULT_TIMEZONE,
                  api_call: Callable[[str, str, dict], dict] = _call_telegram_api,
                  sleeper: Callable[[float], None] = time.sleep) -> None:
         self._bot_token = bot_token
         self._chat_id = chat_id
+        self._timezone_name = timezone_name
         self._api_call = api_call
         self._sleep = sleeper
 
-    def send_digest(self, lines: Sequence[DigestLine]) -> bool:
+    def send_digest(self, lines: Sequence[DigestLine], *, now: str) -> bool:
         if not lines:
             return True  # silence is the normal state
         ordered = sorted(lines, key=lambda line: line.manga_title)
-        header = f"{len(ordered)} update(s)"
+        header = _format_header(len(ordered), now, self._timezone_name)
         body_lines = [_format_line(line) for line in ordered]
         parts = _split_message(header, body_lines, MESSAGE_LIMIT)
         return all([self._send_one(part) for part in parts])  # every part is attempted; the whole send is judged

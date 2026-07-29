@@ -45,7 +45,7 @@ def _bootstrap(config: AppConfig) -> tuple[int, ManganatoClient]:
 def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     site_id, client = _bootstrap(config)
     telegram = require_telegram(config)
-    sender = TelegramSender(telegram.bot_token, telegram.chat_id)
+    sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
                      active_sweep_hour=config.active_sweep_hour).start()  # blocks until interrupted
     return 0
@@ -54,12 +54,19 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
 def _cmd_run_job(args: argparse.Namespace, config: AppConfig) -> int:
     site_id, client = _bootstrap(config)
     telegram = require_telegram(config)
-    sender = TelegramSender(telegram.bot_token, telegram.chat_id)
+    sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
     run_job_once(args.job, db_path=config.db_path, site_id=site_id, client=client, sender=sender)
     return 0
 
 
-# `test-telegram` still deferred (line-budget priority; see apply-progress).
+def _cmd_test_telegram(args: argparse.Namespace, config: AppConfig) -> int:
+    """Manual verification utility (BOT "Utilidad de prueba manual"): sends one
+    message to the configured chat. Used at deploy time and after rotating the
+    token - must never run automatically, so no other subcommand calls it."""
+    telegram = require_telegram(config)
+    sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
+    ok = sender.send_test_message("manga-tracker: test message - if you see this, the bot can send.")
+    return 0 if ok else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_job = subparsers.add_parser("run-job", help="Run one job body once, outside the scheduler")
     run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB])
     run_job.set_defaults(handler=_cmd_run_job)
+
+    test_telegram = subparsers.add_parser(
+        "test-telegram", help="Send a manual verification message to the configured chat; never runs automatically"
+    )
+    test_telegram.set_defaults(handler=_cmd_test_telegram)
 
     return parser
 

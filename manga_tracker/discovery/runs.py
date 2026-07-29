@@ -68,6 +68,21 @@ def _digest_url(conn, client, candidate) -> str:
     )
 
 
+def _accumulated_count(conn, candidate) -> int:
+    """Chapters registered above the reader's progress, up to and including
+    the one just detected (BOT "acumulas N") - the honest number, since it
+    only counts what chapter_history actually recorded. NULL progress means
+    there is no accumulation to report; the formatter already omits the whole
+    progress clause in that case, so the count is never rendered."""
+    if candidate.last_chapter_read is None:
+        return 1
+    row = conn.execute(
+        "SELECT COUNT(*) FROM chapter_history WHERE manga_site_id = ? AND chapter_num > ? AND chapter_num <= ?",
+        (candidate.manga_site_id, candidate.last_chapter_read, candidate.chapter_num),
+    ).fetchone()
+    return row[0]
+
+
 def send_and_advance(conn, candidates: list, sender, *, now: str, client=None) -> SendOutcome:
     """Zero candidates or a failed send: nothing advances. Success: advances
     every candidate's latest_chapter_* and reports the sent count.
@@ -87,11 +102,12 @@ def send_and_advance(conn, candidates: list, sender, *, now: str, client=None) -
             c.chapter_num,
             _digest_url(conn, client, c),
             c.last_chapter_read,
+            _accumulated_count(conn, c),
         )
         for c in candidates
     ]
     try:
-        delivered = sender.send_digest(lines)
+        delivered = sender.send_digest(lines, now=now)
     except Exception:
         logging.getLogger(__name__).exception("digest send raised; advancing nothing")
         return SendOutcome(0, failed=True)

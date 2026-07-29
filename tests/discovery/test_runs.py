@@ -23,7 +23,7 @@ class FakeSender:
         self.raises = raises
         self.called = False
 
-    def send_digest(self, lines):
+    def send_digest(self, lines, *, now):
         self.called = True
         if self.raises:
             raise RuntimeError("telegram unreachable")
@@ -97,7 +97,7 @@ class CapturingSender:
     def __init__(self):
         self.lines = None
 
-    def send_digest(self, lines):
+    def send_digest(self, lines, *, now):
         self.lines = lines
         return True
 
@@ -131,3 +131,25 @@ def test_digest_link_comes_from_the_resolution_hierarchy_not_the_detected_chapte
     send_and_advance(conn, [candidate], sender, now=NOW, client=UrlClient())
 
     assert sender.lines[0].url == "https://real/101"  # not the detected 104
+
+
+def test_accumulated_count_counts_chapter_history_rows_above_progress():
+    """The count discovery attaches to DigestLine (BOT "acumulas N"): chapters
+    registered above the reader's progress, up to and including the one just
+    detected - proven through the real send_and_advance path, not the helper
+    called directly."""
+    conn = connect(":memory:")
+    ms_id = _seed_manga_site(conn)
+    for chapter_num in (101, 102):
+        conn.execute(
+            "INSERT INTO chapter_history (manga_site_id, chapter_num, chapter_url, detected_at, detected_via) "
+            "VALUES (?, ?, ?, ?, 'active_sweep')",
+            (ms_id, chapter_num, f"https://real/{chapter_num}", NOW),
+        )
+    conn.commit()
+    sender = CapturingSender()
+
+    candidate = Candidate(ms_id, "OP", 102, "https://real/102", NOW, 100)
+    send_and_advance(conn, [candidate], sender, now=NOW)
+
+    assert sender.lines[0].accumulated_count == 2

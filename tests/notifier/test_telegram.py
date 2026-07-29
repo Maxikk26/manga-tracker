@@ -3,11 +3,13 @@ all-or-nothing size split, and the 429/retry policy (spec-bot-telegram.md
 v1.1 "Mensaje 1"). No network - the HTTP call is injected."""
 
 from manga_tracker.notifier.contracts import DigestLine
-from manga_tracker.notifier.telegram import MESSAGE_LIMIT, TelegramSender, _format_line, _split_message
+from manga_tracker.notifier.telegram import DEFAULT_TIMEZONE, MESSAGE_LIMIT, TelegramSender, _format_line, _split_message
+
+NOW = "2026-07-21T22:40:00Z"  # 18:40 in America/Caracas (UTC-4) - BOT's own illustrative example
 
 
-def _line(title, chapter_num, url="https://x/chapter", last_chapter_read=None):
-    return DigestLine(title, chapter_num, url, last_chapter_read)
+def _line(title, chapter_num, url="https://x/chapter", last_chapter_read=None, accumulated_count=1):
+    return DigestLine(title, chapter_num, url, last_chapter_read, accumulated_count)
 
 
 class FakeApi:
@@ -33,9 +35,10 @@ def _fail(error_code=400, retry_after=None):
     return response
 
 
-def _send(lines, *responses, sleeper=lambda s: None):
+def _send(lines, *responses, sleeper=lambda s: None, now=NOW, timezone_name=DEFAULT_TIMEZONE):
     api = FakeApi(list(responses))
-    result = TelegramSender("t", "c", api_call=api, sleeper=sleeper).send_digest(lines)
+    sender = TelegramSender("t", "c", timezone_name=timezone_name, api_call=api, sleeper=sleeper)
+    result = sender.send_digest(lines, now=now)
     return result, api.calls
 
 
@@ -93,3 +96,44 @@ def test_second_failure_after_retry_reports_failure():
     ok, calls = _send([_line("A", 1)], _fail(), _fail())
     assert ok is False
     assert len(calls) == 2
+
+
+def test_accumulation_clause_rendered_only_when_more_than_one_pending():
+    """BOT "acumulas N": shown when >1 chapter piled up, omitted at exactly 1."""
+    lines = [
+        _line("Omniscient Reader", 145.5, last_chapter_read=144, accumulated_count=2),
+        _line("Accidental Romance", 81, last_chapter_read=80, accumulated_count=1),
+    ]
+    _, calls = _send(lines, _ok())
+    text = calls[0]["text"]
+    assert "you are on 144, 2 accumulated" in text
+    assert "you are on 80)" in text  # single pending chapter: no accumulation clause
+    assert "1 accumulated" not in text
+
+
+def test_null_progress_omits_progress_and_accumulation_clauses():
+    """A never-started manga has nothing to accumulate against; both clauses
+    are absent even if a caller mistakenly still passes a count > 1."""
+    _, calls = _send([_line("Solo Leveling", 5, last_chapter_read=None, accumulated_count=3)], _ok())
+    text = calls[0]["text"]
+    assert "you are on" not in text
+    assert "accumulated" not in text
+
+
+def test_header_renders_run_time_in_the_configured_local_zone():
+    _, calls = _send([_line("Alpha", 1)], _ok(), now="2026-07-21T22:40:00Z", timezone_name="America/Caracas")
+    assert "21 Jul, 18:40" in calls[0]["text"]  # UTC-4, matches BOT's own illustrative example
+
+
+def test_header_falls_back_to_utc_when_the_configured_zone_is_unavailable():
+    """Never raises: a digest with an odd timestamp beats one that never sends."""
+    _, calls = _send([_line("Alpha", 1)], _ok(), now="2026-07-21T22:40:00Z", timezone_name="Not/AZone")
+    assert "22:40 UTC" in calls[0]["text"]
+
+
+def test_send_test_message_reaches_the_injected_transport():
+    """The `test-telegram` utility's underlying call - unit-level, no CLI."""
+    api = FakeApi([_ok()])
+    ok = TelegramSender("t", "c", api_call=api).send_test_message("hello")
+    assert ok is True
+    assert api.calls[0]["text"] == "hello"
