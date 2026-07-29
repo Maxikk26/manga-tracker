@@ -3,6 +3,7 @@ manga-details pages. Knows manganato's URLs/JSON/HTML selectors; nothing
 about the reading list, bookmark states, or the DB (CD Parte A / CLAUDE.md)."""
 
 import json
+from urllib.parse import urlparse
 
 from manga_tracker.sources.contracts import Chapter, FeedItem, MangaDetails, NotFound, Transport, Unexpected
 from manga_tracker.sources.manganato.parsing import parse_feed, parse_manga_details
@@ -25,8 +26,30 @@ def build_chapter_url(slug: str, chapter_num: float | str) -> str:
     return f"{BASE_URL}/manga/{slug}/chapter-{str(num).replace('.', '-')}"
 
 
+def build_manga_url(slug: str) -> str:
+    """Canonical ficha URL for a slug (SRC section 5)."""
+    return f"{BASE_URL}/manga/{slug}"
+
+
+def extract_slug(url: str) -> str | None:
+    """Slug from any manganato URL, ficha or chapter (SRC section 5).
+
+    Tolerates `www`, a trailing slash, a query and a fragment. Any segment
+    after the slug — a chapter, typically — is ignored: progress never comes
+    from a URL, only from the caller's own data.
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if "manga" not in parts:
+        return None
+    idx = parts.index("manga")
+    return parts[idx + 1] if idx + 1 < len(parts) else None
+
+
 class ManganatoClient:
     """All three CD operations: feed, chapters, manga details."""
+
+    build_manga_url = staticmethod(build_manga_url)
+    extract_slug = staticmethod(extract_slug)
 
     def __init__(self, transport: Transport):
         self._transport = transport
