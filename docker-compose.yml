@@ -11,7 +11,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Deploy note (design D5): the in-memory jobstore forgets any missed
-    # active_sweep window across a restart (~47h worst-case latency after an
-    # off-window restart). After any restart outside the scheduled hour, run:
-    #   docker compose exec manga-tracker python -m manga_tracker run-job active_sweep
+    # Deploy note (design D5): the jobstore is in memory, so a restart forgets
+    # any active_sweep window it missed. That used to mean a manual
+    # `run-job active_sweep` after every off-window restart, or up to ~47h
+    # without a guaranteed sweep. The `run` subcommand now reads job_runs at
+    # startup and runs one sweep immediately when the last successful one is
+    # older than a day, so a restart no longer needs a human to remember.
+    # `run-job active_sweep` remains available for forcing one on demand.

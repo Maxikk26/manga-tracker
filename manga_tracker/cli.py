@@ -11,7 +11,7 @@ from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
-from manga_tracker.scheduler import build_scheduler, run_job_once
+from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, run_job_once
 from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
@@ -46,6 +46,11 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     site_id, client = _bootstrap(config)
     telegram = require_telegram(config)
     sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
+    # Before scheduling: the in-memory jobstore forgets a window missed across a
+    # restart, so a sweep that is overdue runs once now instead of waiting for
+    # tomorrow's cron. Replaces the manual `run-job active_sweep` the compose
+    # file used to prescribe after an off-window restart.
+    catch_up_sweep_if_overdue(db_path=config.db_path, client=client, sender=sender)
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
                      active_sweep_hour=config.active_sweep_hour).start()  # blocks until interrupted
     return 0

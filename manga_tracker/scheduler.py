@@ -96,6 +96,54 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, active_sweep_
     return scheduler
 
 
+SWEEP_CATCHUP_AFTER_SECONDS = 24 * 3600
+
+
+def sweep_is_overdue(conn, *, max_age_seconds: int = SWEEP_CATCHUP_AFTER_SECONDS) -> bool:
+    """True when the last successful active_sweep is older than its interval.
+
+    The jobstore is in memory, so a restart forgets any window it missed: a
+    container coming back at 04:00 with the sweep scheduled at 03:00 gets no
+    sweep until 03:00 the next day, stretching the worst-case detection latency
+    from ~24h to ~47h. The documented mitigation was a human remembering to run
+    `run-job active_sweep`, which is a poor guarantee for the mechanism the
+    whole design leans on.
+
+    No persistent jobstore is needed to fix it: job_runs already records what
+    ran and when, which is exactly what that table exists for. Reading it back
+    at startup costs one query.
+    """
+    row = conn.execute(
+        "SELECT started_at FROM job_runs WHERE job_name = ? AND status IN ('ok', 'partial') "
+        "ORDER BY started_at DESC LIMIT 1",
+        (ACTIVE_SWEEP,),
+    ).fetchone()
+    if row is None:
+        return True  # never swept: the seed alone leaves nothing armed
+    last = datetime.strptime(row[0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - last).total_seconds() > max_age_seconds
+
+
+def catch_up_sweep_if_overdue(*, db_path: str, client, sender) -> bool:
+    """Run one active_sweep at startup when the last one is overdue.
+
+    This is not the startup message the bot spec forbids — that rule is about a
+    greeting or liveness ping. A sweep that finds real chapters and reports them
+    is the product working, and staying silent when there is nothing new is the
+    normal outcome either way.
+    """
+    conn = connect(db_path)
+    try:
+        overdue = sweep_is_overdue(conn)
+    finally:
+        conn.close()
+    if not overdue:
+        return False
+    logger.info("active_sweep is overdue; running one now before scheduling")
+    _make_job(active_sweep, ACTIVE_SWEEP, db_path, client, sender, {})()
+    return True
+
+
 def run_job_once(job_name: str, *, db_path: str, site_id: int, client, sender) -> None:
     """`run-job`: run one job body directly, no scheduler involved - covers
     bring-up, where waiting an hour for a real feed tick is not workable.

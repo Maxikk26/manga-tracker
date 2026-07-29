@@ -75,3 +75,55 @@ def test_job_wrapper_closes_the_run_row_and_logs_when_the_job_body_raises(tmp_pa
     assert row[0] == "error"
     assert row[1] is not None  # finished_at is set - never left NULL
     assert "feed_check failed" in caplog.text
+
+
+def test_sweep_is_overdue_reads_job_runs_rather_than_a_persistent_jobstore():
+    """The in-memory jobstore forgets a missed window; job_runs does not.
+
+    A restart outside the scheduled hour used to mean no sweep until the next
+    day, stretching worst-case latency from ~24h to ~47h, mitigated only by a
+    human remembering a command. These assertions pin the replacement.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.scheduler import sweep_is_overdue
+    from manga_tracker.storage.db import connect
+
+    def stamp(delta):
+        return (datetime.now(timezone.utc) + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    conn = connect(":memory:")
+    assert sweep_is_overdue(conn) is True  # never swept: nothing is armed yet
+
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'ok')",
+        (SWEEP, stamp(timedelta(hours=-2))),
+    )
+    conn.commit()
+    assert sweep_is_overdue(conn) is False  # swept two hours ago: nothing owed
+
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'ok')",
+        (SWEEP, stamp(timedelta(hours=-30))),
+    )
+    conn.execute("DELETE FROM job_runs WHERE started_at = ?", (stamp(timedelta(hours=-2)),))
+    conn.commit()
+    assert sweep_is_overdue(conn) is True  # last success is older than a day
+
+
+def test_a_failed_sweep_does_not_count_as_having_run():
+    """`error` means the run aborted, so it leaves the sweep still owed."""
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.scheduler import sweep_is_overdue
+    from manga_tracker.storage.db import connect
+
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'error')",
+        (SWEEP, (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")),
+    )
+    conn.commit()
+    assert sweep_is_overdue(conn) is True
