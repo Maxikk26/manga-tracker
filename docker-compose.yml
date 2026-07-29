@@ -1,0 +1,17 @@
+services:
+  manga-tracker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Deploy note (design D5): the in-memory jobstore forgets any missed
+    # active_sweep window across a restart (~47h worst-case latency after an
+    # off-window restart). After any restart outside the scheduled hour, run:
+    #   docker compose exec manga-tracker python -m manga_tracker run-job active_sweep

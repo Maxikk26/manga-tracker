@@ -17,6 +17,7 @@ class TelegramConfig:
 class AppConfig:
     db_path: str
     log_level: str
+    active_sweep_hour: int  # design open question 2: local hour, default 3 (early morning)
     telegram: TelegramConfig | None  # present only if both vars were set
 
 
@@ -27,6 +28,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         db_path=os.environ.get("DB_PATH", "data/manga-tracker.db"),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        active_sweep_hour=int(os.environ.get("ACTIVE_SWEEP_HOUR", "3")),
         telegram=telegram,
     )
 

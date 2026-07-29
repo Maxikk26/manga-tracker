@@ -1,12 +1,17 @@
 """The one composition root (design D6): the only module allowed to import
-both `sources.manganato` and `storage` and `seed`. Only `seed` is wired
-this attempt; `test-telegram`/`run`/`run-job` need units 4-6 and will call
-`config.require_telegram` directly, already tested in `tests/test_config.py`."""
+both `sources.manganato` and `storage` and `seed`. `scheduler.py` never
+imports either - it receives already-built client/sender objects from here,
+so the composition-root exemption in test_architecture.py stays limited to
+this file and `__main__.py`, unchanged."""
 
 import argparse
 
-from manga_tracker.config import AppConfig, load_config
+from manga_tracker.config import AppConfig, load_config, require_telegram
+from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
+from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.logging_setup import configure_logging
+from manga_tracker.notifier.telegram import TelegramSender
+from manga_tracker.scheduler import build_scheduler, run_job_once
 from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
@@ -26,6 +31,37 @@ def _cmd_seed(args: argparse.Namespace, config: AppConfig) -> int:
     return 0 if (args.dry_run or loaded) else 1
 
 
+def _bootstrap(config: AppConfig) -> tuple[int, ManganatoClient]:
+    """Shared by every subcommand that runs a job: `ensure_site` is called
+    only here, never by `scheduler.py`. The bootstrap connection closes right
+    away - each job run opens its own connection later, on its own worker
+    thread (design: one sqlite3 connection per run)."""
+    conn = connect(config.db_path)
+    site_id = ensure_site(conn, "manganato", BASE_URL)
+    conn.close()
+    return site_id, ManganatoClient(CurlCffiTransport())
+
+
+def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
+    site_id, client = _bootstrap(config)
+    telegram = require_telegram(config)
+    sender = TelegramSender(telegram.bot_token, telegram.chat_id)
+    build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
+                     active_sweep_hour=config.active_sweep_hour).start()  # blocks until interrupted
+    return 0
+
+
+def _cmd_run_job(args: argparse.Namespace, config: AppConfig) -> int:
+    site_id, client = _bootstrap(config)
+    telegram = require_telegram(config)
+    sender = TelegramSender(telegram.bot_token, telegram.chat_id)
+    run_job_once(args.job, db_path=config.db_path, site_id=site_id, client=client, sender=sender)
+    return 0
+
+
+# `test-telegram` still deferred (line-budget priority; see apply-progress).
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="manga_tracker")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -34,6 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     seed.add_argument("--file", default="data/seed.csv")
     seed.add_argument("--dry-run", action="store_true", help="Validate and report; write nothing")
     seed.set_defaults(handler=_cmd_seed)
+
+    run = subparsers.add_parser("run", help="Start the scheduler (blocks until interrupted)")
+    run.set_defaults(handler=_cmd_run)
+
+    run_job = subparsers.add_parser("run-job", help="Run one job body once, outside the scheduler")
+    run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB])
+    run_job.set_defaults(handler=_cmd_run_job)
 
     return parser
 
