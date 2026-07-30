@@ -1,6 +1,12 @@
 services:
   manga-tracker:
     build: .
+    # Without this, Compose derives `<project>-<service>-<N>` and the container
+    # is called manga-tracker-manga-tracker-1. The suffix exists to keep
+    # replicas apart, and this service is one instance by definition: a single
+    # SQLite file and a scheduler with max_workers=1. Naming it explicitly also
+    # shortens every log line, since Compose prefixes output with the name.
+    container_name: manga-tracker
     restart: unless-stopped
     env_file:
       - .env
