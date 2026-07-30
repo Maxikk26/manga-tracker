@@ -1,6 +1,6 @@
 # Medición: ventana del feed de manganato
 
-Versión 1.1 — 2026-07-28. Documento de apoyo del paquete SDD. Depende de `manganato-fuente-actual.md` (v1.3). Su resultado alimenta `spec-cliente-fuente-descubrimiento.md` (v1.3).
+Versión 1.1 — 2026-07-28. Documento de apoyo del paquete SDD. Depende de `manganato-fuente-actual.md` (v1.3). Su resultado alimenta `spec-cliente-fuente-descubrimiento.md` (v1.4).
 
 Cambios vs 1.0: se fija el host explícitamente en el procedimiento; se declara el supuesto de ordenamiento del feed con su paso de verificación; se agregan resultados y decisión.
 
