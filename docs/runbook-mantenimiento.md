@@ -91,7 +91,7 @@ docker compose exec manga-tracker python -m manga_tracker run-job active_sweep
 No hay migraciones en V1a: `schema.sql` usa `IF NOT EXISTS` y se ejecuta en cada conexión, así que **agregar** una tabla o un índice es transparente. Pero:
 
 - **Cambiar una restricción CHECK con la base poblada obliga a migrar.** Por eso los valores de `job_name` y `detected_via` ya incluyen `onhold_sweep` y `seed_backfill` aunque no se usen todavía.
-- Respalda antes: `cp data/manga-tracker.db ~/backups/pre-cambio.db`.
+- Respalda antes: `cp ~/manga-tracker-data/manga-tracker.db ~/backups/pre-cambio.db`.
 
 ## Operación cotidiana
 
@@ -100,7 +100,7 @@ No hay migraciones en V1a: `schema.sql` usa `IF NOT EXISTS` y se ejecuta en cada
 El heartbeat llega los domingos. Entre semana, si quieres confirmar:
 
 ```
-sqlite3 data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5"
+sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5"
 ```
 
 `feed_check` corre cada hora, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
@@ -122,7 +122,7 @@ Un `partial` por digest fallido **se auto-corrige**: `latest_chapter_num` no ava
 `consecutive_failures` cuenta los fallos de tipo "no encontrado". A los 5, el mapeo se salta en el barrido diario y no consume request.
 
 ```
-sqlite3 data/manga-tracker.db "select m.title, ms.source_key, ms.consecutive_failures from manga_sites ms join mangas m on m.id=ms.manga_id where ms.consecutive_failures > 0"
+sqlite3 ~/manga-tracker-data/manga-tracker.db "select m.title, ms.source_key, ms.consecutive_failures from manga_sites ms join mangas m on m.id=ms.manga_id where ms.consecutive_failures > 0"
 ```
 
 Casi siempre significa que la fuente le cambió el slug. Corrígelo en la base o en el CSV y re-corre el seed; cualquier éxito resetea el contador.
@@ -132,7 +132,7 @@ Casi siempre significa que la fuente le cambió el slug. Corrígelo en la base o
 En V1a se hace directo en la base, con DB Browser o SQL. El trigger captura el evento en `reading_history` automáticamente — por eso existe, porque ningún código de aplicación intercepta esa escritura.
 
 ```
-sqlite3 data/manga-tracker.db "update bookmarks set last_chapter_read=40 where manga_id=(select id from mangas where title like 'Black Haze%')"
+sqlite3 ~/manga-tracker-data/manga-tracker.db "update bookmarks set last_chapter_read=40 where manga_id=(select id from mangas where title like 'Black Haze%')"
 ```
 
 Dispara solo en UPDATE, nunca en INSERT: así el seed y el import de Kitsu no generan eventos falsos de lectura.
