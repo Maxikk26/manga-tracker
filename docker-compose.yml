@@ -4,8 +4,22 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Overrides the .env value on purpose, and the two are not redundant.
+      # Inside the container this is relative to WORKDIR /app, so it lands on
+      # the mount below. The .env value is for running the CLI on the host
+      # without Docker, and points at the same physical directory from there.
+      # Both therefore address one database; only the route differs.
+      DB_PATH: data/manga-tracker.db
     volumes:
-      - ./data:/app/data
+      # Irreplaceable local data lives OUTSIDE the repository. Not preference:
+      # `git clean -xdf` deletes ignored files, and this directory holds the
+      # hand-typed seed plus a database whose reading_history is never
+      # reconstructible — the "capture today what is unrecoverable tomorrow"
+      # principle in the data-model spec. A .gitignore stops you committing it,
+      # not losing it. Override DATA_DIR per server; the default is a sibling
+      # of the repo.
+      - ${DATA_DIR:-../manga-tracker-data}:/app/data
     logging:
       driver: json-file
       options:

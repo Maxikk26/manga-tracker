@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.0 — 2026-07-29. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-seed-manual.md` (v2.2).
+Versión 1.0 — 2026-07-29. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-seed-manual.md` (v2.3).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
@@ -26,7 +26,7 @@ Rellena las seis variables. **El archivo tiene que tener contenido**: un `.env` 
 ```
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
-DB_PATH=data/manga-tracker.db
+DB_PATH=../manga-tracker-data/manga-tracker.db
 LOG_LEVEL=INFO
 ACTIVE_SWEEP_HOUR=3
 LOCAL_TIMEZONE=America/Caracas
@@ -50,13 +50,39 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"
 
 Nota: el nombre del bot **no** identifica nada en el código. La URL de la API se arma con el token, así que renombrar el bot no rompe nada, y nadie puede arrebatarte el username de un bot activo.
 
-## 2. Permisos del volumen — solo en Linux
+## 2. El directorio de datos va FUERA del repositorio
 
-El contenedor corre como UID fijo **10001**, no root. En Linux el bind mount respeta ese UID, así que la carpeta del host necesita pertenecerle:
+Toda la data irreemplazable —la base y el seed— vive en un directorio hermano del repo, no dentro:
 
 ```
-mkdir -p data
-sudo chown -R 10001:10001 ./data
+~/manga-tracker/            el repositorio
+~/manga-tracker-data/       la base y el seed   ← fuera
+```
+
+**No es preferencia.** `git clean -xdf` borra los archivos ignorados, y ese directorio guarda el CSV que escribiste a mano más una base cuyo `reading_history` **no se reconstruye jamás** — el principio de "capturar hoy lo irrecuperable mañana" de la spec del modelo. Un `.gitignore` evita que lo commitees; no evita que lo pierdas.
+
+El compose lo monta con `${DATA_DIR:-../manga-tracker-data}`, así que el default es el hermano y puedes apuntarlo a otro lado por servidor:
+
+```
+DATA_DIR=/srv/manga-tracker-data docker compose up -d
+```
+
+### Las dos rutas de `DB_PATH`, y por qué no son redundantes
+
+| Contexto | Valor | Resuelve a |
+|---|---|---|
+| `.env`, para correr el CLI en el host | `../manga-tracker-data/manga-tracker.db` | el directorio hermano |
+| `environment:` del compose | `data/manga-tracker.db` | `/app/data`, que **es** ese mismo directorio montado |
+
+Las dos llegan al mismo archivo por rutas distintas. El compose pisa el valor del `.env` a propósito: si alguien las "unifica", una de las dos deja de apuntar a la base y acabas con dos bases divergentes sin darte cuenta.
+
+### Permisos — solo en Linux
+
+El contenedor corre como UID fijo **10001**, no root. En Linux el bind mount respeta ese UID, así que el directorio del host necesita pertenecerle:
+
+```
+mkdir -p ~/manga-tracker-data
+sudo chown -R 10001:10001 ~/manga-tracker-data
 ```
 
 **Omitir esto es el fallo más probable del primer arranque**: el contenedor no puede crear el archivo SQLite y muere.
@@ -70,6 +96,8 @@ Tu CSV vive **fuera del repositorio** y la ruta se pasa como argumento. Va afuer
 ```
 ~/manga-tracker-data/seed.csv
 ```
+
+Es el **mismo** directorio que monta el contenedor, así que dentro se ve como `/app/data/seed.csv`. Al cargar desde el contenedor la ruta es simplemente `data/seed.csv`, sin gimnasia de rutas relativas.
 
 **El nombre importa, y es una trampa real.** `.gitignore` ignora todos los `*.csv` pero **re-incluye `seed-plantilla.csv` por nombre**, para poder versionar la plantilla vacía. Así que:
 
@@ -106,10 +134,10 @@ Cada paso verifica algo antes de que el siguiente dependa de ello.
 uv run --env-file .env python -m manga_tracker test-telegram
 
 # 2. ¿El CSV está bien? Valida TODO y no escribe nada.
-uv run --env-file .env python -m manga_tracker seed --dry-run --file ~/manga-tracker-data/seed.csv
+uv run --env-file .env python -m manga_tracker seed --dry-run --file ../manga-tracker-data/seed.csv
 
 # 3. Cargar. Toca la red: un request por título con delay de 5-15s.
-uv run --env-file .env python -m manga_tracker seed --file ~/manga-tracker-data/seed.csv
+uv run --env-file .env python -m manga_tracker seed --file ../manga-tracker-data/seed.csv
 
 # 4. Forzar una detección sin esperar al cron.
 uv run --env-file .env python -m manga_tracker run-job active_sweep
@@ -142,7 +170,7 @@ Para confirmar que está vivo sin esperar al domingo, mira las corridas:
 
 ```
 docker compose logs --tail 20
-sqlite3 data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at from job_runs order by id desc limit 5"
+sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at from job_runs order by id desc limit 5"
 ```
 
 `feed_check` corre cada hora, así que debe aparecer una fila nueva dentro de la hora. Si no aparece, ahí sí hay algo que investigar.
@@ -152,7 +180,7 @@ sqlite3 data/manga-tracker.db "select job_name,status,items_checked,updates_foun
 El respaldo es **copiar un archivo**:
 
 ```
-cp data/manga-tracker.db ~/backups/manga-tracker-$(date +%F).db
+cp ~/manga-tracker-data/manga-tracker.db ~/backups/manga-tracker-$(date +%F).db
 ```
 
 Eso es todo. Sin dump, sin credenciales de base, sin segundo contenedor — es la contrapartida de haber elegido SQLite sobre Postgres.
@@ -168,4 +196,5 @@ Y respalda tu `seed.csv` en otro lado. Un `.gitignore` evita que lo commitees; *
 | `getUpdates` devuelve `"result":[]` | No le escribiste al bot todavía |
 | `{"ok":false,"error_code":404}` | La URL llevaba el marcador literal en vez del token |
 | `seed` reporta errores raros en una fila | Un título con coma sin comillas dobles en el CSV |
+| El CLI local no encuentra la base | `DB_PATH` del `.env` sigue apuntando a `data/` del repo |
 | Todo verde y no llega nada | Correcto: no hay capítulos nuevos. Verifica con `job_runs` |
