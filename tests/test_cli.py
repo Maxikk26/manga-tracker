@@ -60,3 +60,34 @@ def test_test_telegram_reaches_the_injected_transport(monkeypatch):
     assert FakeSender.instance.bot_token == "tok"
     assert FakeSender.instance.chat_id == "chat"
     assert len(FakeSender.instance.sent) == 1
+
+
+def test_test_telegram_reports_on_both_paths(monkeypatch, capsys):
+    """A verification utility must say what it verified.
+
+    This command is the first thing run on a new server and used to print
+    nothing on success: a silent exit 0 looks exactly like having done nothing,
+    which is the worst moment to be guessing. It bit during a real deploy.
+    """
+    from manga_tracker import cli
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+
+    class Sender:
+        def __init__(self, *a, **k):
+            pass
+
+        def send_test_message(self, text):
+            return Sender.result
+
+    monkeypatch.setattr(cli, "TelegramSender", Sender)
+
+    Sender.result = True
+    assert cli.main(["test-telegram"]) == 0
+    out = capsys.readouterr().out
+    assert "Sent" in out and "12345" in out
+
+    Sender.result = False
+    assert cli.main(["test-telegram"]) == 1
+    assert "FAILED" in capsys.readouterr().out

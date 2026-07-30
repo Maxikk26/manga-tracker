@@ -69,11 +69,24 @@ def _cmd_run_job(args: argparse.Namespace, config: AppConfig) -> int:
 def _cmd_test_telegram(args: argparse.Namespace, config: AppConfig) -> int:
     """Manual verification utility (BOT "Utilidad de prueba manual"): sends one
     message to the configured chat. Used at deploy time and after rotating the
-    token - must never run automatically, so no other subcommand calls it."""
+    token - must never run automatically, so no other subcommand calls it.
+
+    It reports on both paths. This is the first command run on a new server and
+    it used to print nothing at all on success: a silent exit 0 is
+    indistinguishable from having done nothing, which is the worst moment to be
+    guessing. A verification utility that does not say what it verified is not
+    one.
+    """
     telegram = require_telegram(config)
     sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
     ok = sender.send_test_message("manga-tracker: test message - if you see this, the bot can send.")
-    return 0 if ok else 1
+    if ok:
+        print(f"Sent. Check chat {telegram.chat_id} - the message should be there.")
+        return 0
+    print("FAILED to send. The token and chat id were present, so the call itself was rejected:")
+    print("  - a wrong token gives 401; check for a stray space or a revoked value")
+    print("  - a wrong chat id gives 400; the bot must have received a message from you first")
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
