@@ -90,6 +90,10 @@ Operational caveat on `data/seed.csv`: it is hand-typed and not reconstructible,
 
 ## Conventions
 
-Documentation and prose in `docs/` are written in Spanish. Code, identifiers, comments, commit messages, and any string literal are in English. Domain terms stay verbatim as the specs define them (`last_chapter_read`, `active_sweep`, `source_key`) — do not translate schema names.
+Documentation and prose in `docs/` are written in Spanish. Code, identifiers, comments, commit messages, log records, exception messages and CLI output are in English. Domain terms stay verbatim as the specs define them (`last_chapter_read`, `active_sweep`, `source_key`) — do not translate schema names.
+
+**The English rule is code hygiene, and it stops at the reader.** Text a human receives as the product — the Telegram digest, the heartbeat, the dead-slug notice, the manual test message — is **Spanish**, and that is binding per `spec-bot-telegram.md` §"Idioma de los mensajes". The distinction is who the string is for: English for whatever the machine says to a developer, Spanish for whatever the product says to its user.
+
+This is written down because the first implementation got it wrong. "Any string literal is in English" was read to cover product copy, the digest shipped in English, and three real notifications went out that way before anyone noticed — the tests were green because they asserted the English text too. If you are translating this copy back to English to satisfy a convention, you are reintroducing a defect.
 
 When a spec does not cover something, ask; do not fill the gap by your own judgment. The gap is closed as a decision and the corresponding document is versioned, with its changelog and open-pendings list updated.

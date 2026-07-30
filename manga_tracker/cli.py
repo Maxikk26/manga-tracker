@@ -79,7 +79,9 @@ def _cmd_test_telegram(args: argparse.Namespace, config: AppConfig) -> int:
     """
     telegram = require_telegram(config)
     sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
-    ok = sender.send_test_message("manga-tracker: test message - if you see this, the bot can send.")
+    # Spanish, because this one lands in Telegram. The prints below stay English:
+    # they are operator output, same as the logs.
+    ok = sender.send_test_message("manga-tracker: mensaje de prueba - si lees esto, el bot puede enviar.")
     if ok:
         print(f"Sent. Check chat {telegram.chat_id} - the message should be there.")
         return 0
