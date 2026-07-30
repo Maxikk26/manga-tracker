@@ -9,7 +9,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK
-from manga_tracker.scheduler import _make_job, build_scheduler, run_job_once
+from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT
+from manga_tracker.scheduler import HEARTBEAT_GRACE_SECONDS, _make_job, build_scheduler, run_job_once
 from manga_tracker.storage.db import connect
 
 
@@ -25,12 +26,40 @@ def test_executor_max_workers_is_explicit_not_the_apscheduler_default():
 
 def test_both_jobs_registered_with_expected_trigger_types_and_grace():
     jobs = {job.id: job for job in _scheduler().get_jobs()}
-    assert set(jobs) == {FEED_CHECK, ACTIVE_SWEEP}
+    assert set(jobs) == {FEED_CHECK, ACTIVE_SWEEP, HEARTBEAT}
     assert isinstance(jobs[FEED_CHECK].trigger, IntervalTrigger)
     assert isinstance(jobs[ACTIVE_SWEEP].trigger, CronTrigger)
     assert jobs[FEED_CHECK].max_instances == 1 and jobs[ACTIVE_SWEEP].max_instances == 1
     assert jobs[FEED_CHECK].misfire_grace_time == 300
     assert jobs[ACTIVE_SWEEP].misfire_grace_time == 3600
+
+
+def test_heartbeat_registered_weekly_with_expected_id():
+    """Own weekly schedule, decoupled from onhold_sweep (recorded spec
+    deviation): Sunday, id 'heartbeat', its own grace window."""
+    jobs = {job.id: job for job in _scheduler().get_jobs()}
+    trigger = jobs[HEARTBEAT].trigger
+    assert isinstance(trigger, CronTrigger)
+    assert str(next(f for f in trigger.fields if f.name == "day_of_week")) == "sun"
+    assert jobs[HEARTBEAT].max_instances == 1
+    assert jobs[HEARTBEAT].misfire_grace_time == HEARTBEAT_GRACE_SECONDS
+
+
+def test_run_job_once_dispatches_heartbeat(tmp_path):
+    """`run-job heartbeat`: fired on demand, same dispatch path as the
+    detection jobs - waiting a week to see the message render is not workable."""
+
+    class FakeSender:
+        def __init__(self):
+            self.called = False
+
+        def send_heartbeat(self, report, *, now):
+            self.called = True
+            return True
+
+    sender = FakeSender()
+    run_job_once(HEARTBEAT, db_path=str(tmp_path / "heartbeat.db"), site_id=1, client=None, sender=sender)
+    assert sender.called is True
 
 
 def test_run_job_once_dispatches_exactly_one_job(tmp_path):

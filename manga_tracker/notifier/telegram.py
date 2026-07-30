@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Callable, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from manga_tracker.notifier.contracts import DigestLine
+from manga_tracker.notifier.contracts import DigestLine, HeartbeatReport
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 MESSAGE_LIMIT = 4096  # verified live (task 5.1): 1-4096 chars after entity parsing
@@ -48,16 +48,37 @@ def _format_line(line: DigestLine) -> str:
     return f'<b>{title}</b> - chapter {chapter} is out{progress} -&gt; <a href="{url}">open chapter {chapter}</a>'
 
 
-def _format_header(count: int, now: str, timezone_name: str) -> str:
-    """Run's local time in the header (BOT "Encabezado"). Falls back to UTC
-    with a marker instead of raising if the configured zone's tz data is
-    unavailable - a digest with an odd timestamp beats one that never sends."""
-    run_time = datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+def _format_local(ts: str, timezone_name: str) -> str:
+    """UTC ISO string -> local stamp; falls back to UTC with a marker instead
+    of raising if the configured zone's tz data is unavailable - a message
+    with an odd timestamp beats one that never sends. Shared by the digest
+    header and the heartbeat."""
+    run_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     try:
-        stamp = run_time.astimezone(ZoneInfo(timezone_name)).strftime("%d %b, %H:%M")
+        return run_time.astimezone(ZoneInfo(timezone_name)).strftime("%d %b, %H:%M")
     except ZoneInfoNotFoundError:
-        stamp = run_time.strftime("%d %b, %H:%M") + " UTC (tz data unavailable)"
-    return f"{count} update(s) - {stamp}"
+        return run_time.strftime("%d %b, %H:%M") + " UTC (tz data unavailable)"
+
+
+def _format_header(count: int, now: str, timezone_name: str) -> str:
+    """Run's local time in the header (BOT "Encabezado")."""
+    return f"{count} update(s) - {_format_local(now, timezone_name)}"
+
+
+def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> str:
+    """Weekly heartbeat (recorded spec deviation - see docs follow-up):
+    proves the system is alive; silence between heartbeats stays normal."""
+    last_run = (
+        _format_local(report.last_successful_run_at, timezone_name)
+        if report.last_successful_run_at is not None
+        else "no successful run yet"
+    )
+    return (
+        f"\U0001F493 Weekly heartbeat - {_format_local(now, timezone_name)}\n\n"
+        f"Last successful detection run: {last_run}\n"
+        f"Tracked: {report.tracked_count} title(s), {report.behind_count} behind\n"
+        f"Degraded runs this week: {report.degraded_run_count} (partial/error)"
+    )
 
 
 def _split_message(header: str, body_lines: list[str], limit: int) -> list[str]:
@@ -110,6 +131,9 @@ class TelegramSender:
         body_lines = [_format_line(line) for line in ordered]
         parts = _split_message(header, body_lines, MESSAGE_LIMIT)
         return all([self._send_one(part) for part in parts])  # every part is attempted; the whole send is judged
+
+    def send_heartbeat(self, report: HeartbeatReport, *, now: str) -> bool:
+        return self._send_one(_format_heartbeat(report, now, self._timezone_name))
 
     def send_test_message(self, text: str) -> bool:
         return self._send_one(text)  # manual test-telegram message; never runs automatically

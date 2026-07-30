@@ -9,6 +9,7 @@ import argparse
 from manga_tracker.config import AppConfig, load_config, require_telegram
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
+from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
 from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, run_job_once
@@ -52,7 +53,8 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     # file used to prescribe after an off-window restart.
     catch_up_sweep_if_overdue(db_path=config.db_path, client=client, sender=sender)
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
-                     active_sweep_hour=config.active_sweep_hour).start()  # blocks until interrupted
+                     active_sweep_hour=config.active_sweep_hour,
+                     heartbeat_hour=config.heartbeat_hour).start()  # blocks until interrupted
     return 0
 
 
@@ -87,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(handler=_cmd_run)
 
     run_job = subparsers.add_parser("run-job", help="Run one job body once, outside the scheduler")
-    run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB])
+    run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB, HEARTBEAT_JOB])
     run_job.set_defaults(handler=_cmd_run_job)
 
     test_telegram = subparsers.add_parser(

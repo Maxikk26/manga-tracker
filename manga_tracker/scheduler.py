@@ -17,6 +17,8 @@ from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP
 from manga_tracker.discovery.active_sweep import active_sweep
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK
 from manga_tracker.discovery.feed_check import feed_check
+from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT
+from manga_tracker.discovery.heartbeat import heartbeat
 from manga_tracker.storage.db import connect
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,8 @@ logger = logging.getLogger(__name__)
 # for a mere scheduling delay.
 FEED_GRACE_SECONDS = 300
 SWEEP_GRACE_SECONDS = 3600
-_JOBS = {FEED_CHECK: feed_check, ACTIVE_SWEEP: active_sweep}
+HEARTBEAT_GRACE_SECONDS = 3600  # weekly, informational only - never detection-critical
+_JOBS = {FEED_CHECK: feed_check, ACTIVE_SWEEP: active_sweep, HEARTBEAT: heartbeat}
 
 
 def _utc_now() -> str:
@@ -77,7 +80,8 @@ def _on_job_error(event) -> None:
     logger.error("unhandled scheduler error for job %s", event.job_id)
 
 
-def build_scheduler(*, db_path: str, site_id: int, client, sender, active_sweep_hour: int = 3) -> BlockingScheduler:
+def build_scheduler(*, db_path: str, site_id: int, client, sender, active_sweep_hour: int = 3,
+                     heartbeat_hour: int = 3) -> BlockingScheduler:
     """max_workers=1 is set explicitly - APScheduler 3.x's ThreadPoolExecutor
     defaults to 10 (verified against the installed package), so zero
     concurrency is a configuration fact here, never an inherited default."""
@@ -91,6 +95,12 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, active_sweep_
         _make_job(active_sweep, ACTIVE_SWEEP, db_path, client, sender, {}),
         trigger=CronTrigger(hour=active_sweep_hour, minute=0), id=ACTIVE_SWEEP, max_instances=1,
         misfire_grace_time=SWEEP_GRACE_SECONDS,
+    )
+    # Own weekly schedule, decoupled from onhold_sweep (recorded spec deviation).
+    scheduler.add_job(
+        _make_job(heartbeat, HEARTBEAT, db_path, client, sender, {}),
+        trigger=CronTrigger(day_of_week="sun", hour=heartbeat_hour, minute=0), id=HEARTBEAT, max_instances=1,
+        misfire_grace_time=HEARTBEAT_GRACE_SECONDS,
     )
     scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
     return scheduler
