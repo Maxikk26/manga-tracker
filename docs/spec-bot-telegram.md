@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.2 — 2026-07-29. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
+Versión 1.3 — 2026-07-30. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
+
+Cambios vs 1.2: se declara **vinculante** que el texto de los mensajes va en español, porque la primera implementación los emitió en inglés y tres digests reales salieron así. No fue un descuido: la convención del repositorio "los string literals van en inglés" se aplicó a copy de producto, y esta spec solo lo mostraba en sus ejemplos ilustrativos, que son por definición no vinculantes. Ahora está dicho como regla. Además se normaliza el encabezado del heartbeat, que decía "Weekly heartbeat" en inglés dentro de un ejemplo cuyas demás líneas estaban en español, y se fija la concordancia de número ("1 novedad" / "3 novedades") y que los meses no dependen del locale de la máquina.
 
 Cambios vs 1.1: el heartbeat se desacopla del `onhold_sweep` y pasa a tener horario propio (domingo, hora configurable), con contenido nuevo — última detección exitosa, títulos vigilados, atrasados y corridas degradadas de la semana. Motivo y consecuencias en la sección del Mensaje 2. Además se registra que el heartbeat es de solo lectura y no abre fila en `job_runs`, y que el digest debe desactivar la vista previa de enlaces con `link_preview_options`, no con el `disable_web_page_preview` retirado de la Bot API.
 Cambios vs 1.0: adopción del renombre de barridos (`daily_sweep`→`active_sweep`), que esta spec se había perdido por tener el pin desactualizado; pines corregidos.
@@ -35,6 +37,17 @@ El bot decide únicamente **cómo se ve el texto** y se encarga del envío.
 - **Validación al arrancar**: si falta cualquiera de las dos, el proceso falla de inmediato con un mensaje claro en el log, en vez de descubrirlo cuando haya que enviar el primer digest.
 - **Utilidad de prueba manual**: un modo de invocación que envía un mensaje de verificación al chat configurado. Se usa al desplegar y cuando se rota el token. No corre automáticamente.
 - Zona horaria de los mensajes: hora local (America/Caracas), convertida por el backend desde el UTC de la base, según la convención de la spec del modelo.
+
+## Idioma de los mensajes (vinculante)
+
+**El texto que recibe el lector va en español.** Aplica al digest, al heartbeat, al aviso de slug muerto y al mensaje de la utilidad de prueba manual. Los ejemplos de este documento son ilustrativos en cuanto a negritas, viñetas y separadores; **el idioma no lo es**.
+
+La convención del repositorio de que los string literals van en inglés es de higiene de código: cubre identificadores, comentarios, logs, excepciones y salida de CLI. **Se detiene en el lector.** La v1.2 no lo decía, y la primera implementación emitió el digest completo en inglés — tres mensajes reales salieron así antes de que se notara, porque los tests también habían codificado el texto inglés y estaban en verde.
+
+Dos reglas que se derivan de escribir en español:
+
+- **Concordancia de número**: "1 novedad" y "3 novedades"; "1 título atrasado" y "2 títulos atrasados". Un "1 novedades" se lee como defecto.
+- **Los nombres de mes no salen del locale del sistema.** `%b` rinde según el locale del proceso, que en el contenedor es C ("Jul") y en una máquina de desarrollo puede ser cualquier otro. El mapeo va explícito en el código: el texto que recibe el lector no puede depender de qué máquina lo envió.
 
 ## Mensaje 1: digest de novedades
 
@@ -83,11 +96,13 @@ La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlaza
 
 **Ejemplo ilustrativo**:
 
-> 💓 Weekly heartbeat — 29 jul, 19:50
+> 💓 Heartbeat semanal — 29 jul, 19:50
 >
 > Última detección exitosa: 29 jul, 19:09
 > Vigilados: 16 títulos, 15 atrasados
 > Corridas degradadas esta semana: 0
+
+Hasta la v1.2 este ejemplo encabezaba "Weekly heartbeat", en inglés, con las demás líneas en español. Era un resto, no una decisión; normalizado en la v1.3.
 
 **Es solo lectura**: consulta `job_runs`, `bookmarks` y `manga_sites`, y **no abre fila propia en `job_runs`**. No es un mecanismo de detección, así que su nombre no entra en la restricción CHECK de `job_name` — agregar un valor ahí con la base poblada obligaría a migrar.
 

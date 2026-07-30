@@ -61,9 +61,9 @@ def test_heartbeat_renders_last_run_tracked_behind_and_flags_a_partial_run():
     heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
 
     text = api.calls[0]["text"]
-    assert "25 Jul" in text  # last successful detection run, rendered in local time
-    assert "2 title(s), 1 behind" in text  # "Finished" (completed) is excluded from tracked
-    assert "Degraded runs this week: 1" in text  # the partial run is flagged, not hidden
+    assert "25 jul" in text  # last successful detection run, rendered in local time
+    assert "Vigilados: 2 títulos, 1 atrasado" in text  # "Finished" (completed) is excluded from tracked
+    assert "Corridas degradadas esta semana: 1" in text  # the partial run is flagged, not hidden
 
 
 def test_heartbeat_renders_without_crashing_when_no_run_has_ever_succeeded():
@@ -74,4 +74,4 @@ def test_heartbeat_renders_without_crashing_when_no_run_has_ever_succeeded():
     api = FakeApi()
     heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
 
-    assert "no successful run yet" in api.calls[0]["text"]
+    assert "Última detección exitosa: ninguna todavía" in api.calls[0]["text"]

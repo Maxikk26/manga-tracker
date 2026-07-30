@@ -47,7 +47,7 @@ V1a termina el día que llegue la primera notificación real, correcta y no prov
 1. **Fase corazón**: esquema SQLite + seed manual (<20) + cliente de fuente + `feed_check` + **`active_sweep`** + digest Telegram + **heartbeat semanal** + deploy en Docker. Hito: primera notificación real.
 2. **Fase red de seguridad**: `onhold_sweep` + aviso de slug muerto por Telegram. Hito: un ciclo semanal completo corrido solo.
 
-**El heartbeat semanal se adelantó a la fase corazón** (v1.8). Motivo: con varios títulos al día, el silencio es el estado **esperado** durante días, así que un sistema sano y uno muerto se ven idénticos desde Telegram — el "cron comentado" otra vez, ahora sin que nadie lo comente. Dejarlo para la fase 2 significaba operar ciego justo durante el arranque, que es cuando más falta hace la señal. Quedó desacoplado del `onhold_sweep` y con horario propio; el detalle está en `spec-bot-telegram.md` v1.2.
+**El heartbeat semanal se adelantó a la fase corazón** (v1.8). Motivo: con varios títulos al día, el silencio es el estado **esperado** durante días, así que un sistema sano y uno muerto se ven idénticos desde Telegram — el "cron comentado" otra vez, ahora sin que nadie lo comente. Dejarlo para la fase 2 significaba operar ciego justo durante el arranque, que es cuando más falta hace la señal. Quedó desacoplado del `onhold_sweep` y con horario propio; el detalle está en `spec-bot-telegram.md` v1.3.
 3. **Fase backfill**: import Kitsu + matching de slugs por tandas. Hito: histórico en DB con pendientes de slug documentados.
 
 Las fases 2 y 3 pueden intercalarse; la fase 1 no se comparte con nada.

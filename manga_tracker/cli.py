@@ -52,7 +52,10 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     # tomorrow's cron. Replaces the manual `run-job active_sweep` the compose
     # file used to prescribe after an off-window restart.
     catch_up_sweep_if_overdue(db_path=config.db_path, client=client, sender=sender)
+    # timezone_name goes to the scheduler as well as the sender: the cron hours
+    # are LOCAL hours, and without it APScheduler falls back to tzlocal -> UTC.
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
+                     timezone_name=config.timezone_name,
                      active_sweep_hour=config.active_sweep_hour,
                      heartbeat_hour=config.heartbeat_hour).start()  # blocks until interrupted
     return 0
@@ -79,7 +82,9 @@ def _cmd_test_telegram(args: argparse.Namespace, config: AppConfig) -> int:
     """
     telegram = require_telegram(config)
     sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
-    ok = sender.send_test_message("manga-tracker: test message - if you see this, the bot can send.")
+    # Spanish, because this one lands in Telegram. The prints below stay English:
+    # they are operator output, same as the logs.
+    ok = sender.send_test_message("manga-tracker: mensaje de prueba - si lees esto, el bot puede enviar.")
     if ok:
         print(f"Sent. Check chat {telegram.chat_id} - the message should be there.")
         return 0

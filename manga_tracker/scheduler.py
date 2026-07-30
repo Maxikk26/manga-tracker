@@ -6,6 +6,7 @@ and needs no change to the composition-root exemption list."""
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.events import EVENT_JOB_ERROR
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -80,27 +81,70 @@ def _on_job_error(event) -> None:
     logger.error("unhandled scheduler error for job %s", event.job_id)
 
 
-def build_scheduler(*, db_path: str, site_id: int, client, sender, active_sweep_hour: int = 3,
-                     heartbeat_hour: int = 3) -> BlockingScheduler:
+def _scheduler_timezone(timezone_name: str) -> str:
+    """The zone the cron hours are expressed in. Not optional, and not cosmetic.
+
+    Left unset, APScheduler resolves its timezone through tzlocal; the container
+    sets no TZ, so it resolved to UTC and every cron hour became a UTC hour.
+    Observed in production: with ACTIVE_SWEEP_HOUR=3 the daily sweep fired at
+    03:00Z, which is 23:00 in America/Caracas - four hours off the schedule the
+    spec and both runbooks document, and the "Sunday early morning" heartbeat
+    would have arrived on Saturday night. LOCAL_TIMEZONE reached the message
+    formatter and nothing else, so the messages said the right local time about
+    jobs running at the wrong one.
+
+    An unknown zone name degrades to UTC instead of refusing to boot: a sweep at
+    the wrong hour still gives the same ~24h coverage, while a process that will
+    not start detects nothing at all. Unlike the old behaviour, it says so.
+    """
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.error(
+            "LOCAL_TIMEZONE %r is not a known zone; scheduling in UTC. Cron hours "
+            "will be UTC hours, not local ones - check tzdata in the image.", timezone_name
+        )
+        return "UTC"
+    return timezone_name
+
+
+def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name: str,
+                     active_sweep_hour: int = 3, heartbeat_hour: int = 3) -> BlockingScheduler:
     """max_workers=1 is set explicitly - APScheduler 3.x's ThreadPoolExecutor
     defaults to 10 (verified against the installed package), so zero
-    concurrency is a configuration fact here, never an inherited default."""
-    scheduler = BlockingScheduler(executors={"default": ThreadPoolExecutor(max_workers=1)})
+    concurrency is a configuration fact here, never an inherited default.
+
+    `timezone_name` has no default on purpose: it decides when everything runs,
+    and the bug it fixes was precisely an implicit default nobody passed.
+
+    It is handed to every trigger as well as to the scheduler, and that is not
+    belt-and-braces. APScheduler only injects the scheduler's timezone into a
+    trigger it builds itself from keyword arguments; a trigger passed in already
+    constructed - as all three are here - resolved its own timezone at
+    construction time through tzlocal, and keeps it. Setting it on the scheduler
+    alone changes nothing at all, which is how the first attempt at this fix
+    looked correct and did nothing.
+    """
+    tz = _scheduler_timezone(timezone_name)
+    scheduler = BlockingScheduler(
+        timezone=tz, executors={"default": ThreadPoolExecutor(max_workers=1)},
+    )
     scheduler.add_job(
         _make_job(feed_check, FEED_CHECK, db_path, client, sender, {"site_id": site_id}),
-        trigger=IntervalTrigger(hours=1), id=FEED_CHECK, max_instances=1,
+        trigger=IntervalTrigger(hours=1, timezone=tz), id=FEED_CHECK, max_instances=1,
         misfire_grace_time=FEED_GRACE_SECONDS,
     )
     scheduler.add_job(
         _make_job(active_sweep, ACTIVE_SWEEP, db_path, client, sender, {}),
-        trigger=CronTrigger(hour=active_sweep_hour, minute=0), id=ACTIVE_SWEEP, max_instances=1,
-        misfire_grace_time=SWEEP_GRACE_SECONDS,
+        trigger=CronTrigger(hour=active_sweep_hour, minute=0, timezone=tz), id=ACTIVE_SWEEP,
+        max_instances=1, misfire_grace_time=SWEEP_GRACE_SECONDS,
     )
     # Own weekly schedule, decoupled from onhold_sweep (recorded spec deviation).
+    # day_of_week is read in this zone too: Sunday local, not Sunday UTC.
     scheduler.add_job(
         _make_job(heartbeat, HEARTBEAT, db_path, client, sender, {}),
-        trigger=CronTrigger(day_of_week="sun", hour=heartbeat_hour, minute=0), id=HEARTBEAT, max_instances=1,
-        misfire_grace_time=HEARTBEAT_GRACE_SECONDS,
+        trigger=CronTrigger(day_of_week="sun", hour=heartbeat_hour, minute=0, timezone=tz),
+        id=HEARTBEAT, max_instances=1, misfire_grace_time=HEARTBEAT_GRACE_SECONDS,
     )
     scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
     return scheduler

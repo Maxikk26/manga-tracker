@@ -20,7 +20,27 @@ RETRY_WAIT_SECONDS = 5  # brief wait before the single retry on a non-rate-limit
 TITLE_MAX_LENGTH = 60  # keeps one manga line readable on a phone screen
 DEFAULT_TIMEZONE = "America/Caracas"  # BOT: "hora local... configurable si me mudo"
 
+# The text of every message is Spanish, and this is the spec's wording, not a
+# preference: BOT "Mensaje 1" states the line "in words" as «Título» — Cap N
+# salió (vas por el M), and both illustrative examples are Spanish. The project
+# convention that string literals are English is about code hygiene - it does
+# not reach product copy, which is read by a Spanish-speaking reader of one.
+# Logs, exceptions and CLI output stay English; what Telegram delivers does not.
+#
+# Month names are mapped rather than taken from %b. %b renders in the host's
+# locale - "Jul" under the container's C locale, something else on a developer
+# machine with a locale set - and the text a reader receives must not depend on
+# which machine happened to send it.
+MONTHS_ES = ("ene", "feb", "mar", "abr", "may", "jun",
+             "jul", "ago", "sep", "oct", "nov", "dic")
+
 logger = logging.getLogger(__name__)
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    """"1 novedad" / "3 novedades". Spanish agrees the noun with the number, so
+    a bare "1 novedades" reads as a bug to the person receiving it."""
+    return f"{count} {singular if count == 1 else plural}"
 
 
 def _format_chapter_num(chapter_num: float) -> str:
@@ -41,11 +61,11 @@ def _format_line(line: DigestLine) -> str:
     chapter = _format_chapter_num(line.chapter_num)
     progress = ""
     if line.last_chapter_read is not None:
-        progress = f" (you are on {_format_chapter_num(line.last_chapter_read)}"
+        progress = f" (vas por el {_format_chapter_num(line.last_chapter_read)}"
         if line.accumulated_count > 1:  # BOT "acumulas N": only shown on actual accumulation
-            progress += f", {line.accumulated_count} accumulated"
+            progress += f", acumulas {line.accumulated_count}"
         progress += ")"
-    return f'<b>{title}</b> - chapter {chapter} is out{progress} -&gt; <a href="{url}">open chapter {chapter}</a>'
+    return f'<b>{title}</b> — Cap {chapter} salió{progress} → <a href="{url}">abrir Cap {chapter}</a>'
 
 
 def _format_local(ts: str, timezone_name: str) -> str:
@@ -55,14 +75,15 @@ def _format_local(ts: str, timezone_name: str) -> str:
     header and the heartbeat."""
     run_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     try:
-        return run_time.astimezone(ZoneInfo(timezone_name)).strftime("%d %b, %H:%M")
+        local, suffix = run_time.astimezone(ZoneInfo(timezone_name)), ""
     except ZoneInfoNotFoundError:
-        return run_time.strftime("%d %b, %H:%M") + " UTC (tz data unavailable)"
+        local, suffix = run_time, " UTC (sin datos de zona horaria)"
+    return f"{local.day:02d} {MONTHS_ES[local.month - 1]}, {local:%H:%M}{suffix}"
 
 
 def _format_header(count: int, now: str, timezone_name: str) -> str:
     """Run's local time in the header (BOT "Encabezado")."""
-    return f"{count} update(s) - {_format_local(now, timezone_name)}"
+    return f"\U0001F4EC {_plural(count, 'novedad', 'novedades')} — {_format_local(now, timezone_name)}"
 
 
 def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> str:
@@ -71,13 +92,18 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
     last_run = (
         _format_local(report.last_successful_run_at, timezone_name)
         if report.last_successful_run_at is not None
-        else "no successful run yet"
+        else "ninguna todavía"
     )
+    behind = _plural(report.behind_count, "atrasado", "atrasados")
     return (
-        f"\U0001F493 Weekly heartbeat - {_format_local(now, timezone_name)}\n\n"
-        f"Last successful detection run: {last_run}\n"
-        f"Tracked: {report.tracked_count} title(s), {report.behind_count} behind\n"
-        f"Degraded runs this week: {report.degraded_run_count} (partial/error)"
+        # BOT's illustration heads this "Weekly heartbeat" while every line under
+        # it is Spanish - a leftover in an otherwise Spanish example. Normalised
+        # here, and recorded in the spec's changelog rather than left as a silent
+        # divergence.
+        f"\U0001F493 Heartbeat semanal — {_format_local(now, timezone_name)}\n\n"
+        f"Última detección exitosa: {last_run}\n"
+        f"Vigilados: {_plural(report.tracked_count, 'título', 'títulos')}, {behind}\n"
+        f"Corridas degradadas esta semana: {report.degraded_run_count} (partial/error)"
     )
 
 

@@ -1,6 +1,7 @@
-"""notifier/telegram.py: HTML formatting, link-preview suppression, the
-all-or-nothing size split, and the 429/retry policy (spec-bot-telegram.md
-v1.1 "Mensaje 1"). No network - the HTTP call is injected."""
+"""notifier/telegram.py: Spanish reader-facing copy, HTML formatting,
+link-preview suppression, the all-or-nothing size split, and the 429/retry
+policy (spec-bot-telegram.md v1.3 "Mensaje 1" + "Idioma de los mensajes").
+No network - the HTTP call is injected."""
 
 from manga_tracker.notifier.contracts import DigestLine
 from manga_tracker.notifier.telegram import DEFAULT_TIMEZONE, MESSAGE_LIMIT, TelegramSender, _format_line, _split_message
@@ -54,8 +55,8 @@ def test_formatting_rules_in_one_digest():
     assert text.index("Alpha") < text.index("Beta")  # alphabetical
     assert "\n\n" in text.split("\n\n", 1)[1]  # blank line between manga lines
     assert "145.5" in text  # decimal verbatim
-    assert "chapter 10 is out" in text and "10.0" not in text  # whole number, no trailing .0
-    assert text.count("you are on") == 1 and "you are on 144" in text  # null progress omits the clause
+    assert "Cap 10 salió" in text and "10.0" not in text  # whole number, no trailing .0
+    assert text.count("vas por el") == 1 and "vas por el 144" in text  # null progress omits the clause
     assert long_title not in text and "..." in text  # overlong title truncated with ellipsis
 
 
@@ -67,22 +68,31 @@ def test_title_is_html_escaped():
 
 
 def test_split_all_or_nothing_and_previews_disabled():
-    # 100 lines -> 3 parts (measured); part 2 fails+retries-fails while 1 and 3 still succeed (BOT "Tamano").
-    lines = [_line(f"Series {i:03d}", 1) for i in range(100)]
+    """The part count is derived here, never hardcoded (BOT "Tamano").
+
+    It used to assert exactly 3 parts for 100 lines - a number measured by hand
+    against the English copy. Translating the digest to Spanish shortened every
+    line, 100 of them then fitted in 2 parts, and this failed while nothing
+    about the split was broken. The invariants are what matter: no part over the
+    limit, and no manga line duplicated or dropped.
+    """
+    lines = [_line(f"Series {i:03d}", 1) for i in range(200)]
     body_lines = [_format_line(line) for line in lines]
     parts = _split_message("HEADER", body_lines, MESSAGE_LIMIT)
-    assert len(parts) == 3
+    assert len(parts) >= 3  # enough lines to exercise a genuinely multi-part split
     assert all(len(part) <= MESSAGE_LIMIT for part in parts)
     assert all(sum(part.count(entry) for part in parts) == 1 for entry in body_lines)
 
-    ok, calls = _send(lines, _ok(), _ok(), _ok())
+    count = len(parts)
+    ok, calls = _send(lines, *[_ok()] * count)
     assert ok is True
-    assert len(calls) == 3
+    assert len(calls) == count
     assert all(call["link_preview_options"] == {"is_disabled": True} for call in calls)
 
-    ok, calls = _send(lines, _ok(), _fail(), _fail(), _ok())
+    # Part 2 fails and its one retry fails too; every other part still goes out.
+    ok, calls = _send(lines, _ok(), _fail(), _fail(), *[_ok()] * (count - 2))
     assert ok is False
-    assert len(calls) == 4  # part1 (1) + part2 (fail + retry) + part3 (1)
+    assert len(calls) == count + 1  # the extra call is part 2's retry
 
 
 def test_rate_limit_retry_after_is_honored_then_retries_once():
@@ -106,9 +116,9 @@ def test_accumulation_clause_rendered_only_when_more_than_one_pending():
     ]
     _, calls = _send(lines, _ok())
     text = calls[0]["text"]
-    assert "you are on 144, 2 accumulated" in text
-    assert "you are on 80)" in text  # single pending chapter: no accumulation clause
-    assert "1 accumulated" not in text
+    assert "vas por el 144, acumulas 2" in text
+    assert "vas por el 80)" in text  # single pending chapter: no accumulation clause
+    assert "acumulas 1" not in text
 
 
 def test_null_progress_omits_progress_and_accumulation_clauses():
@@ -116,13 +126,41 @@ def test_null_progress_omits_progress_and_accumulation_clauses():
     are absent even if a caller mistakenly still passes a count > 1."""
     _, calls = _send([_line("Solo Leveling", 5, last_chapter_read=None, accumulated_count=3)], _ok())
     text = calls[0]["text"]
-    assert "you are on" not in text
-    assert "accumulated" not in text
+    assert "vas por el" not in text
+    assert "acumulas" not in text
 
 
 def test_header_renders_run_time_in_the_configured_local_zone():
     _, calls = _send([_line("Alpha", 1)], _ok(), now="2026-07-21T22:40:00Z", timezone_name="America/Caracas")
-    assert "21 Jul, 18:40" in calls[0]["text"]  # UTC-4, matches BOT's own illustrative example
+    assert "21 jul, 18:40" in calls[0]["text"]  # UTC-4, matches BOT's own illustrative example
+
+
+def test_the_reader_facing_text_is_spanish_and_matches_the_spec_wording():
+    """BOT "Mensaje 1" gives the line in words - «Título» — Cap N salió (vas por
+    el M) - and both its examples are Spanish. The first implementation shipped
+    English because the repo convention "string literals are English" was applied
+    to product copy; that convention is about code hygiene and stops at the
+    reader. Three real digests went out in English before this was caught.
+    """
+    lines = [_line("Solo Leveling", 214, last_chapter_read=210, accumulated_count=4)]
+    _, calls = _send(lines, _ok(), now="2026-07-21T22:40:00Z")
+    text = calls[0]["text"]
+
+    assert text.startswith("\U0001F4EC 1 novedad — 21 jul, 18:40")
+    assert "Cap 214 salió (vas por el 210, acumulas 4)" in text
+    assert ">abrir Cap 214</a>" in text
+    for english in ("is out", "you are on", "accumulated", "open chapter", "update(s)"):
+        assert english not in text, f"English leftover in reader-facing copy: {english!r}"
+
+
+def test_month_names_do_not_depend_on_the_host_locale():
+    """%b renders in the host locale - "Jul" under the container's C locale and
+    something else on a machine with one set. A reader must not be able to tell
+    which machine sent the message, so the month mapping is explicit. The months
+    checked here are the ones where Spanish and English actually differ."""
+    for month, expected in ((1, "ene"), (4, "abr"), (8, "ago"), (12, "dic")):
+        _, calls = _send([_line("Alpha", 1)], _ok(), now=f"2026-{month:02d}-15T16:00:00Z")
+        assert f"15 {expected}, 12:00" in calls[0]["text"]
 
 
 def test_header_falls_back_to_utc_when_the_configured_zone_is_unavailable():
