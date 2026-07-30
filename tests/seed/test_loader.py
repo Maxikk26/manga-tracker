@@ -81,3 +81,28 @@ def test_zero_chapters_row_reported_and_discarded_whole(tmp_path):
     assert loaded is False
     for table in ("mangas", "manga_sites", "bookmarks"):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_load_prints_progress_per_row_before_its_request(tmp_path, capsys):
+    """SEED requires progress during the load, and the reason is operational.
+
+    The validation report prints instantly; then every row costs one request
+    with a 5-15s delay. Without progress the command looks frozen for minutes,
+    and a real bring-up was interrupted with Ctrl+C halfway through because of
+    it. Each row must be announced BEFORE its request, so the line on screen is
+    the one being waited on.
+    """
+    rows = [
+        {"title": f"Manga {n}", "url": f"{SITE_URL}/manga/m{n}", "last_chapter_read": "1", "status": "reading"}
+        for n in (1, 2, 3)
+    ]
+    csv_path, conn, site_id = _setup(tmp_path, rows)
+    chapters = {f"m{n}": [Chapter(chapter_num=2, url="u", published_at=None)] for n in (1, 2, 3)}
+
+    assert load_seed(csv_path, conn, FakeClient(chapters), site_id=site_id) is True
+
+    out = capsys.readouterr().out
+    assert "[1/3]" in out and "[2/3]" in out and "[3/3]" in out
+    assert "Done: 3 of 3" in out
+    # The announcement precedes the summary, not the other way round.
+    assert out.index("[1/3]") < out.index("Done:")

@@ -52,7 +52,20 @@ def load_seed(csv_path, conn, client: SourceClient, *, site_id: int, dry_run: bo
         print("Dry run: nothing written." if dry_run else "Nothing written - fix the errors above and re-run.")
         return False
 
-    results = [_load_row(conn, row, client, site_id=site_id) for row, _ in report]
+    # SEED requires progress while loading, and it is not cosmetic. The
+    # validation report above prints instantly, then every row costs one
+    # request with a 5-15s delay, so a silent load looks frozen for minutes.
+    # That is exactly how a real bring-up got interrupted with Ctrl+C halfway
+    # through. Announce each row BEFORE its request, so the line on screen is
+    # the one being waited on.
+    total = len(report)
+    print(f"\nLoading {total} row(s). One request each, 5-15s apart - a few minutes total.")
+    results = []
+    for index, (row, _) in enumerate(report, start=1):
+        print(f"[{index}/{total}] {row.get('title')!r} ...", flush=True)
+        results.append(_load_row(conn, row, client, site_id=site_id))
+    loaded = sum(1 for r in results if r)
+    print(f"\nDone: {loaded} of {total} row(s) loaded, {total - loaded} discarded.")
     return any(results)
 
 
