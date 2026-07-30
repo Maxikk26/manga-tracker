@@ -1,6 +1,8 @@
 # Fuente: manganato.gg (verificado 2026-07-20; re-verificado 2026-07-28)
 
-Versión 1.2 — 2026-07-28. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.6).
+Versión 1.3 — 2026-07-28. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.7).
+
+Cambios vs 1.2: se registra que el feed **no** trae elemento de fecha, verificado sobre una página real, y la trampa del atributo `title` del link de capítulo, que contiene el nombre del capítulo y no una fecha. Consecuencia: `updated_at_hint` del contrato del §8 es siempre nulo en esta fuente.
 
 Cambios vs 1.1: nomenclatura corregida al glosario oficial (`latest_chapter_num` en lugar del retirado `latest_chapter_seen`).
 Cambios vs 1.0: sección 9.bis con la re-verificación del 2026-07-28.
@@ -38,6 +40,7 @@ Un solo request devuelve la página 1 con los ~20 mangas más recientemente actu
 - Último capítulo (nombre + URL): `a.list-story-item-wrap-chapter` → texto ej. `Chapter 80: Vol.16 CONTINUING STEP 5`, `href` = URL del capítulo.
 - Portada: `a.list-story-item img` → preferir atributo `data-src` (lazy load); `src` puede ser placeholder.
 - View count (opcional, no lo usamos): `span.aye_icon`.
+- **No hay elemento de fecha. Verificado sobre una página real el 2026-07-28**: un item trae únicamente el link del título, el link del capítulo, la portada y el contador de vistas. Cuidado con la trampa: el atributo `title` del link de capítulo contiene el **nombre del capítulo** (`title="Chapter 102"`), no una fecha; leerlo como pista de fecha llena el campo con un nombre de capítulo, que es peor que dejarlo vacío porque aparenta estar poblado. Consecuencia para el contrato del §8: `updated_at_hint` es **siempre nulo** en esta fuente. Inofensivo, porque `chapter_history.source_published_at` queda nulo en toda detección por feed y solo lo rellena un barrido. La única fecha confiable del sitio es el `updated_at` del endpoint JSON del §3.
 
 **Flujo del descubrimiento**:
 1. GET al feed, parsear items reales (sin ads).

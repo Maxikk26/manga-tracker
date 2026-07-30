@@ -10,7 +10,7 @@ This file covers what the README does not: the architectural rules that are easy
 
 ## Repository state
 
-There is **no code yet**. Phase 0 is complete: the V1a design is closed across seven documents in `docs/`, and the repo has no commits. `docs/` is the source of truth, not a description of existing code.
+There is **no application code yet**. Phase 0 is complete: the V1a design is closed across eight documents in `docs/`. `docs/` is the source of truth, not a description of existing code.
 
 Consequences:
 

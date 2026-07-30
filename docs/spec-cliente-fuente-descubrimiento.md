@@ -1,7 +1,9 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.2 — 2026-07-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.3), `spec-modelo-de-datos.md` (v1.6) y `manganato-fuente-actual.md` (auditoría 2026-07-20, re-verificada 2026-07-28).
+Versión 1.4 — 2026-07-29. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
 
+Cambios vs 1.3: se agrega la recuperación al arrancar del `active_sweep`, que sustituye la mitigación manual del reinicio fuera de hora (ver la sección al final del Mecanismo 2); y se precisa que `finished_at` se toma al cerrar la corrida y no del timestamp de apertura, porque reusarlo hacía que toda corrida reportara duración cero. Ambos cambios salieron de correr el sistema en producción, no de revisión de documentos.
+Cambios vs 1.2: se corrige una contradicción interna en la regla de detección. El paso 3 afirmaba que la publicación se registra "antes de cualquier decisión", mientras que el paso 4 decía que los estados terminales no registran historia; leído en orden, un match del feed contra un manga `dropped` habría escrito en `chapter_history` lo que la propia spec prohíbe. El filtro de terminales pasa a ser el paso 3, antes del registro, y "antes de cualquier decisión" se precisa como "antes de la decisión de notificar". Pasos renumerados a seis.
 Cambios vs 1.1: pin actualizado al modelo v1.6 (barrido de consistencia del paquete).
 Cambios vs 1.0: intervalo del feed fijado en 1 hora por la medición de la ventana (pendiente #1 resuelto); renombre `daily_sweep`→`active_sweep` y `weekly_sweep`→`onhold_sweep`; nota sobre el papel real del feed tras la medición.
 
@@ -101,12 +103,14 @@ Dado un mapeo de `manga_sites` y un capítulo observado (número, URL, timestamp
 
 1. **Sellar el chequeo**: se actualiza `last_checked_at` del mapeo. Ocurre siempre, haya novedad o no.
 2. **Comparar**: si el número observado es menor o igual a `latest_chapter_num`, no hay novedad; fin. (Caso especial: si es *menor*, la fuente renumeró o borró capítulos; se registra en log y NO se retrocede el valor guardado.)
-3. **Registrar la publicación**: el capítulo se inserta en `chapter_history` con su `detected_via` correspondiente. La restricción de unicidad hace la operación idempotente. Este paso ocurre **antes** de cualquier decisión de notificación y es independiente de ella: la historia de publicaciones es un hecho, no depende de si el mensaje salió.
-4. **Decidir según el estado del bookmark**:
-   - `reading` / `want_to_read` → **candidato a notificación**: se acumula en el lote de la corrida (paso 5).
+3. **Descartar los terminales primero**: si el bookmark está en `completed` o `dropped`, la secuencia termina aquí. No se registra historia y no se actualiza el mapeo. Solo el sello de `last_checked_at` del paso 1 ya ocurrió, porque el chequeo sí pasó.
+4. **Registrar la publicación**: el capítulo se inserta en `chapter_history` con su `detected_via` correspondiente. La restricción de unicidad hace la operación idempotente. Este paso ocurre **antes de la decisión de notificar** y es independiente de ella: la historia de publicaciones es un hecho, no depende de si el mensaje salió.
+
+   Precisión de orden (corregida en la v1.3): "antes de cualquier decisión" se refiere a la decisión de **notificar**, no a la de estado terminal. El filtro de terminales del paso 3 va primero, porque la regla de estados terminales es absoluta — no consumen requests y su data no alimenta nada, `chapter_history` incluida. Redactado al revés, un match del feed contra un manga `dropped` habría escrito historia que la spec prohíbe.
+5. **Decidir según el estado del bookmark restante** (los terminales ya salieron en el paso 3):
+   - `reading` / `want_to_read` → **candidato a notificación**: se acumula en el lote de la corrida (paso 6).
    - `on_hold` → **actualización silenciosa**: se actualiza `latest_chapter_num`, `latest_chapter_url` y `latest_chapter_at` de inmediato. Nunca notifica.
-   - `completed` / `dropped` → **se ignora por completo**: ni se actualiza el mapeo ni se registra historia. Son terminales; su data no alimenta nada.
-5. **Cierre de corrida para los candidatos** (ver orden de operaciones abajo).
+6. **Cierre de corrida para los candidatos** (ver orden de operaciones abajo).
 
 ## Orden de operaciones: notificar antes de actualizar
 
@@ -142,7 +146,7 @@ Consecuencia aceptada: si el digest se envía pero el proceso muere antes de act
 
 ## Mecanismo 2: barrido de activos (`active_sweep`)
 
-**Frecuencia**: una vez al día, a hora fija de madrugada (parámetro configurable). **Este es el mecanismo de detección principal del sistema**, no un respaldo: la medición de la ventana del feed demostró que el feed no puede garantizar nada. Si en uso real la latencia de hasta 24h resulta molesta, subir este barrido a cada 6-8 horas cuesta ~60-80 requests diarios y no requiere ningún cambio estructural: es el mismo mecanismo con otro valor de frecuencia.
+**Frecuencia**: una vez al día, a hora fija de madrugada (parámetro configurable), **más una corrida de recuperación al arrancar el proceso si la última exitosa quedó vieja** (ver abajo). **Este es el mecanismo de detección principal del sistema**, no un respaldo: la medición de la ventana del feed demostró que el feed no puede garantizar nada. Si en uso real la latencia de hasta 24h resulta molesta, subir este barrido a cada 6-8 horas cuesta ~60-80 requests diarios y no requiere ningún cambio estructural: es el mismo mecanismo con otro valor de frecuencia.
 
 **Población**: todos los mapeos de manganato cuyo manga tiene bookmark en `reading` o `want_to_read`, excluyendo los pausados por fallos (ver slugs muertos). A escala real: menos de 20.
 
@@ -151,6 +155,21 @@ Consecuencia aceptada: si el digest se envía pero el proceso muere antes de act
 **Nota sobre la respuesta completa**: la llamada devuelve hasta 50 capítulos, pero solo el más nuevo se compara. Los demás se registran igualmente en `chapter_history` si no estaban (idempotencia mediante); es data gratis para la cadencia futura.
 
 **Costo**: menos de 20 requests, pocos minutos de corrida. Este mecanismo es la garantía de que la latencia máxima de detección es ~24h aunque el feed se desborde siempre.
+
+### Recuperación al arrancar (agregada en la v1.4)
+
+El scheduler guarda sus jobs **en memoria**, así que al reiniciar el proceso se olvida de cualquier ventana que se haya perdido. Un contenedor que vuelve a las 04:00 con el barrido programado a las 03:00 no barre ese día: el siguiente es a las 03:00 del día siguiente, y la latencia máxima real pasa de ~24h a **~47h**.
+
+**Regla**: al arrancar, antes de agendar, se consulta la última corrida de `active_sweep` con status `ok` o `partial`. Si es más vieja que su intervalo, se corre un barrido de inmediato.
+
+Detalles que importan:
+
+- **No hace falta un jobstore persistente.** `job_runs` ya registra qué corrió y cuándo, que es justamente para lo que existe esa tabla; leerla de vuelta cuesta una consulta. Un jobstore persistente traería replay de corridas perdidas y complejidad que a esta escala no se paga.
+- Una corrida con status `error` **no** cuenta como haber barrido: abortó, así que el barrido sigue pendiente.
+- No haber barrido nunca también cuenta como atrasado. Una base recién sembrada no tiene nada armado.
+- **Esto no es el "mensaje al arrancar" que la spec del bot prohíbe.** Esa regla es sobre un saludo o un ping de vida. Un barrido que encuentra capítulos reales y los reporta es el producto funcionando, y si no hay nada nuevo el resultado es silencio igual.
+
+Sustituye la mitigación anterior, que era una persona acordándose de correr el barrido a mano tras cada reinicio fuera de hora — garantía débil para el mecanismo del que depende todo el diseño. El comando manual sigue disponible para forzar uno cuando se quiera.
 
 ## Mecanismo 3: barrido silencioso de on-hold (`onhold_sweep`)
 
@@ -183,7 +202,7 @@ Todo mecanismo abre una fila al arrancar y la cierra al terminar:
 | Campo | Cómo se llena |
 |---|---|
 | `job_name` | `feed_check`, `active_sweep` u `onhold_sweep`. |
-| `started_at` / `finished_at` | Inicio y fin reales de la corrida. |
+| `started_at` / `finished_at` | Inicio y fin reales de la corrida. **`finished_at` se toma en el momento de cerrar, no del timestamp con que la corrida arrancó.** Una corrida propaga un solo `now` a todo lo que escribe —`detected_at`, `last_checked_at`— y eso es correcto: una corrida, un instante de observación. Pero `finished_at` significa *cuándo terminó*, y reusar el de apertura hacía que toda corrida reportara duración cero. Se detectó en vivo: un barrido de 166 segundos reales registró inicio y fin en el mismo segundo. Importa porque el caso para el que existe esta tabla es un barrido degradándose en timeouts —hasta ~35 minutos con 16 mapeos a 30s de timeout más reintentos— y eso es invisible si la duración siempre es cero. |
 | `status` | `ok` si todo salió bien; `partial` si hubo fallos individuales (items con error, o digest fallido) pero la corrida completó; `error` si la corrida abortó (excepción no controlada, feed inaccesible por completo). |
 | `items_checked` | Items reales del feed procesados, o mangas consultados en el barrido. |
 | `updates_found` | Capítulos nuevos detectados (activos + silenciosos). |

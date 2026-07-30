@@ -1,7 +1,8 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.6 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.3). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.7 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
 
+Cambios vs 1.6: se cierra el caso del reset de `last_chapter_read` a nulo en el trigger de `reading_history`, que la v1.6 no cubría y que habría abortado el UPDATE por la restricción NOT NULL de `chapter_history.chapter_num`.
 Cambios vs 1.5: corrección del pin de dependencia (apuntaba al one-pager v1.1, que es anterior al renombre de barridos y al glosario).
 Cambios vs 1.4: renombre de los valores de job/detección para que describan la POBLACIÓN y no la frecuencia (`daily_sweep`→`active_sweep`, `weekly_sweep`→`onhold_sweep`); motivo en la nota bajo la tabla `job_runs`.
 Cambios vs 1.3: columna `consecutive_failures` en `manga_sites`, requerida por la lógica de slugs muertos de la spec 3 (handoff 2 resuelto).
@@ -146,6 +147,8 @@ Solo-escritura en V1a; la consume V1b (heatmap de días de lectura estilo GitHub
 Índices: índice sobre (`manga_id`, `read_at`); índice sobre `read_at` (la consulta del heatmap agrega por fecha sobre toda la tabla).
 
 **Trigger de captura (el único trigger del esquema)**: un trigger de SQLite sobre `bookmarks`, disparado después de cada UPDATE que modifique `last_chapter_read` a un valor distinto del anterior, inserta automáticamente el evento correspondiente en `reading_history` (manga, valor nuevo, valor anterior, timestamp actual, origin `manual`). Justificación de la excepción a la regla "sin triggers": en V1a el progreso se edita a mano en DB Browser, donde ningún código de aplicación puede interceptar la escritura; el trigger garantiza que la captura ocurre sin importar quién o qué escriba. Diseño deliberado del disparador: actúa solo en UPDATE, no en INSERT — así el alta masiva del seed y del import de Kitsu NO genera eventos falsos de lectura (el heatmap no debe mostrar "leí 340 mangas el día del import"). Cuando V1b/V1c escriban progreso, el mismo trigger captura; si esas capas quieren registrar un origin más específico (`panel`, `extension`), podrán actualizar el campo del evento recién creado o insertar el evento ellas mismas — detalle que se decide en sus specs.
+
+**Nota sobre el reset a nulo (agregada en la v1.7)**: si `last_chapter_read` se corrige a NULL —por ejemplo al deshacer un progreso tecleado por error— el trigger **no** genera evento. No es una omisión: `reading_history.chapter_num` es NOT NULL, así que un trigger que dispare ante cualquier cambio violaría esa restricción y abortaría el UPDATE. La condición del trigger exige que el valor nuevo no sea nulo. Consecuencia aceptada: volver a "sin progreso" no queda registrado como evento; el estado sí queda correcto en `bookmarks`.
 
 **Nota sobre correcciones hacia abajo**: el trigger captura cualquier cambio, incluidas correcciones de progreso a un capítulo menor (evento con `chapter_num` < `previous_chapter_num`). Es data honesta y se conserva; la regla para el consumidor (estadísticas de V1b) es tratar los deltas negativos como correcciones, no como lectura — se excluyen del heatmap y de los conteos de volumen.
 

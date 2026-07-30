@@ -1,0 +1,20 @@
+services:
+  manga-tracker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Deploy note (design D5): the jobstore is in memory, so a restart forgets
+    # any active_sweep window it missed. That used to mean a manual
+    # `run-job active_sweep` after every off-window restart, or up to ~47h
+    # without a guaranteed sweep. The `run` subcommand now reads job_runs at
+    # startup and runs one sweep immediately when the last successful one is
+    # older than a day, so a restart no longer needs a human to remember.
+    # `run-job active_sweep` remains available for forcing one on demand.

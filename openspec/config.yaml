@@ -1,0 +1,59 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python, SQLite (single file, Docker volume), curl-cffi (Chrome
+  impersonation), APScheduler in-process, one Docker container. No
+  Playwright, zero concurrency, sequential requests only.
+  Status: DECLARED BUT UNSCAFFOLDED. No pyproject.toml, requirements.txt,
+  Dockerfile, docker-compose.yml, Makefile, or test suite exists yet.
+  Architecture boundary: source client (manganato specifics: URLs, HTML, JSON
+  endpoint, anti-bot) vs discovery (reading list, states, notify decisions,
+  DB writes) — must never leak into each other.
+  Docs authority: `docs/` (8 files) is the closed V1a design, source of
+  truth, written in Spanish. Conflict rule: more specific document wins,
+  then more recent version. `referencia-repo-viejo.md` is historical/partly
+  superseded and never outranks a spec.
+  Language convention: docs/ prose stays Spanish; code, identifiers,
+  comments, commit messages, string literals are English. Domain terms
+  verbatim: last_chapter_read, latest_chapter_num, active_sweep, onhold_sweep,
+  source_key.
+  Testing: no test runner exists (strict_tdd: false).
+
+testing:
+  strict_tdd: false
+  test_runner: null
+  reason: "No test tooling scaffolded yet — no pyproject.toml, requirements.txt, pytest.ini, or CI config found."
+
+rules:
+  proposal:
+    - No prior code to break; frame rollback as "delete the new files/migration", not a revert of existing behavior.
+    - Explicitly state which V1a doc(s) in docs/ the proposal implements or extends.
+    - If a proposal would require filling a gap the specs don't cover, stop and ask — do not decide by default judgment (CLAUDE.md rule).
+  specs:
+    - Use Given/When/Then for scenarios; use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+    - Preserve domain nomenclature verbatim from docs/ (last_chapter_read, latest_chapter_num, active_sweep, onhold_sweep, source_key) — never rename or translate.
+    - Keep the source-client / discovery boundary explicit in any spec that touches detection or the manganato client.
+    - On conflict with an existing docs/ spec, the more specific document wins, then the more recent version — never let an SDD artifact silently override docs/.
+  design:
+    - Document architecture decisions with rationale; call out which layer (client vs discovery) owns each responsibility.
+    - Respect decided platform choices (Python, SQLite single file, curl-cffi + Chrome impersonation, APScheduler in-process, one container) — do not introduce Playwright or concurrency.
+    - Reference the detection rule from CLAUDE.md (seal last_checked_at -> compare -> record chapter_history -> decide by bookmark state) instead of re-deriving it.
+  tasks:
+    - Group by phase, use hierarchical numbering, keep tasks completable in one session.
+    - Review budget is 400 changed lines (additions + deletions); forecast risk and flag if chained/stacked PRs are needed.
+    - Delivery strategy for this project: single-pr (cached at session start).
+  apply:
+    guidelines:
+      - Follow the source-client vs discovery boundary; do not let manganato-specific knowledge (URLs, HTML, endpoint shape) leak into discovery code.
+      - Code, identifiers, comments, commit messages, and string literals in English; existing docs/ Spanish prose is untouched.
+      - No test runner exists yet — first apply phase that introduces code MUST also scaffold the chosen test tool before or alongside it, or explicitly flag the gap.
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+    note: "No build/test tooling exists yet. Verification until scaffolding lands is manual: read the diff against the relevant docs/ spec."
+  archive:
+    - Warn before merging destructive deltas.
+    - A nomenclature change propagates across the whole docs/ package (README rule), not just the document where it was decided.

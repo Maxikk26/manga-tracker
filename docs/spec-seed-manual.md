@@ -1,7 +1,8 @@
 # Spec: Seed manual — manga-tracker V1a
 
-Versión 2.1 — 2026-07-28. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.6) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.2).
+Versión 2.2 — 2026-07-28. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4).
 
+Cambios vs 2.1: se cierra el hueco del arreglo de capítulos vacío (ver la regla al final de la sección de carga). El documento cubría la fila con 404 pero no la fila cuyo slug existe y devuelve `success: true` con cero capítulos, que no es un error bajo la taxonomía del cliente y por tanto no tenía regla.
 Cambios vs 2.0: se nombran los archivos y rutas concretas (plantilla versionada, archivo real, carpeta ignorada), que antes quedaban como blancos que el implementador tenía que adivinar; pines corregidos.
 
 Utilidad de arranque, invocable a mano, fuera del scheduler: lee un CSV que yo lleno con mis lecturas activas reales (<20 títulos) y puebla la base. Sin esto no hay nada que chequear.
@@ -47,6 +48,10 @@ Se validan todas las filas y se imprime el reporte; solo si no hay errores se pr
 Llamadas secuenciales con delay random 5-15s, imprimiendo progreso. Con <20 filas son pocos minutos.
 
 **Fila con 404 o error de la fuente**: se reporta y se descarta completa (ni manga, ni mapeo, ni bookmark). Casi siempre significa URL mal pegada; prefiero corregir y re-correr que arrastrar una fila coja. Las demás filas continúan.
+
+**Fila cuyo slug existe pero devuelve cero capítulos**: mismo trato — se reporta y se descarta completa. El caso es distinto del 404: la respuesta está bien formada y el cliente la clasifica como éxito, no como error, así que hay que decidirlo aquí explícitamente. Sin capítulos no hay `latest_chapter_num` que fijar, con lo cual el paso 3 de la carga no puede completarse: es exactamente la fila coja que este documento prefiere no arrastrar. Y hace ruido donde conviene: si escribí un `last_chapter_read` para algo que la fuente dice que no tiene capítulos, quiero enterarme por el reporte y no descubrirlo meses después. Se descarta también la alternativa de cargarla con `latest_chapter_num` nulo, porque sobrecargaría ese nulo con dos significados distintos: "nunca chequeado" y "chequeado, sin capítulos".
+
+Nota de alcance: esta regla es del cargador. En los barridos, un arreglo vacío sí cuenta como éxito y por tanto resetea `consecutive_failures` — la lógica de slugs muertos está acotada a los fallos de tipo "no encontrado" y no se redefine aquí.
 
 ## Re-ejecución
 

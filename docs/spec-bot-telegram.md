@@ -1,7 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.1 — 2026-07-28. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.3) y `spec-cliente-fuente-descubrimiento.md` (v1.2).
+Versión 1.2 — 2026-07-29. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
 
+Cambios vs 1.1: el heartbeat se desacopla del `onhold_sweep` y pasa a tener horario propio (domingo, hora configurable), con contenido nuevo — última detección exitosa, títulos vigilados, atrasados y corridas degradadas de la semana. Motivo y consecuencias en la sección del Mensaje 2. Además se registra que el heartbeat es de solo lectura y no abre fila en `job_runs`, y que el digest debe desactivar la vista previa de enlaces con `link_preview_options`, no con el `disable_web_page_preview` retirado de la Bot API.
 Cambios vs 1.0: adopción del renombre de barridos (`daily_sweep`→`active_sweep`), que esta spec se había perdido por tener el pin desactualizado; pines corregidos.
 
 Última pieza que bloquea el corazón de V1a. Es el módulo emisor: recibe datos estructurados del descubrimiento y los convierte en mensajes.
@@ -70,23 +71,33 @@ El bot decide únicamente **cómo se ve el texto** y se encarga del envío.
 2. **URL construida por patrón**: la operación auxiliar del cliente de la fuente arma la URL del primer capítulo no leído a partir del slug y el número. Es una conjetura razonable pero no verificada.
 3. **URL del capítulo más nuevo**: siempre existe y siempre es real. Es el fallback final.
 
-La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlazadas, las previsualizaciones lo vuelven ilegible.
+La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlazadas, las previsualizaciones lo vuelven ilegible. **Detalle de implementación verificado contra la Bot API (2026-07-29)**: el campo vigente es `link_preview_options` con `is_disabled`. El viejo `disable_web_page_preview` ya no figura en la documentación, y usarlo dejaría las previsualizaciones activas **en silencio**, sin error ni aviso.
 
 **Tamaño**: si el mensaje supera el límite de Telegram, se parte en varios respetando que ninguna línea de manga quede cortada entre mensajes. El descubrimiento recibe "envío exitoso" solo si todas las partes se enviaron; si una falla, el envío completo se considera fallido (y por tanto no se avanza el dedupe).
 
 ## Mensaje 2: heartbeat semanal
 
-**Cuándo**: al terminar el barrido semanal, siempre, haya habido actualizaciones o no. Es señal de vida: su ausencia un lunes significa que algo murió.
+**Cuándo**: domingo de madrugada, a hora configurable (por defecto la misma del barrido de activos). **Tiene su propio horario y no depende de ningún barrido.** Es señal de vida: su ausencia un lunes significa que algo murió.
 
-**Contenido**: confirmación del barrido con su fecha y hora local, cantidad de mangas barridos, cantidad de actualizaciones silenciosas aplicadas, y cuándo fue la última corrida de detección exitosa.
+**Contenido**: confirmación con fecha y hora local, cuándo fue la última corrida de detección exitosa, cuántos títulos se vigilan, cuántos están atrasados, y cuántas corridas cerraron degradadas (`partial` o `error`) en la última semana. Si hubo corridas degradadas el heartbeat lo indica; no se envía un mensaje de error aparte.
 
 **Ejemplo ilustrativo**:
 
-> ✅ Barrido semanal OK — dom 21 jul, 03:15
-> Mangas barridos: 112 · Actualizaciones silenciosas: 6
-> Última detección exitosa: dom 02:00
+> 💓 Weekly heartbeat — 29 jul, 19:50
+>
+> Última detección exitosa: 29 jul, 19:09
+> Vigilados: 16 títulos, 15 atrasados
+> Corridas degradadas esta semana: 0
 
-Si el barrido terminó con status `partial` (algunos mangas fallaron), el heartbeat lo indica con la cantidad de fallos. No se envía un mensaje de error aparte.
+**Es solo lectura**: consulta `job_runs`, `bookmarks` y `manga_sites`, y **no abre fila propia en `job_runs`**. No es un mecanismo de detección, así que su nombre no entra en la restricción CHECK de `job_name` — agregar un valor ahí con la base poblada obligaría a migrar.
+
+### Desviación registrada (v1.2): desacoplado del barrido de on-hold
+
+Hasta la v1.1 este mensaje se disparaba al terminar el `onhold_sweep` y reportaba mangas barridos más actualizaciones silenciosas. **Se cambió, y el motivo es concreto**: en la lista real todos los bookmarks están en `reading` y no hay ninguno en `on_hold`, así que ese barrido no barre nada y esos dos campos dirían `0` para siempre. Un mensaje que siempre reporta ceros entrena a ignorarlo, que es exactamente lo que este documento advierte sobre los avisos de "no hay nada".
+
+Y el problema que resuelve es más urgente de lo que la v1.1 asumía: con varios títulos al día, el silencio es el estado **esperado** durante días, así que un sistema sano y uno muerto se ven idénticos desde Telegram. Por eso el heartbeat se adelantó de la fase 2 a la fase corazón (ver `one-pager-v1a.md`).
+
+Cuando exista `onhold_sweep`, sus números pueden sumarse al mensaje. Lo que no vuelve es la dependencia: el heartbeat late aunque ese barrido no exista.
 
 ## Mensaje 3: aviso de slug muerto
 
