@@ -14,8 +14,62 @@ from manga_tracker.scheduler import HEARTBEAT_GRACE_SECONDS, _make_job, build_sc
 from manga_tracker.storage.db import connect
 
 
-def _scheduler():
-    return build_scheduler(db_path=":memory:", site_id=1, client=object(), sender=object())
+def _scheduler(**overrides):
+    kwargs = dict(db_path=":memory:", site_id=1, client=object(), sender=object(),
+                  timezone_name="America/Caracas")
+    return build_scheduler(**{**kwargs, **overrides})
+
+
+def test_cron_hours_are_local_hours_not_utc():
+    """ACTIVE_SWEEP_HOUR=3 means 03:00 in the configured zone, not 03:00 UTC.
+
+    It used to mean 03:00 UTC. build_scheduler constructed BlockingScheduler
+    without a timezone, APScheduler resolved one through tzlocal, and the
+    container sets no TZ - so every cron hour silently became a UTC hour. In
+    production the daily sweep ran at 23:00 local and the Sunday heartbeat would
+    have landed Saturday night. LOCAL_TIMEZONE was reaching the message
+    formatter and nothing else, so the messages reported the right local time
+    about jobs firing at the wrong one.
+
+    The zone asserted here is deliberately NOT the production one. A first pass
+    of this test used America/Caracas and passed against a build_scheduler that
+    only set the timezone on the scheduler - which does nothing for triggers
+    passed in already constructed. It passed because the developer machine's
+    tzlocal *is* America/Caracas, so the ambient default happened to match the
+    expectation, and it would have failed in the container. Asia/Tokyo cannot be
+    supplied by accident, so the assertion measures the plumbing.
+    """
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    tokyo = ZoneInfo("Asia/Tokyo")  # UTC+9: 03:00 local is 18:00 UTC the day before
+    noon_utc = datetime(2026, 7, 30, 12, 0, tzinfo=dt_timezone.utc)
+    jobs = {job.id: job
+            for job in _scheduler(timezone_name="Asia/Tokyo", active_sweep_hour=3, heartbeat_hour=3).get_jobs()}
+
+    for job_id in (ACTIVE_SWEEP, HEARTBEAT):
+        trigger = jobs[job_id].trigger
+        assert str(trigger.timezone) == "Asia/Tokyo"
+        fires_at = trigger.get_next_fire_time(None, noon_utc)
+        assert fires_at.astimezone(tokyo).hour == 3
+        assert fires_at.astimezone(dt_timezone.utc).hour == 18  # the bug put a 3 here
+
+    # The heartbeat's weekday is read in that zone too: Sunday local, not Sunday UTC.
+    assert jobs[HEARTBEAT].trigger.get_next_fire_time(None, noon_utc).astimezone(tokyo).weekday() == 6
+
+    # And the production configuration: 03:00 America/Caracas is 07:00 UTC.
+    caracas_sweep = {job.id: job for job in _scheduler(active_sweep_hour=3).get_jobs()}[ACTIVE_SWEEP]
+    assert caracas_sweep.trigger.get_next_fire_time(None, noon_utc).astimezone(dt_timezone.utc).hour == 7
+
+
+def test_an_unknown_timezone_degrades_to_utc_instead_of_refusing_to_boot(caplog):
+    """A sweep at the wrong hour still covers ~24h; a process that will not start
+    covers nothing. Unlike the old implicit UTC, this one is logged."""
+    with caplog.at_level(logging.ERROR):
+        jobs = {job.id: job for job in _scheduler(timezone_name="Not/AZone").get_jobs()}
+    assert str(jobs[ACTIVE_SWEEP].trigger.timezone) == "UTC"
+    assert "Not/AZone" in caplog.text
 
 
 def test_executor_max_workers_is_explicit_not_the_apscheduler_default():

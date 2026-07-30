@@ -52,7 +52,10 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     # tomorrow's cron. Replaces the manual `run-job active_sweep` the compose
     # file used to prescribe after an off-window restart.
     catch_up_sweep_if_overdue(db_path=config.db_path, client=client, sender=sender)
+    # timezone_name goes to the scheduler as well as the sender: the cron hours
+    # are LOCAL hours, and without it APScheduler falls back to tzlocal -> UTC.
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
+                     timezone_name=config.timezone_name,
                      active_sweep_hour=config.active_sweep_hour,
                      heartbeat_hour=config.heartbeat_hour).start()  # blocks until interrupted
     return 0

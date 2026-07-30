@@ -1,6 +1,6 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8).
+Versión 1.2 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-bot-telegram.md` (v1.3).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
@@ -53,6 +53,9 @@ Historial de este proyecto, todos con la suite en verde:
 | Un fixture con 4 tests pasando | el fixture estaba inventado y validaba lo equivocado |
 | `resolve_link` con cobertura completa | nadie la llamaba: función viva, feature muerta |
 | Test de `sweep_is_overdue` en verde | insertaba filas sin `finished_at` ni `items_checked`, una forma que ningún barrido real tiene |
+| Tests de formato del digest | **afirmaban el texto en inglés**: confirmaban la desviación del spec en vez de atraparla |
+| "100 líneas → 3 partes" en el test de partición | el 3 estaba medido a mano contra el copy inglés; el español acorta las líneas y saltó sin que el split estuviera roto |
+| Test de zona horaria del scheduler con `America/Caracas` | pasaba con el fix **sin efecto**, porque el `tzlocal` de la máquina de desarrollo ya era esa zona. Un test de configuración tiene que usar un valor que el ambiente no pueda suministrar por accidente |
 
 La regla que generaliza: **un guardián cubre la clase de error que sabe mirar, y nada más.**
 
@@ -126,6 +129,8 @@ sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_chec
 ```
 
 `feed_check` corre cada hora, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
+
+**`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 03:00 aparece como `07:00Z` y el heartbeat del domingo también. Si ves el barrido cayendo a las `03:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
 
 **Silencio en Telegram no es señal de fallo.** Con títulos al día es el estado esperado durante días. Lo que sí es señal es un heartbeat que no llegó un lunes.
 
