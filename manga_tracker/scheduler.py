@@ -110,7 +110,7 @@ SWEEP_CATCHUP_AFTER_SECONDS = 24 * 3600
 
 
 def sweep_is_overdue(conn, *, max_age_seconds: int = SWEEP_CATCHUP_AFTER_SECONDS) -> bool:
-    """True when the last successful active_sweep is older than its interval.
+    """True when the last active_sweep that actually swept is older than its interval.
 
     The jobstore is in memory, so a restart forgets any window it missed: a
     container coming back at 04:00 with the sweep scheduled at 03:00 gets no
@@ -122,9 +122,28 @@ def sweep_is_overdue(conn, *, max_age_seconds: int = SWEEP_CATCHUP_AFTER_SECONDS
     No persistent jobstore is needed to fix it: job_runs already records what
     ran and when, which is exactly what that table exists for. Reading it back
     at startup costs one query.
+
+    The two extra conditions are not defensive padding — both were observed
+    suppressing a real catch-up on the first server, and `status IN ('ok',
+    'partial')` alone matches rows that did not sweep anything:
+
+    - `finished_at IS NOT NULL`. `open_run` inserts the row with status 'ok'
+      already set and finished_at NULL, so a run merely *in flight* matched, and
+      so did one whose process was killed mid-sweep. That is the worse case: the
+      row stays open forever, and every later sweep is then refused by
+      open_run's overlap guard while this query keeps reporting the sweep as
+      satisfied. Only a finished run is evidence of a sweep.
+
+    - `items_checked > 0`. A sweep over an empty database completes correctly
+      and closes 'ok' having examined nothing. It then satisfied this window for
+      24h, which is exactly what happened at bring-up: the container came up
+      before the seed, swept zero titles in under a second, and the sweep that
+      should have followed the seed never ran. Zero items examined is not a
+      sweep, whatever its status says.
     """
     row = conn.execute(
         "SELECT started_at FROM job_runs WHERE job_name = ? AND status IN ('ok', 'partial') "
+        "AND finished_at IS NOT NULL AND IFNULL(items_checked, 0) > 0 "
         "ORDER BY started_at DESC LIMIT 1",
         (ACTIVE_SWEEP,),
     ).fetchone()
