@@ -62,6 +62,11 @@ Los documentos de `docs/` son la fuente de verdad. Orden de lectura recomendado:
 4. **`spec-bot-telegram.md`** — los tres tipos de mensaje y su formato.
 5. **`spec-seed-manual.md`** — formato del CSV de arranque y comportamiento del cargador.
 
+Runbooks operativos:
+
+- **`runbook-deploy.md`** — qué setear al montar un servidor nuevo, la secuencia de arranque en orden, y la tabla de fallos del primer despliegue.
+- **`runbook-mantenimiento.md`** — el ciclo de un cambio hasta producción, cómo verificar que el sistema vive, y qué hacer cuando un slug deja de responder.
+
 Documentos de apoyo:
 
 - **`manganato-fuente-actual.md`** — auditoría en vivo de la fuente: endpoints, selectores, anti-bot, y el playbook de qué hacer si cambia de dominio o UI.
