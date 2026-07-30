@@ -122,22 +122,29 @@ def test_sweep_is_overdue_reads_job_runs_rather_than_a_persistent_jobstore():
     def stamp(delta):
         return (datetime.now(timezone.utc) + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    def insert_completed_sweep(hours_ago, items=16):
+        """A row that looks like what close_run actually writes.
+
+        The earlier version of this test inserted only (job_name, started_at,
+        status), leaving finished_at NULL and items_checked NULL - a shape no
+        completed sweep ever has. It passed, and in doing so hid two ways the
+        query matched runs that swept nothing. Build rows the real code builds.
+        """
+        conn.execute(
+            "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, "
+            "updates_found, notifications_sent) VALUES (?, ?, ?, 'ok', ?, 0, 0)",
+            (SWEEP, stamp(timedelta(hours=-hours_ago)), stamp(timedelta(hours=-hours_ago, minutes=3)), items),
+        )
+        conn.commit()
+
     conn = connect(":memory:")
     assert sweep_is_overdue(conn) is True  # never swept: nothing is armed yet
 
-    conn.execute(
-        "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'ok')",
-        (SWEEP, stamp(timedelta(hours=-2))),
-    )
-    conn.commit()
+    insert_completed_sweep(hours_ago=2)
     assert sweep_is_overdue(conn) is False  # swept two hours ago: nothing owed
 
-    conn.execute(
-        "INSERT INTO job_runs (job_name, started_at, status) VALUES (?, ?, 'ok')",
-        (SWEEP, stamp(timedelta(hours=-30))),
-    )
-    conn.execute("DELETE FROM job_runs WHERE started_at = ?", (stamp(timedelta(hours=-2)),))
-    conn.commit()
+    conn.execute("DELETE FROM job_runs")
+    insert_completed_sweep(hours_ago=30)
     assert sweep_is_overdue(conn) is True  # last success is older than a day
 
 
@@ -156,3 +163,79 @@ def test_a_failed_sweep_does_not_count_as_having_run():
     )
     conn.commit()
     assert sweep_is_overdue(conn) is True
+
+
+def test_a_sweep_that_examined_nothing_does_not_satisfy_the_catch_up_window():
+    """Observed on the first server, and it silenced the mechanism for a day.
+
+    The container came up before the seed had run. Its catch-up swept an empty
+    database, examined zero titles, finished in under a second and closed 'ok'.
+    Sixteen titles were then loaded - and because that empty run looked like a
+    successful sweep, neither the following restart nor a recreate ran one. The
+    16 titles sat unswept until the next 03:00 cron.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.scheduler import sweep_is_overdue
+    from manga_tracker.storage.db import connect
+
+    now = datetime.now(timezone.utc)
+
+    def stamp(minutes):
+        return (now + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, "
+        "updates_found, notifications_sent) VALUES (?, ?, ?, 'ok', 0, 0, 0)",
+        (SWEEP, stamp(-40), stamp(-40)),
+    )
+    conn.commit()
+    assert sweep_is_overdue(conn) is True
+
+    # One real sweep, and the window is genuinely satisfied.
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, "
+        "updates_found, notifications_sent) VALUES (?, ?, ?, 'ok', 16, 0, 0)",
+        (SWEEP, stamp(-10), stamp(-7)),
+    )
+    conn.commit()
+    assert sweep_is_overdue(conn) is False
+
+
+def test_an_unfinished_sweep_does_not_satisfy_the_catch_up_window():
+    """open_run writes status 'ok' up front, so an OPEN row already reads as a
+    success to any query that does not check finished_at.
+
+    Two consequences, and the second is the dangerous one. A run merely in
+    flight suppressed the catch-up - harmless, it is running. But a run whose
+    process was killed mid-sweep leaves that row open permanently: open_run's
+    overlap guard then refuses every future active_sweep with RunAlreadyOpen
+    while this query keeps reporting the sweep as satisfied, so the primary
+    detection mechanism dies silently and nothing ever says so. Reproduced by
+    killing a `run-job active_sweep` container mid-run on the real server.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.discovery.runs import RunAlreadyOpen, open_run
+    from manga_tracker.scheduler import sweep_is_overdue
+    from manga_tracker.storage.db import connect
+
+    started = (datetime.now(timezone.utc) - timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = connect(":memory:")
+    run_id = open_run(conn, SWEEP, started)
+
+    row = conn.execute("SELECT status, finished_at FROM job_runs WHERE id = ?", (run_id,)).fetchone()
+    assert row == ("ok", None)  # the shape that used to read as a completed sweep
+
+    assert sweep_is_overdue(conn) is True
+
+    # And this is why it matters: while that row is open, no sweep can start.
+    try:
+        open_run(conn, SWEEP, started)
+    except RunAlreadyOpen:
+        pass
+    else:
+        raise AssertionError("expected the overlap guard to refuse a second run")

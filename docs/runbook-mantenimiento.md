@@ -52,6 +52,7 @@ Historial de este proyecto, todos con la suite en verde:
 | Reglas por subpaquete | ciegas al nivel superior: cualquier módulo ahí escapaba |
 | Un fixture con 4 tests pasando | el fixture estaba inventado y validaba lo equivocado |
 | `resolve_link` con cobertura completa | nadie la llamaba: función viva, feature muerta |
+| Test de `sweep_is_overdue` en verde | insertaba filas sin `finished_at` ni `items_checked`, una forma que ningún barrido real tiene |
 
 La regla que generaliza: **un guardián cubre la clase de error que sabe mirar, y nada más.**
 
@@ -83,6 +84,21 @@ docker compose logs --tail 30
 ```
 
 `build` es opcional y la regla es simple: si el cambio toca `manga_tracker/`, `pyproject.toml` o el `Dockerfile`, hace falta. Si solo toca `docs/` o el compose, no.
+
+### Nunca uses `docker compose restart` después de un build
+
+`restart` es `stop` + `start` **del mismo contenedor**: no lo recrea, no toma la imagen nueva y no vuelve a leer el `compose.yml`. Construyes, reinicias, todo parece bien — y sigues corriendo el código viejo. Costó una noche entera de depuración.
+
+`up -d` sí compara la configuración con el contenedor existente y lo recrea cuando difiere. Es el único verbo de redespliegue.
+
+Cómo confirmar que el contenedor corre lo que acabas de construir — los dos hashes deben coincidir:
+
+```
+docker inspect manga-tracker --format 'corriendo   {{.Image}}'
+docker image inspect manga-tracker-manga-tracker:latest --format 'construida  {{.Id}}'
+```
+
+Síntoma barato de detectar sin inspeccionar nada: en `docker ps`, la columna `IMAGE` sale como hash pelado en vez del nombre. Significa que el tag ya se movió a la imagen nueva y el contenedor quedó agarrado a una imagen que perdió su etiqueta.
 
 **El reinicio ya no necesita nada manual.** El arranque consulta `job_runs` y corre un `active_sweep` de inmediato si el último exitoso quedó viejo, así que un reinicio fuera de la hora programada no te deja sin barrido. Antes había que acordarse de un comando; ya no.
 
