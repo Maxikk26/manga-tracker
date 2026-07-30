@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.0 — 2026-07-29. Documento operativo. Depende de `one-pager-v1a.md` (v1.8).
+Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambio en v1.1: el redespliegue dice explícitamente "mergea, después `pull`" —el servidor sigue `main`, y un `pull` con el PR abierto responde "Already up to date" y parece un despliegue exitoso— y aclara cuándo `build` hace falta y cuándo no.
 
 ## Antes de escribir código
 
@@ -71,12 +73,16 @@ Conventional commits. Sin atribución de IA ni líneas de co-autoría.
 
 ## Redesplegar
 
+El servidor sigue `main`, no la rama de trabajo. Así que el orden es **mergea el PR primero, después haz `pull`**: un `git pull` con el PR abierto responde "Already up to date" y te deja pensando que desplegaste algo cuando no bajó nada.
+
 ```
-git pull
-docker compose build
+git pull                      # después del merge, nunca antes
+docker compose build          # solo si el cambio toca manga_tracker/
 docker compose up -d
 docker compose logs --tail 30
 ```
+
+`build` es opcional y la regla es simple: si el cambio toca `manga_tracker/`, `pyproject.toml` o el `Dockerfile`, hace falta. Si solo toca `docs/` o el compose, no.
 
 **El reinicio ya no necesita nada manual.** El arranque consulta `job_runs` y corre un `active_sweep` de inmediato si el último exitoso quedó viejo, así que un reinicio fuera de la hora programada no te deja sin barrido. Antes había que acordarse de un comando; ya no.
 

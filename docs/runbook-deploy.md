@@ -1,8 +1,10 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.0 — 2026-07-29. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-seed-manual.md` (v2.3).
+Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-seed-manual.md` (v2.3).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
+
+Cambios en v1.1, todos del segundo despliegue: los comandos de arranque van por `docker compose run --rm` y no por `uv`, porque el servidor no tiene `uv` — la v1.0 prescribía comandos que no corrían ahí. La inspección de la imagen usa el nombre del servicio, no un tag inexistente. Se documenta que el seed va antes del `up -d` y qué hacer si no fue así, y que un barrido con `items_checked = 0` no significa nada.
 
 ## Antes de empezar: qué necesitas a mano
 
@@ -114,40 +116,51 @@ Nombra tu archivo `seed.csv`. Verifica con `git check-ignore --stdin` (no con `-
 docker compose build
 ```
 
-Verificaciones que vale hacer una vez sobre la imagen, porque las tres han fallado antes en otros proyectos:
+La construcción tarda unos cuatro minutos la primera vez. Verificaciones que vale hacer una vez, porque las tres han fallado antes en otros proyectos:
 
 ```
-docker run --rm --entrypoint python manga-tracker:v1a -c "from zoneinfo import ZoneInfo; ZoneInfo('America/Caracas'); print('tzdata OK')"
-docker run --rm --entrypoint sh manga-tracker:v1a -c "id -un; python -c 'import pytest'"
+docker compose run --rm --entrypoint python manga-tracker -c "from zoneinfo import ZoneInfo; ZoneInfo('America/Caracas'); print('tzdata OK')"
+docker compose run --rm --entrypoint sh manga-tracker -c "id -un; python -c 'import pytest'"
 ```
 
 Lo esperado: `tzdata OK`, usuario `appuser`, y que `pytest` **falle** con `ModuleNotFoundError` — no debe viajar a producción.
 
-El `ENTRYPOINT` ya apunta al CLI, así que para inspeccionar la imagen hay que sobreescribirlo con `--entrypoint`. Sin eso, tus comandos llegan como subcomandos y rebotan.
+Dos detalles que hacen fallar el comando si los ignoras:
+
+- El `ENTRYPOINT` ya apunta al CLI, así que para inspeccionar la imagen hay que sobreescribirlo con `--entrypoint`. Sin eso, tus comandos llegan como subcomandos y rebotan.
+- Va por `docker compose run`, con el **nombre del servicio**, no por `docker run` con un nombre de imagen. Compose no etiqueta la imagen: la deja como `<proyecto>-<servicio>` y en `docker ps` la verás incluso como puro hash. Cualquier `docker run manga-tracker:algo` te dará "image not found".
 
 ## 5. La secuencia de arranque, en orden
 
 Cada paso verifica algo antes de que el siguiente dependa de ello.
 
+**Todo va por `docker compose run --rm`, no por `uv`.** Un servidor de despliegue no tiene por qué tener `uv` ni Python instalados — el mini-PC no los tenía, y descubrirlo en el paso 1 del arranque real costó tiempo. La imagen ya trae todo; `run --rm` levanta un contenedor efímero con el mismo `.env` y el mismo volumen, y lo borra al terminar. Usa `uv run` solo en tu máquina de desarrollo.
+
+Dentro del contenedor el volumen se ve en `/app/data`, así que la ruta del seed es siempre `data/seed.csv`.
+
 ```
 # 1. ¿Las credenciales sirven? Debe llegarte un mensaje a Telegram.
-uv run --env-file .env python -m manga_tracker test-telegram
+docker compose run --rm manga-tracker test-telegram
 
 # 2. ¿El CSV está bien? Valida TODO y no escribe nada.
-uv run --env-file .env python -m manga_tracker seed --dry-run --file ../manga-tracker-data/seed.csv
+docker compose run --rm manga-tracker seed --dry-run --file data/seed.csv
 
 # 3. Cargar. Toca la red: un request por título con delay de 5-15s.
-uv run --env-file .env python -m manga_tracker seed --file ../manga-tracker-data/seed.csv
+#    Imprime [n/total] antes de cada request: si no ves avanzar el contador
+#    en ~15s, ahí sí está trabado. NO lo cortes con Ctrl+C — ver más abajo.
+docker compose run --rm manga-tracker seed --file data/seed.csv
 
 # 4. Forzar una detección sin esperar al cron.
-uv run --env-file .env python -m manga_tracker run-job active_sweep
+docker compose run --rm manga-tracker run-job active_sweep
 
 # 5. Ver el heartbeat sin esperar al domingo.
-uv run --env-file .env python -m manga_tracker run-job heartbeat
+docker compose run --rm manga-tracker run-job heartbeat
 
 # 6. Dejarlo corriendo.
 docker compose up -d
 ```
+
+**El orden importa: el seed va ANTES del `up -d`.** Si el contenedor arranca con la base vacía, su barrido de arranque (`catch-up`) corre contra cero títulos, y en V1a eso cuenta como barrido hecho durante 24h. Sembrar después deja el sistema sin barrido garantizado hasta el cron de las 03:00. Si ya arrancaste antes de sembrar, fuerza el barrido a mano con el paso 4.
 
 **No te saltes el paso 2.** En el primer despliegue real detectó dos filas malas: un título con una coma que partió el CSV en cinco columnas, y otro al que le faltaba la primera letra. La primera la atrapa el validador; la segunda solo la ve un humano leyendo el reporte, porque un título mal escrito es válido para el cargador.
 
@@ -170,10 +183,18 @@ Para confirmar que está vivo sin esperar al domingo, mira las corridas:
 
 ```
 docker compose logs --tail 20
-sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at from job_runs order by id desc limit 5"
+sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5"
+```
+
+Si el servidor no tiene `sqlite3` instalado, el mismo query sale por el contenedor, sin instalar nada:
+
+```
+docker compose run --rm --entrypoint python manga-tracker -c "import sqlite3;[print(r) for r in sqlite3.connect('data/manga-tracker.db').execute('select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5')]"
 ```
 
 `feed_check` corre cada hora, así que debe aparecer una fila nueva dentro de la hora. Si no aparece, ahí sí hay algo que investigar.
+
+**Lee `items_checked`, no solo `status`.** Un barrido con `items_checked = 0` cierra en `ok` y no significa nada: no revisó ningún título. Y `finished_at` menos `started_at` te da la duración real — dieciséis títulos son unos tres minutos, así que un barrido con duración cero revisó cero.
 
 ## 7. Respaldo
 
@@ -192,9 +213,19 @@ Y respalda tu `seed.csv` en otro lado. Un `.gitignore` evita que lo commitees; *
 | Síntoma | Causa |
 |---|---|
 | `Missing required environment variable(s)` | `.env` vacío o sin guardar en el editor |
-| El contenedor muere al arrancar, en Linux | Falta `chown 10001:10001 ./data` |
+| `uv: command not found` | El servidor no tiene `uv`. Todo va por `docker compose run --rm` |
+| `Unable to find image 'manga-tracker:v1a'` | Compose no etiqueta la imagen. Usa el **servicio**, no un tag |
+| El contenedor muere al arrancar, en Linux | Falta `chown 10001:10001` en el directorio de datos |
+| `usermod: group '10001' does not exist` | `usermod -aG` exige un grupo con nombre. `groupadd -g 10001 mangatracker` primero |
 | `getUpdates` devuelve `"result":[]` | No le escribiste al bot todavía |
 | `{"ok":false,"error_code":404}` | La URL llevaba el marcador literal en vez del token |
 | `seed` reporta errores raros en una fila | Un título con coma sin comillas dobles en el CSV |
 | El CLI local no encuentra la base | `DB_PATH` del `.env` sigue apuntando a `data/` del repo |
+| El barrido cierra en un segundo, `items_checked = 0` | La base está vacía o a medio sembrar. Vuelve a correr el paso 3 |
 | Todo verde y no llega nada | Correcto: no hay capítulos nuevos. Verifica con `job_runs` |
+
+### Si cortaste el seed con Ctrl+C
+
+Se puede volver a correr sin limpiar nada: el cargador es idempotente por slug —busca el mapeo existente antes de escribir— y `chapter_history` tiene restricción de unicidad. Corre el paso 3 otra vez y termina lo que faltaba.
+
+Lo que **no** se arregla solo es el barrido de arranque ya gastado: si el contenedor estaba levantado con la base vacía, fuerza uno con el paso 4 en vez de esperar al cron.
