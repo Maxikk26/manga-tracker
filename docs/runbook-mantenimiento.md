@@ -1,8 +1,12 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.2 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-bot-telegram.md` (v1.3).
+Versión 1.3 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-bot-telegram.md` (v1.3).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.3: el paso 7 del ciclo queda documentado — el cuerpo del PR sale de `.github/pull_request_template.md`, con sus reglas de formato y lo que obliga a declarar.
+
+Cambios en v1.2: cómo leer el `started_at` en UTC contra horas de cron locales, y tres entradas nuevas en la tabla de guardianes verdes (los tests de formato del digest, el conteo de partes medido a mano, y el test de zona horaria que pasaba con un fix sin efecto).
 
 Cambio en v1.1: el redespliegue dice explícitamente "mergea, después `pull`" —el servidor sigue `main`, y un `pull` con el PR abierto responde "Already up to date" y parece un despliegue exitoso— y aclara cuándo `build` hace falta y cuándo no.
 
@@ -74,6 +78,22 @@ rg -n -o "^Versión [0-9.]+|\`[a-z-]+\.md\` \(v[0-9.]+\)" docs/*.md
 Código, tests y docs del mismo cambio **juntos**. Los commits son la materia prima para cortar PRs después; un historial con unidades limpias se corta en minutos, uno con commits gigantes se rehace.
 
 Conventional commits. Sin atribución de IA ni líneas de co-autoría.
+
+### Paso 7: el cuerpo del PR sale de la plantilla
+
+`.github/pull_request_template.md` se precarga solo al abrir un PR en GitHub. **Conserva los encabezados `##`**; borra una sección solo si de verdad no aplica, y dilo en una línea en vez de dejarla vacía.
+
+**Corto.** La regla que más importa: el cuerpo **no repite los commits**. Los mensajes de commit ya llevan el razonamiento y `docs/` lleva las decisiones; el PR responde tres cosas para quien va a mergear y desplegar — qué cambió, qué vigilar, y por qué creemos que funciona. Veinte líneas es un buen cuerpo; noventa es un síntoma.
+
+Reglas de formato, en el comentario de la plantilla porque ahí se leen cuando hacen falta:
+
+- Encabezados `##` de verdad. **Nunca negritas haciendo de encabezado** — no generan ancla y aplanan el índice.
+- Línea en blanco antes de cada lista, tabla y bloque. Sin ella GitHub renderiza el markup como texto literal, que es exactamente el síntoma de "esto quedó para los perros".
+- Viñetas y tablas, no párrafos: se lee en un panel angosto de revisión.
+
+Lo único que la plantilla obliga a declarar es lo que se olvida: si el despliegue necesita `build`, y **qué guardián rompiste a propósito**.
+
+Deliberadamente **no** pide issue vinculado ni labels: este repositorio no tiene issues ni CI que los valide, y una casilla que nadie puede hacer cumplir se marca sin leerla.
 
 ## Redesplegar
 
