@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Callable, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from manga_tracker.notifier.contracts import DigestLine, HeartbeatReport
+from manga_tracker.notifier.contracts import DeadSlugNotice, DigestLine, HeartbeatReport
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 MESSAGE_LIMIT = 4096  # verified live (task 5.1): 1-4096 chars after entity parsing
@@ -107,6 +107,31 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
     )
 
 
+def _format_dead_slug(notice: DeadSlugNotice) -> str:
+    """BOT "Mensaje 3". Says what stopped answering, its slug, and what to do.
+
+    Registered deviation from the spec's illustration, and it is about honesty:
+    that example ends "se reintenta en el semanal", which assumes `onhold_sweep`
+    exists. It does not yet, and the one-pager already accepts that a mapping
+    paused at the threshold has no automatic recovery during the heart phase. A
+    message promising a retry nothing performs would be worse than no message.
+    The wording follows `retries_weekly`, so it corrects itself when that sweep
+    lands instead of needing to be remembered.
+    """
+    title = html.escape(_truncate_title(notice.manga_title))
+    slug = html.escape(notice.source_key)
+    recovery = (
+        "Queda fuera del barrido diario; se reintenta en el semanal."
+        if notice.retries_weekly
+        else "Queda fuera del barrido diario y no se reintenta solo."
+    )
+    return (
+        f"⚠️ <b>Slug sin respuesta</b> — {title}\n"
+        f"El slug <code>{slug}</code> lleva {notice.failure_count} chequeos sin encontrarlo. "
+        f"{recovery} Revisa si cambió de URL en la fuente y corrígelo."
+    )
+
+
 def _split_message(header: str, body_lines: list[str], limit: int) -> list[str]:
     """All-or-nothing size split (BOT "Tamano"): never cuts a manga's line."""
     parts: list[str] = []
@@ -160,6 +185,17 @@ class TelegramSender:
 
     def send_heartbeat(self, report: HeartbeatReport, *, now: str) -> bool:
         return self._send_one(_format_heartbeat(report, now, self._timezone_name))
+
+    def send_dead_slug_notice(self, notices: Sequence[DeadSlugNotice], *, now: str) -> bool:
+        """Several mappings crossing in the same run share one message, split by a
+        blank line exactly like the digest (BOT "Mensaje 3"), and reuse the same
+        all-or-nothing size split so no notice is ever cut in half."""
+        if not notices:
+            return True
+        ordered = sorted(notices, key=lambda notice: notice.manga_title)
+        header = f"{_plural(len(ordered), 'slug sin respuesta', 'slugs sin respuesta')} — {_format_local(now, self._timezone_name)}"
+        parts = _split_message(header, [_format_dead_slug(notice) for notice in ordered], MESSAGE_LIMIT)
+        return all([self._send_one(part) for part in parts])
 
     def send_test_message(self, text: str) -> bool:
         return self._send_one(text)  # manual test-telegram message; never runs automatically

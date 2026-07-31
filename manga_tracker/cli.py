@@ -12,7 +12,7 @@ from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
-from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, run_job_once
+from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, reap_stale_runs, run_job_once
 from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
@@ -47,10 +47,15 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     site_id, client = _bootstrap(config)
     telegram = require_telegram(config)
     sender = TelegramSender(telegram.bot_token, telegram.chat_id, timezone_name=config.timezone_name)
-    # Before scheduling: the in-memory jobstore forgets a window missed across a
-    # restart, so a sweep that is overdue runs once now instead of waiting for
-    # tomorrow's cron. Replaces the manual `run-job active_sweep` the compose
-    # file used to prescribe after an off-window restart.
+    # Order matters. Reaping first releases any job_runs row left open by a
+    # process that died mid-run; while such a row exists `open_run` refuses to
+    # start that job at all, so a catch-up attempted before the reap would be
+    # rejected and the sweep would stay blocked for good.
+    reap_stale_runs(config.db_path)
+    # Then: the in-memory jobstore forgets a window missed across a restart, so a
+    # sweep that is overdue runs once now instead of waiting for tomorrow's cron.
+    # Replaces the manual `run-job active_sweep` the compose file used to
+    # prescribe after an off-window restart.
     catch_up_sweep_if_overdue(db_path=config.db_path, client=client, sender=sender)
     # timezone_name goes to the scheduler as well as the sender: the cron hours
     # are LOCAL hours, and without it APScheduler falls back to tzlocal -> UTC.

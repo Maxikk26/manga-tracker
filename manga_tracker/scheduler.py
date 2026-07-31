@@ -151,6 +151,59 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name
 
 
 SWEEP_CATCHUP_AFTER_SECONDS = 24 * 3600
+# Long enough that no live run can be mistaken for a corpse. The worst realistic
+# sweep is ~16 mappings x (30s timeout, two attempts, plus a 5-15s delay) - about
+# 25 minutes - and `run-job` may legitimately be sweeping from a separate
+# container, where max_instances is no help because it is process-local. An hour
+# clears that with margin.
+STALE_RUN_AFTER_SECONDS = 3600
+
+
+def reap_stale_runs(db_path: str, *, max_age_seconds: int = STALE_RUN_AFTER_SECONDS) -> int:
+    """Close job_runs rows left open by a process that died mid-run.
+
+    Without this, one hard kill disables the primary detection mechanism
+    permanently and silently. `open_run` refuses to start while a row for the
+    same job is open, nothing closes it - SIGKILL raises no Python exception, so
+    `_make_job`'s handler never runs - and `sweep_is_overdue` used to read that
+    same row as a completed sweep. The result was a system reporting `ok` and
+    detecting nothing, which is this project's original failure mode.
+
+    Reproduced during the first deploy: `docker compose restart` allows 10s
+    before SIGKILL and a sweep takes about 150s, so any restart during a sweep
+    triggered it.
+
+    Closed as `error`, not `partial`: `partial` means the run finished and
+    something inside it failed, while these never finished at all. The row also
+    fails `sweep_is_overdue`'s items_checked filter, so a reaped run correctly
+    leaves the sweep owed.
+    """
+    now = datetime.now(timezone.utc)
+    conn = connect(db_path)
+    try:
+        open_rows = conn.execute(
+            "SELECT id, job_name, started_at FROM job_runs WHERE finished_at IS NULL"
+        ).fetchall()
+        reaped = 0
+        for run_id, job_name, started_at in open_rows:
+            started = datetime.strptime(started_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age = (now - started).total_seconds()
+            if age <= max_age_seconds:
+                continue  # may still be running, in this process or another container
+            conn.execute(
+                "UPDATE job_runs SET finished_at = ?, status = 'error', error_summary = ? WHERE id = ?",
+                (now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 f"reaped at startup: left open {age / 3600:.1f}h, process died before closing it", run_id),
+            )
+            logger.error(
+                "reaped stale %s run %s left open since %s (%.1fh) - it would otherwise have blocked "
+                "every future run of that job", job_name, run_id, started_at, age / 3600,
+            )
+            reaped += 1
+        conn.commit()
+        return reaped
+    finally:
+        conn.close()
 
 
 def sweep_is_overdue(conn, *, max_age_seconds: int = SWEEP_CATCHUP_AFTER_SECONDS) -> bool:

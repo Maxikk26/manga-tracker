@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-seed-manual.md` (v2.3).
+Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.9) y `spec-seed-manual.md` (v2.3).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
