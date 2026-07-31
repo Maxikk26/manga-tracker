@@ -4,6 +4,12 @@ the decisions - do NOT repeat either here. This body exists to answer three thin
 for someone about to merge and deploy: what changed, what to watch out for, and
 why we believe it works. Twenty lines is a good body; ninety is a symptom.
 
+FIRST, DELETE WHATEVER SITS ABOVE THIS COMMENT. When a branch has exactly one
+commit, GitHub prefills the PR body with that commit's message and then appends
+this template, so you get the full commit body pasted above - which is precisely
+the duplication this file exists to prevent. Branches with two or more commits
+get the template alone.
+
 Formatting, since inconsistency is what this file exists to fix:
 - Real `##` headings, never bold text standing in for one.
 - A blank line before every list, table and fenced block, or GitHub renders the
