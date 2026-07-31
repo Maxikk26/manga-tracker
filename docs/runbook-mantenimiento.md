@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.3 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.8) y `spec-bot-telegram.md` (v1.3).
+Versión 1.4 — 2026-07-31. Documento operativo. Depende de `one-pager-v1a.md` (v1.9) y `spec-bot-telegram.md` (v1.4).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.4: el aviso de slug muerto ya existe y llega por Telegram, así que la sección de "un manga dejó de responder" deja de ser solo consulta manual; y se documenta el limpiador de corridas huérfanas al arrancar.
 
 Cambios en v1.3: el paso 7 del ciclo queda documentado — el cuerpo del PR sale de `.github/pull_request_template.md`, con sus reglas de formato y lo que obliga a declarar.
 
@@ -123,7 +125,20 @@ docker image inspect manga-tracker-manga-tracker:latest --format 'construida  {{
 
 Síntoma barato de detectar sin inspeccionar nada: en `docker ps`, la columna `IMAGE` sale como hash pelado en vez del nombre. Significa que el tag ya se movió a la imagen nueva y el contenedor quedó agarrado a una imagen que perdió su etiqueta.
 
-**El reinicio ya no necesita nada manual.** El arranque consulta `job_runs` y corre un `active_sweep` de inmediato si el último exitoso quedó viejo, así que un reinicio fuera de la hora programada no te deja sin barrido. Antes había que acordarse de un comando; ya no.
+**El reinicio ya no necesita nada manual.** El arranque hace dos cosas, en este orden:
+
+1. **Limpia corridas huérfanas.** Cierra como `error` toda fila de `job_runs` que quedó abierta hace más de una hora. Sin esto, **un solo `kill` a mitad de barrido deshabilitaba `active_sweep` para siempre y en silencio**: la guarda de solapamiento rechaza arrancar mientras haya una fila abierta de ese job, y nada la cerraba —`SIGKILL` no lanza excepción en Python, así que el manejador del wrapper nunca corre—. El resultado era un sistema reportando `ok` y detectando nada, que es el modo de fallo original de este proyecto. Pasó de verdad: `docker compose restart` da 10 segundos antes del `SIGKILL` y un barrido tarda ~150.
+2. **Recupera el barrido vencido.** Si el último exitoso quedó viejo, corre uno de inmediato.
+
+El umbral de una hora no es arbitrario: el peor barrido realista son ~25 minutos, y `run-job` puede estar barriendo legítimamente desde otro contenedor —donde `max_instances` no sirve, porque es por proceso—. Cerrar una corrida viva sería lo contrario de la guarda.
+
+Se cierra como `error` y no `partial` porque `partial` significa que la corrida terminó y algo falló dentro; estas nunca terminaron. Y como no revisó items, tampoco cuenta como barrido para la ventana de recuperación.
+
+Si aparece en el log, quiere decir que algo mató al proceso a mitad de una corrida:
+
+```
+reaped stale active_sweep run 12 left open since ... - it would otherwise have blocked every future run
+```
 
 Si quieres forzar uno de todas formas:
 
@@ -165,6 +180,15 @@ error     la corrida abortó por una excepción no controlada. Mira error_summar
 Un `partial` por digest fallido **se auto-corrige**: `latest_chapter_num` no avanzó, así que la siguiente corrida re-detecta y reintenta. Un aviso duplicado es aceptable; uno perdido no.
 
 ### Un manga dejó de responder
+
+**Ahora te avisa por Telegram.** Al cruzar el umbral llega un mensaje diciendo qué título dejó de responder y con qué slug:
+
+> ⚠️ **Slug sin respuesta** — Black Haze (2025)
+> El slug `black-haze-2025` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario y no se reintenta solo. Revisa si cambió de URL en la fuente y corrígelo.
+
+Llega **una sola vez por manga**, y eso no depende de una bandera en la base: un mapeo en el umbral sale de la población, así que no vuelve a consumir request ni a incrementar. El cruce ocurre exactamente una vez por slug muerto — y por eso mismo el contador **no avanza hasta que el aviso salió**. Si el envío falla, la corrida cierra `partial`, el contador se queda en 4 y la siguiente corrida reintenta. Cuesta un request extra; compra que el aviso no se pueda perder.
+
+Mientras `onhold_sweep` no exista (fase 2), el mensaje dice explícitamente que **no se reintenta solo**. No promete un reintento semanal que nadie ejecuta.
 
 `consecutive_failures` cuenta los fallos de tipo "no encontrado". A los 5, el mapeo se salta en el barrido diario y no consume request.
 

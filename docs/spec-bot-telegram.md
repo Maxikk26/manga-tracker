@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.3 — 2026-07-30. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
+Versión 1.4 — 2026-07-31. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.9) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
+
+Cambios vs 1.3: el Mensaje 3 se construye. Dos decisiones que la v1.3 no cubría, ambas en su sección: el aviso **no promete** el reintento semanal mientras `onhold_sweep` no exista (desviación registrada, redacción condicionada para que se corrija sola), y el contador de fallos **no avanza hasta que el aviso salió** — el cruce del umbral ocurre exactamente una vez por slug muerto, así que avanzar primero haría que un envío fallido destruyera el único aviso que ese mapeo va a generar. Se fija también que `notifications_sent` cuenta este aviso.
 
 Cambios vs 1.2: se declara **vinculante** que el texto de los mensajes va en español, porque la primera implementación los emitió en inglés y tres digests reales salieron así. No fue un descuido: la convención del repositorio "los string literals van en inglés" se aplicó a copy de producto, y esta spec solo lo mostraba en sus ejemplos ilustrativos, que son por definición no vinculantes. Ahora está dicho como regla. Además se normaliza el encabezado del heartbeat, que decía "Weekly heartbeat" en inglés dentro de un ejemplo cuyas demás líneas estaban en español, y se fija la concordancia de número ("1 novedad" / "3 novedades") y que los meses no dependen del locale de la máquina.
 
@@ -123,9 +125,25 @@ Cuando exista `onhold_sweep`, sus números pueden sumarse al mensaje. Lo que no 
 **Ejemplo ilustrativo**:
 
 > ⚠️ Slug sin respuesta — Some Manga Title
-> El slug `some-manga-slug` lleva 5 chequeos con 404. Queda fuera del barrido diario; se reintenta en el semanal. Revisa si cambió de URL en la fuente.
+> El slug `some-manga-slug` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario y no se reintenta solo. Revisa si cambió de URL en la fuente y corrígelo.
 
 Varios mangas que crucen el umbral en la misma corrida se agrupan en un solo mensaje, con el mismo criterio de separación por línea en blanco del digest.
+
+### Desviación registrada (v1.4): el mensaje no promete el reintento semanal
+
+Hasta la v1.3 el ejemplo cerraba con "se reintenta en el semanal", que asume que `onhold_sweep` existe. **No existe todavía**, y el one-pager ya acepta que durante la fase corazón un mapeo pausado en el umbral no tiene vía automática de recuperación. Un mensaje que promete un reintento que nadie ejecuta es peor que no tener mensaje: entrena a esperar sentado.
+
+La redacción va condicionada a si el barrido semanal existe, así que **se corrige sola** cuando entre la fase 2 en vez de depender de que alguien se acuerde.
+
+### Orden de operaciones del aviso (v1.4): notificar antes de avanzar el contador
+
+Vale la misma regla que el digest, y acá no es estilística sino estructural. Un mapeo que llega al umbral **queda fuera de la población**, así que no vuelve a consumir request ni a incrementar: el cruce ocurre **exactamente una vez** en la vida de un slug muerto.
+
+Consecuencia: si el contador avanza primero y el envío falla, ese mapeo pierde el único aviso que va a generar jamás, y el título sale del barrido diario en el silencio que este mensaje existe para romper.
+
+Por eso el contador se mantiene un paso por debajo del umbral hasta que el aviso salió. Un envío fallido cierra la corrida como `partial` y la siguiente corrida re-detecta y reintenta. Cuesta un request extra; compra que el aviso no se pueda perder.
+
+**`job_runs.notifications_sent` cuenta este aviso**, igual que cuenta un digest. Es un mensaje que salió, y no contarlo haría de `job_runs` un diagnóstico peor de lo que es.
 
 ## Manejo de fallos de envío
 

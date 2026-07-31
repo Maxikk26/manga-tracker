@@ -1,6 +1,6 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.7 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.8). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.7 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.9). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
 
 Cambios vs 1.6: se cierra el caso del reset de `last_chapter_read` a nulo en el trigger de `reading_history`, que la v1.6 no cubría y que habría abortado el UPDATE por la restricción NOT NULL de `chapter_history.chapter_num`.
 Cambios vs 1.5: corrección del pin de dependencia (apuntaba al one-pager v1.1, que es anterior al renombre de barridos y al glosario).

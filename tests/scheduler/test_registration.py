@@ -293,3 +293,77 @@ def test_an_unfinished_sweep_does_not_satisfy_the_catch_up_window():
         pass
     else:
         raise AssertionError("expected the overlap guard to refuse a second run")
+
+
+def test_reaping_releases_a_run_row_left_open_by_a_dead_process(tmp_path, caplog):
+    """One hard kill used to disable active_sweep permanently and silently.
+
+    `open_run` refuses to start while a row for the same job is open, and nothing
+    closed it: SIGKILL raises no Python exception, so `_make_job`'s handler never
+    runs. The result was a system reporting `ok` and detecting nothing. Observed
+    for real - `docker compose restart` allows 10s before SIGKILL and a sweep
+    takes about 150s.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.discovery.runs import RunAlreadyOpen, open_run
+    from manga_tracker.scheduler import reap_stale_runs
+    from manga_tracker.storage.db import connect
+
+    db_path = str(tmp_path / "reap.db")
+    conn = connect(db_path)
+
+    def stamp(hours):
+        return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    orphan = open_run(conn, SWEEP, stamp(-3))
+    conn.close()
+
+    with caplog.at_level(logging.ERROR):
+        assert reap_stale_runs(db_path) == 1
+    assert "would otherwise have blocked" in caplog.text
+
+    conn = connect(db_path)
+    row = conn.execute("SELECT status, finished_at, error_summary FROM job_runs WHERE id = ?", (orphan,)).fetchone()
+    assert row[0] == "error"          # never finished, so not `partial`
+    assert row[1] is not None
+    assert "reaped at startup" in row[2]
+
+    # The point of reaping: the job can run again.
+    open_run(conn, SWEEP, stamp(0))
+
+    # And a reaped run leaves the sweep owed, rather than counting as one.
+    from manga_tracker.scheduler import sweep_is_overdue
+    assert sweep_is_overdue(conn) is True
+
+    # A second open row exists now; prove the guard is still doing its job.
+    try:
+        open_run(conn, SWEEP, stamp(0))
+    except RunAlreadyOpen:
+        pass
+    else:
+        raise AssertionError("expected the overlap guard to still refuse a concurrent run")
+
+
+def test_reaping_leaves_a_run_that_may_still_be_alive_alone(tmp_path):
+    """The threshold is not arbitrary. `run-job` can be sweeping from a separate
+    container, where max_instances is no help because it is process-local, and a
+    real sweep takes minutes. Reaping a live run would close the row underneath
+    it and let a second one start concurrently - the opposite of the guard."""
+    from datetime import datetime, timedelta, timezone
+
+    from manga_tracker.discovery.active_sweep import JOB_NAME as SWEEP
+    from manga_tracker.discovery.runs import open_run
+    from manga_tracker.scheduler import reap_stale_runs
+    from manga_tracker.storage.db import connect
+
+    db_path = str(tmp_path / "alive.db")
+    conn = connect(db_path)
+    open_run(conn, SWEEP, (datetime.now(timezone.utc) - timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    conn.close()
+
+    assert reap_stale_runs(db_path) == 0
+    assert connect(db_path).execute(
+        "SELECT finished_at FROM job_runs WHERE id = 1"
+    ).fetchone()[0] is None
