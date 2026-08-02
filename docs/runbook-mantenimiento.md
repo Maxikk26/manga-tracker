@@ -4,7 +4,7 @@ Versión 1.5 — 2026-08-02. Documento operativo. Depende de `one-pager-v1a.md` 
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
-Cambios en v1.5: se fija que la rama es una unidad de **entrega**, no de autoría — un spec que se va a implementar enseguida viaja con su implementación, y el nombre de la rama describe la entrega completa. Se lista también qué sí va solo.
+Cambios en v1.5: se escribe la convención del **resumen al inicio de cada documento** — se venía aplicando de memoria y por eso estaba en tres formas distintas; incluye la lista de qué documentos la deben todavía. Y se fija que la rama es una unidad de **entrega**, no de autoría — un spec que se va a implementar enseguida viaja con su implementación, y el nombre de la rama describe la entrega completa. Se lista también qué sí va solo.
 
 Cambios en v1.4: el aviso de slug muerto ya existe y llega por Telegram, así que la sección de "un manga dejó de responder" deja de ser solo consulta manual; y se documenta el limpiador de corridas huérfanas al arrancar.
 
@@ -82,6 +82,23 @@ rg -n -o "^Versión [0-9.]+|\`[a-z-]+\.md\` \(v[0-9.]+\)" docs/*.md
 Código, tests y docs del mismo cambio **juntos**. Los commits son la materia prima para cortar PRs después; un historial con unidades limpias se corta en minutos, uno con commits gigantes se rehace.
 
 Conventional commits. Sin atribución de IA ni líneas de co-autoría.
+
+### Todo documento de `docs/` abre con un resumen que evita leerlo
+
+**Regla**: después del encabezado y antes de cualquier detalle va una sección `## Resumen`, en tabla, que cubra **todo lo que el documento decide**. Quien la lea debe poder aprobar el documento sin abrir el resto.
+
+Qué tiene que contestar el resumen, y son estas cosas y no otras:
+
+- Qué decide el documento, en una fila por decisión.
+- **Qué te va a costar**: tiempo, requests, trabajo manual tuyo. Con cifras, no adjetivos.
+- Qué queda fuera, para que nadie asuma de más.
+- Dónde está cada cosa, para saltar directo si algo no cuadra.
+
+No confundir con **"Decisiones discutibles"**, que es otra sección y tiene otro propósito: ahí van solo las decisiones que el lector podría querer revertir. Un documento largo lleva las dos — el resumen dice qué hace, las discutibles dicen qué validar.
+
+El motivo es de fricción, no de estética: un spec de 200 líneas que hay que leer entero para aprobarlo **no se aprueba, se posterga**. El resumen es lo que lo vuelve revisable en dos minutos.
+
+Deuda conocida al 2026-08-02: la convención se venía aplicando de memoria y por eso está en tres formas distintas. `spec-bot-telegram.md` y `spec-importador-kitsu.md` traen "Decisiones discutibles"; `manganato-fuente-actual.md` trae un "TL;DR"; `spec-modelo-de-datos.md` trae su resumen **al final** y solo para trazabilidad. Solo el importador tiene hoy la sección `## Resumen` completa. Al versionar cualquiera de los otros, se le agrega.
 
 ### La rama es una unidad de entrega, no de autoría
 

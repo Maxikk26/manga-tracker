@@ -8,6 +8,27 @@ Utilidad de arranque, invocable a mano, fuera del scheduler — igual que el see
 
 Todas las cifras de este documento son **medidas contra el export real y contra las fuentes en vivo el 2026-07-31**, no estimadas. Cada una dice de dónde salió.
 
+## Resumen: todo lo que decide este documento
+
+Si solo lees esta sección, ya sabes qué hace el importador y qué te va a costar.
+
+| Qué | Decisión | Dónde |
+|---|---|---|
+| **De dónde sale la data** | El export de Kitsu **no trae títulos**: es XML de MyAnimeList con ids, progreso y estado. El import es **archivo + API**, no un lector de archivo | §Lo primero |
+| **Qué entra** | Las **218** entradas. Las 152 activas con mapeo a la fuente; las **66 terminales sin mapeo**, solo metadata y progreso | §El archivo |
+| **Cómo se resuelve el título** | id de MAL → API de Kitsu, en lotes de 12. **150/152 (99%) en 8 requests** | §Resolución |
+| **Cómo se encuentra el slug** | Por **membresía en el sitemap** de manganato, no sondeando. **149/152 (98%)** | §Matching |
+| **Cuánto trabajo manual te queda** | **3 URLs a pegar a mano**, más 2 entradas sin mapping en Kitsu | §La lista de pendientes |
+| **Cuánto tarda** | ~11 a 34 minutos, y **casi todo es el delay de cortesía** de `fetch_chapters` | §Costo total |
+| **Qué se guarda de menos** | `my_score` y el id de MAL: no tienen columna y agregarla obliga a migrar. **Reversible**, el XML se conserva | Decisiones 1 y 5 |
+| **Qué queda nulo** | `last_read_at`, salvo en terminados. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
+| **Qué no se toca nunca** | Los bookmarks con `origin = seed`. Del import solo reciben metadata en `mangas` | §Carga |
+| **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
+
+Lo que **no** hace: no importa anime, no toca el scheduler, y no habilita el sitemap como mecanismo de detección — esa evaluación está cerrada en contra.
+
+Las cinco decisiones que podrías querer cambiar están en la sección siguiente.
+
 ## Lo primero, porque contradice al resto del paquete
 
 **El export de Kitsu no trae títulos.** El archivo que Kitsu genera está en formato MyAnimeList y contiene identificadores de MAL, progreso y estado. Nada más. Ni título, ni `kitsu_id`, ni géneros, ni portada, ni sinopsis.
