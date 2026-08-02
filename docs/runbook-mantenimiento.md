@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.4 — 2026-07-31. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-bot-telegram.md` (v1.4).
+Versión 1.5 — 2026-08-02. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-bot-telegram.md` (v1.4).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.5: se fija que la rama es una unidad de **entrega**, no de autoría — un spec que se va a implementar enseguida viaja con su implementación, y el nombre de la rama describe la entrega completa. Se lista también qué sí va solo.
 
 Cambios en v1.4: el aviso de slug muerto ya existe y llega por Telegram, así que la sección de "un manga dejó de responder" deja de ser solo consulta manual; y se documenta el limpiador de corridas huérfanas al arrancar.
 
@@ -80,6 +82,20 @@ rg -n -o "^Versión [0-9.]+|\`[a-z-]+\.md\` \(v[0-9.]+\)" docs/*.md
 Código, tests y docs del mismo cambio **juntos**. Los commits son la materia prima para cortar PRs después; un historial con unidades limpias se corta en minutos, uno con commits gigantes se rehace.
 
 Conventional commits. Sin atribución de IA ni líneas de co-autoría.
+
+### La rama es una unidad de entrega, no de autoría
+
+**Un spec que se va a implementar enseguida va en la MISMA rama que su implementación.** Escribirlo, mergearlo, y abrir otra rama para el código son dos PRs y dos revisiones para un solo cambio. Peor: separa el contrato de lo que lo cumple justo cuando revisarlos juntos es lo único que dice si el código hace lo que el documento prometió.
+
+Regla práctica: **si ya sabes qué código viene detrás, es la misma rama.** Y el nombre de la rama describe la entrega completa (`feat/importador-kitsu`), no el primer paso (`docs/spec-importador`).
+
+Lo que **sí** va solo, porque nada lo sigue:
+
+- Correcciones a un runbook después de un despliegue.
+- Un pin desactualizado, una desviación registrada, un cambio de convención.
+- Un spec que se escribe para **cerrar una decisión**, sin implementación prevista a continuación.
+
+Esto no contradice que `docs/` sea la fuente de verdad y que el spec se escriba antes del código. Se sigue escribiendo primero; simplemente viaja con lo que produce.
 
 ### Paso 7: el cuerpo del PR sale de la plantilla
 
