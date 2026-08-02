@@ -1,6 +1,6 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.4 — 2026-07-31. Documento operativo. Depende de `one-pager-v1a.md` (v1.9) y `spec-bot-telegram.md` (v1.4).
+Versión 1.4 — 2026-07-31. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-bot-telegram.md` (v1.4).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
@@ -217,5 +217,5 @@ Dato del último chequeo: los dominios hermanos `natomanga.com` y `mangakakalot.
 ## Lo que queda pendiente
 
 - `onhold_sweep` y el aviso de slug muerto por Telegram: fase 2. Hoy el contador cuenta pero no avisa, y un mapeo pausado no tiene reintento automático.
-- Spec del importador de Kitsu: sin escribir.
+- Import de Kitsu: la spec está escrita (`spec-importador-kitsu.md` v1.0); falta implementarla. Es el criterio 4 de V1a.
 - Pipeline de CI: después de V1a/V1b. Tiene más sentido automatizar este runbook cuando ya lo hayas ejecutado a mano unas veces.

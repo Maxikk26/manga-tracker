@@ -1,6 +1,6 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.4 — 2026-07-31. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.9) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
+Versión 1.4 — 2026-07-31. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.10) y `spec-cliente-fuente-descubrimiento.md` (v1.4).
 
 Cambios vs 1.3: el Mensaje 3 se construye. Dos decisiones que la v1.3 no cubría, ambas en su sección: el aviso **no promete** el reintento semanal mientras `onhold_sweep` no exista (desviación registrada, redacción condicionada para que se corrija sola), y el contador de fallos **no avanza hasta que el aviso salió** — el cruce del umbral ocurre exactamente una vez por slug muerto, así que avanzar primero haría que un envío fallido destruyera el único aviso que ese mapeo va a generar. Se fija también que `notifications_sent` cuenta este aviso.
 

@@ -61,6 +61,7 @@ Los documentos de `docs/` son la fuente de verdad. Orden de lectura recomendado:
 3. **`spec-cliente-fuente-descubrimiento.md`** — cliente de la fuente (3 operaciones) y la lógica de los tres mecanismos de detección.
 4. **`spec-bot-telegram.md`** — los tres tipos de mensaje y su formato.
 5. **`spec-seed-manual.md`** — formato del CSV de arranque y comportamiento del cargador.
+6. **`spec-importador-kitsu.md`** — el export de Kitsu, cómo se resuelven sus identificadores y cómo se mapean los títulos a la fuente.
 
 Runbooks operativos:
 
@@ -73,7 +74,7 @@ Documentos de apoyo:
 - **`medicion-ventana-feed.md`** — el experimento que fijó el intervalo del feed y degradó su rol a oportunista.
 - **`referencia-repo-viejo.md`** — rescate del intento anterior en Go (2025) y, sobre todo, la lista de antipatrones que lo mataron.
 
-Falta por escribir: la spec del importador de Kitsu (fase 3 de V1a; no bloquea el arranque).
+El paquete está completo: no falta ninguna spec por escribir.
 
 ### Mapa de dependencias entre documentos
 
@@ -81,10 +82,14 @@ Cada documento declara en su encabezado de qué versiones depende. Este mapa dic
 
 | Si versionas… | Debes revisar y actualizar el pin de… |
 |---|---|
-| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot |
-| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual |
-| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana |
-| `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana |
+| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot, **runbook de despliegue, runbook de mantenimiento** |
+| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual, fuente actual, **importador Kitsu** |
+| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana, **importador Kitsu** |
+| `spec-bot-telegram.md` | **runbook de mantenimiento** |
+| `spec-seed-manual.md` | **runbook de despliegue, importador Kitsu** |
+| `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana, **importador Kitsu** |
+
+Las filas en negrita se agregaron el 2026-08-02: **el mapa mismo estaba desactualizado**. Le faltaban los dos runbooks, que pinean el one-pager desde que se escribieron, y dos documentos no tenían fila propia pese a ser pineados por otros. Un mapa incompleto es peor que no tenerlo, porque da la falsa seguridad de haber revisado.
 
 **Un pin desactualizado es una alarma, no un detalle cosmético**: significa que ese documento no vio los cambios posteriores del que pinea. Ya ocurrió una vez — la spec del bot mantuvo un nombre retirado precisamente porque su pin apuntaba a una versión anterior al renombre.
 
