@@ -19,6 +19,17 @@ RETRY_WAIT_SECONDS = 30.0
 COURTESY_DELAY_SECONDS = 1.0  # deterministic: Kitsu needs politeness, not disguise — no jitter, no rng
 TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
+# Identifying the client is not decoration, it is the difference between working
+# and not. urllib's default `Python-urllib/3.12` is refused by Kitsu with a flat
+# HTTP 403; the identical request with any real User-Agent returns 200. Verified
+# live on 2026-08-02, both directions.
+#
+# It lives here rather than in kitsu.py because it is not Kitsu-specific: a
+# transport that will not say who it is is the defect, and the next catalogue
+# implementation would rediscover the same 403. Callers may override it.
+USER_AGENT = "manga-tracker/1.0 (+https://github.com/Maxikk26/manga-tracker)"
+DEFAULT_HEADERS = {"User-Agent": USER_AGENT}
+
 
 class UrllibJsonTransport:
     """Sequential only: a fixed 1.0s delay between requests (never before
@@ -33,7 +44,9 @@ class UrllibJsonTransport:
         if self._request_made:
             self._sleeper(COURTESY_DELAY_SECONDS)
         self._request_made = True
-        return self._get_with_one_retry(url, headers=headers, timeout=timeout)
+        # Caller headers win, so a future catalogue can still say something else.
+        merged = {**DEFAULT_HEADERS, **headers}
+        return self._get_with_one_retry(url, headers=merged, timeout=timeout)
 
     def _get_with_one_retry(self, url: str, *, headers: dict[str, str], timeout: float) -> Response:
         for attempt in (1, 2):

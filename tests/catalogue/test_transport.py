@@ -136,3 +136,44 @@ def test_network_failure_retried_once_then_propagates_as_catalogue_transient(mon
         transport.get("https://x/mappings", headers={}, timeout=30.0)
 
     assert sleeper.calls == [RETRY_WAIT_SECONDS]
+
+
+def test_every_request_identifies_the_client():
+    """A transport that will not say who it is gets a flat 403 from Kitsu.
+
+    This is the one thing the other tests in this file structurally cannot
+    catch: they drive a fake transport, and a fake has no headers. The real
+    client shipped sending only `Accept`, so urllib supplied its default
+    `Python-urllib/3.12` and Kitsu refused every call with HTTP 403 while the
+    suite stayed green. Verified live on 2026-08-02 in both directions - the
+    identical request with any real User-Agent returns 200.
+
+    Asserted on the urllib.request.Request the transport builds, because that
+    is the last point where the header still exists as data we can inspect.
+    """
+    import urllib.request
+
+    from manga_tracker.catalogue.transport import USER_AGENT, UrllibJsonTransport
+
+    seen = {}
+
+    class _Captured(Exception):
+        pass
+
+    def _capture(request, timeout=None):
+        seen["headers"] = dict(request.headers)
+        raise _Captured
+
+    transport = UrllibJsonTransport(sleeper=lambda _: None)
+    original = urllib.request.urlopen
+    urllib.request.urlopen = _capture
+    try:
+        transport.get("https://kitsu.io/api/edge/manga", headers={"Accept": "application/vnd.api+json"})
+    except Exception:
+        pass
+    finally:
+        urllib.request.urlopen = original
+
+    # urllib title-cases header keys on the Request object.
+    assert seen["headers"].get("User-agent") == USER_AGENT
+    assert seen["headers"].get("Accept") == "application/vnd.api+json"  # caller's header survives
