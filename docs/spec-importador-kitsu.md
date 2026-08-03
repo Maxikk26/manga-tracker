@@ -1,8 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.1 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.2 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
 
-Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
+Cambios vs 1.1: se cierran cinco huecos que la fase de propuesta encontró leyendo el código contra este documento, los cinco verificados. **La reconciliación con el seed pasa a tres llaves en orden** — la v1.0 decía `kitsu_id`, y como el seed nunca lo escribe eso habría duplicado los 16 títulos ya cargados. `last_read_at` se fija a medianoche UTC. Se agregan `alt_titles`, `synopsis` y `total_chapters`, que el modelo ya prevé y la v1.0 omitió. El catálogo lleva **transporte propio confinado**, porque las reglas de confinamiento no le dejaban ninguna ruta HTTP legal. Y se corrige la afirmación de que el sitemap se lee sin delay: es falsa contra el transporte real. Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
 
 Fase 3 de V1a ("backfill"). Cierra el criterio de terminado 4: el histórico completo en la base con la lista de pendientes documentada.
 
@@ -21,16 +21,18 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Cómo se resuelve el título** | id de MAL → API de Kitsu, en lotes de 12. **150/152 (99%) en 8 requests** | §Resolución |
 | **Cómo se encuentra el slug** | Por **membresía en el sitemap** de manganato, no sondeando. **149/152 (98%)** | §Matching |
 | **Cuánto trabajo manual te queda** | **3 URLs a pegar a mano**, más 2 entradas sin mapping en Kitsu | §La lista de pendientes |
-| **Cuánto tarda** | ~11 a 34 minutos, y **casi todo es el delay de cortesía** de `fetch_chapters` | §Costo total |
+| **Cuánto tarda** | ~13 a 37 minutos, y **casi todo es el delay de cortesía**: `fetch_chapters` más los 10 shards del sitemap, que tampoco están exentos | §Costo total |
 | **Qué se guarda de menos** | `my_score` y el id de MAL: no tienen columna y agregarla obliga a migrar. **Reversible**, el XML se conserva | Decisiones 1 y 5 |
-| **Qué queda nulo** | `last_read_at`, salvo en terminados. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
+| **Qué queda nulo** | `last_read_at` salvo en 28 terminados, donde se escribe a **medianoche UTC**. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
+| **Cómo no duplica lo ya cargado** | Reconcilia por **tres llaves en orden**: `kitsu_id`, slug, título exacto. La v1.0 usaba solo `kitsu_id`, que el seed nunca escribe — habría duplicado tus 16 títulos | §Reconciliación |
+| **Qué metadata trae** | Título, `alt_titles`, `synopsis`, géneros, portada, estado y `total_chapters` cuando exista. Las columnas ya estaban en el esquema: **sin migración** | §La frontera del catálogo |
 | **Qué no se toca nunca** | Los bookmarks con `origin = seed`. Del import solo reciben metadata en `mangas` | §Carga |
 | **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
 | **Si Kitsu cierra o cambia** | El catálogo va **detrás de un contrato**, como la fuente. Se escribe otra implementación —AniList está verificada como alternativa— y se cambia una línea en `cli.py` | §La frontera del catálogo |
 
 Lo que **no** hace: no importa anime, no toca el scheduler, y no habilita el sitemap como mecanismo de detección — esa evaluación está cerrada en contra.
 
-Las cinco decisiones que podrías querer cambiar están en la sección siguiente.
+Las siete decisiones que podrías querer cambiar están en la sección siguiente.
 
 ## Lo primero, porque contradice al resto del paquete
 
@@ -54,6 +56,25 @@ Esto corrige tres afirmaciones vigentes en el paquete, que asumían que la metad
 4. **Un match encontrado se verifica antes de aceptarse.** La membresía prueba que el slug existe, no que sea el manga correcto. La verificación sale casi gratis porque el import ya tiene que llamar a `fetch_chapters`.
 5. **`my_score` se descarta en V1a.** No tiene columna, y agregarla es el mismo problema de migración del punto 1. Reversible por la misma razón: el XML se conserva.
 6. **El catálogo va detrás de un contrato, igual que la fuente.** Kitsu es la implementación de hoy, no una dependencia estructural. Ver la sección siguiente.
+7. **La reconciliación con el seed se resuelve por tres llaves en orden, no por `kitsu_id` solo.** Ver la sección siguiente a esa. Es la decisión que evita duplicar los 16 títulos que ya están cargados.
+
+## Reconciliación con las filas del seed
+
+La v1.0 decía "localiza la fila en `mangas` por `kitsu_id`". **Eso no funciona**, y el defecto es serio: `storage/repositories.py` nunca escribe `kitsu_id`, así que **los 16 títulos cargados por el seed lo tienen nulo**. Buscar por esa columna no los encuentra, y el import crearía 16 mangas duplicados en vez de enriquecer los existentes — exactamente el fallo que la regla de `bookmarks.origin` existe para prevenir.
+
+Se resuelve por tres llaves, en este orden, y la primera que acierte gana:
+
+| # | Llave | Cuándo acierta |
+|---|---|---|
+| 1 | `mangas.kitsu_id` | Re-ejecuciones: el import previo ya lo escribió. Es UNIQUE |
+| 2 | El slug, vía `manga_sites.source_key` para el sitio manganato | **El caso real de la primera corrida.** Las filas del seed sí tienen slug, y el matching resuelve el mismo slug para el mismo título |
+| 3 | Título exacto normalizado | Red de seguridad, para cuando el slug del seed y el del catálogo difieren para la misma obra |
+
+**La llave 3 tiene un guardián**: solo aplica si la normalización da **exactamente una** fila candidata. Si hay cero o más de una, no se adivina — la entrada se reporta y queda para revisión manual. Un merge equivocado por título es peor que un duplicado, porque el duplicado se ve y el merge silencioso no.
+
+Al reconciliar por las llaves 2 o 3, **el import escribe el `kitsu_id` que faltaba** en esa fila. Así la segunda corrida ya acierta por la llave 1 y el orden deja de importar.
+
+Lo que no cambia en ningún caso: si esa fila tiene un bookmark con `origin = seed`, **el bookmark no se toca**. Solo se enriquece `mangas`.
 
 ## La frontera del catálogo
 
@@ -80,13 +101,26 @@ CatalogueEntry
     catalogue_id         el id propio del catálogo (hoy va a mangas.kitsu_id)
     title                título canónico, para mostrar
     title_candidates     lista ORDENADA de nombres para buscar el slug
+    alt_titles           lista, tal cual, para mangas.alt_titles
+    synopsis             texto o nulo
     genres               lista
     cover_url
+    total_chapters       entero o nulo
     publication_status   ongoing | finished
 
 CatalogueClient
     resolve(external_ids) -> lista de CatalogueEntry
 ```
+
+`alt_titles` y `synopsis` estaban previstos en `spec-modelo-de-datos.md` y prometidos en el README, y la v1.0 de este documento los había omitido. **No cuestan una llamada extra**: la consulta de categorías ya pega a `/manga`, que los trae en la misma respuesta. Las cuatro columnas existen en el esquema desde el día uno, así que no hay migración.
+
+`total_chapters` se escribe **solo cuando el catálogo lo trae**: medido, `chapterCount` está presente en 48 de 153. El resto queda nulo, que es lo honesto — es distinto de cero.
+
+### El catálogo necesita su propio transporte confinado
+
+`tests/test_architecture.py` fija `curl_cffi` a `sources/manganato/transport.py` y `urllib.request` a `notifier/telegram.py`. **`catalogue/kitsu.py` no puede usar ninguna de las dos**, y eso es correcto: reusar el transporte de manganato metería conocimiento de una fuente dentro del catálogo, que es justo lo que la frontera evita.
+
+Va un `catalogue/transport.py` propio, con su entrada nueva en `CONFINEMENT_RULES`. Su política de cortesía es la suya: Kitsu es una API pública documentada que responde en lote, no una web que se scrapea, así que no le aplica el delay de 5-15s de la fuente.
 
 **`title_candidates` es la pieza que justifica la frontera.** El orden de preferencia es conocimiento del catálogo, no del importador: en Kitsu es `titles.en` → `abbreviatedTitles` → `canonicalTitle` → `titles.en_jp`, y en AniList sería `english` → `synonyms` → `romaji`. El importador recibe una lista ya ordenada y prueba en orden; **no sabe que existe un campo llamado `abbreviatedTitles`**, igual que el descubrimiento no sabe cómo se arma una URL de manganato.
 
@@ -137,7 +171,11 @@ Estructura, medida sobre el export real (218 entradas):
 | `my_score` | 20/218 | Se descarta (decisión 5) |
 | `my_read_volumes`, `my_times_read`, `update_on_import` | 218/218 | Sin uso |
 
-**`last_read_at` no se puede llenar en general, y se deja nulo.** El modelo de datos dice que "el import trae la última actividad de Kitsu como aproximación"; el export **no tiene ese campo**. `my_start_date` es cuándo empecé, que es un dato distinto y escribirlo ahí sería mentir. La única excepción honesta es `my_finish_date`: en un manga terminado, la fecha de fin **es** la de la última lectura. Se usa solo ahí.
+**`last_read_at` no se puede llenar en general, y se deja nulo.** El modelo de datos dice que "el import trae la última actividad de Kitsu como aproximación"; el export **no tiene ese campo**. `my_start_date` es cuándo empecé, que es un dato distinto y escribirlo ahí sería mentir. La única excepción honesta es `my_finish_date`: en un manga terminado, la fecha de fin **es** la de la última lectura.
+
+Ese campo es una fecha pelada (`2021-09-07`) y el modelo exige timestamp UTC completo. **Se escribe a medianoche UTC** — `2021-09-07T00:00:00Z` — que es la convención estándar para una fecha sin hora y no inventa precisión: cualquier consumidor que agrupe por día calendario obtiene el día correcto, y ninguno puede confundirla con una hora medida.
+
+Alcance real, medido: **29 de 218 entradas traen `my_finish_date`**, ninguna con hora, y **cero centinelas `0000-00-00`** (que otros exports de MAL sí emiten; este no). De los 66 terminales, solo 28 tienen fecha, así que **38 terminales quedan con `last_read_at` nulo** aunque estén completados. Es correcto: no hay dato.
 
 ### Reparto por estado, medido
 
@@ -216,7 +254,13 @@ manganato publica un sitemap **declarado en su propio `robots.txt`**, así que c
 
 Medido: **91.471 URLs** `/manga/<slug>`, cada una con `<lastmod>` UTC. Diez requests, ~238 KB comprimidos cada una, y el parseo con `iterparse` toma 0.04s por shard.
 
-Un candidato acierta si su slug **está en ese conjunto**. Eso reemplaza 152 sondeos con delay de 5-15s —entre 19 y 38 minutos— por 10 requests sin delay entre ellas.
+Un candidato acierta si su slug **está en ese conjunto**. Eso reemplaza 152 sondeos por 10 requests.
+
+**Corrección a la v1.0, que decía "sin delay entre ellas".** Era falso: `CurlCffiTransport` aplica la política de 5-15s a toda llamada desde la segunda, sin excepción, así que los 10 shards cuestan entre 1 y 2.5 minutos. La medición original se hizo con `curl_cffi` directo y por eso no lo vio.
+
+**No se le hace excepción**, y la razón es de diseño, no de pereza: la política de cortesía vale para la fuente completa, y abrir un caso especial para "esta ruta sí es de máquinas" invita a que el próximo también lo sea. Dos minutos y medio en un import de media hora no compran nada que justifique una grieta en esa regla.
+
+Lo que sí se verificó es que **no hace falta tocar el contrato**: `Response` expone `text: str` y no `content: bytes`, y `ET.fromstring` parsea los 10.000 elementos desde ese string sin problema, incluso con la declaración de encoding en la cabecera. Aun así siguen siendo 19 a 38 minutos de sondeo evitados.
 
 **Resultado medido: 149 de 152 (98%).** Quedan 3 para pegar a mano.
 
@@ -236,10 +280,10 @@ Orden por prioridad de trabajo manual, según el one-pager: primero `want_to_rea
 
 **Por cada entrada con match verificado:**
 
-1. Crea o localiza la fila en `mangas` por `kitsu_id` (UNIQUE). Escribe título canónico, géneros, portada y `publication_status`.
+1. Crea o **reconcilia** la fila en `mangas` por las tres llaves en orden (§Reconciliación con las filas del seed), escribiendo el `kitsu_id` que faltara. Vuelca título canónico, `alt_titles`, `synopsis`, géneros, portada, `publication_status` y `total_chapters` cuando el catálogo lo traiga.
 2. Crea la fila en `manga_sites` con el slug y la URL de ficha construida por el cliente.
 3. `fetch_chapters` sobre el slug: fija `latest_chapter_num`, `latest_chapter_url`, `latest_chapter_at` y `last_checked_at`; vuelca los capítulos devueltos a `chapter_history` con `detected_via = seed_backfill`.
-4. Crea la fila en `bookmarks`: status mapeado, `last_chapter_read` de `my_read_chapters`, `origin = kitsu_import`, **`progress_is_approx = 1`**, `last_read_at` de `my_finish_date` si el estado es terminal y la fecha existe, si no nulo.
+4. Crea la fila en `bookmarks`: status mapeado, `last_chapter_read` de `my_read_chapters`, `origin = kitsu_import`, **`progress_is_approx = 1`**, `last_read_at` a **medianoche UTC** de `my_finish_date` cuando el estado es terminal y la fecha existe (28 de 66), nulo en el resto.
 
 **Por cada entrada terminal (`completed`, `dropped`):** solo los pasos 1 y 4. Sin mapeo, sin request a la fuente.
 
@@ -286,7 +330,7 @@ Re-correr después de rellenar pendientes cuesta una llamada por entrada nueva y
 |---|---|---|
 | Resolución en Kitsu | 8 | Lotes de 12, una pasada |
 | Categorías | ~13 | Llamada aparte, lotes de 12 |
-| Sitemap de manganato | 10 | Sin delay entre ellas; no es la fuente de contenido |
+| Sitemap de manganato | 10 | **Con** el delay de 5-15s, sin excepción: 1 a 2.5 minutos |
 | `fetch_chapters` | ~136 | **Los únicos con delay de 5-15s.** 11 a 34 minutos |
 
 ## Pendientes abiertos
