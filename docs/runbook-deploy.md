@@ -23,7 +23,7 @@ cd manga-tracker
 cp .env.example .env
 ```
 
-Rellena las seis variables. **El archivo tiene que tener contenido**: un `.env` vacío hace fallar `test-telegram` con "Missing required environment variable(s)", y el mensaje no distingue "archivo vacío" de "archivo ausente".
+Rellena las **siete** variables del bloque de abajo, y cuéntalas contra tu archivo: `cp .env.example .env` puede dejarte con menos de las que este runbook lista, y la que falta no se nota hasta que el comportamiento sale raro en vez de fallar. **El archivo tiene que tener contenido**: un `.env` vacío hace fallar `test-telegram` con "Missing required environment variable(s)", y el mensaje no distingue "archivo vacío" de "archivo ausente".
 
 ```
 TELEGRAM_BOT_TOKEN=...
