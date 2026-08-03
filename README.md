@@ -8,9 +8,16 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 
 ## Estado
 
-Fase 0 completa: el diseño de V1a está cerrado y documentado en `docs/`. Sin código todavía.
+**En producción desde el 2026-07-30.** Corre solo en el mini-PC, en Docker, sin intervención.
 
-La implementación arranca por la **fase corazón** (esquema, seed, cliente de la fuente, detección, digest de Telegram, Docker) y no se desvía hasta que llegue la primera notificación real.
+| Fase de V1a | Estado |
+|---|---|
+| Fase 0 — diseño | ✅ el paquete de `docs/` está completo |
+| Fase corazón — esquema, seed, cliente, detección, digest, Docker | ✅ desplegada; primera notificación real el 30 de julio |
+| Fase 2 — aviso de slug muerto | ✅ desplegada. `onhold_sweep` sigue pendiente y hoy no barrería nada: no hay bookmarks en `on_hold` hasta que corra el import |
+| Fase 3 — import de Kitsu | 🔨 implementada, sin correr todavía contra la base real |
+
+Criterio de terminado de V1a: los cuatro puntos del one-pager. Faltan el criterio 2 (`onhold_sweep`) y el 4 (que el import haya corrido de verdad).
 
 ## Cómo funciona (resumen)
 
