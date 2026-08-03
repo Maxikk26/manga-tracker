@@ -38,6 +38,6 @@ The source client MUST expose `fetch_known_slugs() -> Sequence[str]`, returning 
 
 ## References
 
-- docs/spec-importador-kitsu.md v1.2
+- docs/spec-importador-kitsu.md v1.3
 - docs/spec-cliente-fuente-descubrimiento.md v1.4
 - openspec/changes/v1a-heart-phase/specs/source-client/spec.md

@@ -16,7 +16,7 @@ La implementación arranca por la **fase corazón** (esquema, seed, cliente de l
 
 Híbrido catálogo + scraping ligero:
 
-- **Kitsu** aporta la metadata pesada (títulos canónicos, portadas, sinopsis, géneros).
+- **Kitsu** aporta la metadata pesada (títulos canónicos, portadas, sinopsis, géneros). Llega de su **API, en tiempo de import**, no del archivo exportado: el export de Kitsu viene en formato MyAnimeList y solo trae ids, progreso y estado — ni un título (`spec-importador-kitsu.md` §"Lo primero").
 - **La fuente de lectura** (manganato) se consulta solo para detectar capítulos nuevos, nunca para descargar contenido.
 
 Detección en tres velocidades, todas secuenciales y sin concurrencia:

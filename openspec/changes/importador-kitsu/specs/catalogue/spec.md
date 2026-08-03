@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A confined-transport contract for resolving external catalogue metadata (title, alt titles, synopsis, genres, cover, publication status, chapter count) from a MyAnimeList id. Kitsu is today's implementation; the contract keeps a future catalogue swap to one new module plus one `cli.py` line (docs/spec-importador-kitsu.md v1.2 §"La frontera del catálogo").
+A confined-transport contract for resolving external catalogue metadata (title, alt titles, synopsis, genres, cover, publication status, chapter count) from a MyAnimeList id. Kitsu is today's implementation; the contract keeps a future catalogue swap to one new module plus one `cli.py` line (docs/spec-importador-kitsu.md v1.3 §"La frontera del catálogo").
 
 ## Requirements
 
@@ -87,5 +87,5 @@ The catalogue MUST use its own transport module (`catalogue/transport.py`), MUST
 
 ## References
 
-- docs/spec-importador-kitsu.md v1.2
+- docs/spec-importador-kitsu.md v1.3
 - docs/spec-modelo-de-datos.md v1.7

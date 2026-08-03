@@ -1,10 +1,23 @@
 """Composition-root wiring (design D6/D7): `seed` runs without the Telegram
 env vars present. No network: `--dry-run` returns before any
-`fetch_chapters` call, though `ensure_site` still bootstraps the `sites` row."""
+`fetch_chapters` call, though `ensure_site` still bootstraps the `sites` row.
+
+`import-kitsu` is wired here too, and its tests all replace the two concretes
+`cli.py` constructs - `KitsuCatalogue` and `ManganatoClient` - at the wiring
+point. That is the same trick `test_test_telegram_reaches_the_injected_transport`
+uses, and it is what proves the subcommand really hands the built objects to
+`run_import` instead of quietly doing nothing.
+"""
+
+import csv
 
 import pytest
 
-from manga_tracker.cli import main
+from manga_tracker.catalogue.contracts import CatalogueEntry, CatalogueTransient
+from manga_tracker.cli import build_parser, main
+from manga_tracker.sources.contracts import Chapter
+from manga_tracker.sources.manganato.client import build_manga_url, extract_slug
+from manga_tracker.storage.db import connect
 
 
 def test_seed_dry_run_succeeds_without_telegram_env(tmp_path, monkeypatch):
@@ -91,3 +104,241 @@ def test_test_telegram_reports_on_both_paths(monkeypatch, capsys):
     Sender.result = False
     assert cli.main(["test-telegram"]) == 1
     assert "FAILED" in capsys.readouterr().out
+
+
+# --- import-kitsu -------------------------------------------------------------
+#
+# The doubles below can express failure on purpose. A catalogue that always
+# answers happily would leave the abort path in `_cmd_import_kitsu` unreachable,
+# and an unreachable guard is the failure mode this repo has already shipped
+# once.
+
+
+class FakeCatalogue:
+    def __init__(self, entries=(), error=None):
+        self._entries = {entry.external_id: entry for entry in entries}
+        self._error = error
+        self.resolve_calls = 0
+
+    def resolve(self, external_ids):
+        self.resolve_calls += 1
+        if self._error is not None:
+            raise self._error
+        return [self._entries[key] for key in external_ids if key in self._entries]
+
+
+class FakeSource:
+    """The two URL operations delegate to the real manganato implementations,
+    as every other double in this suite does: they make no request, and
+    stubbing them would let the double drift from the real contract."""
+
+    build_manga_url = staticmethod(build_manga_url)
+    extract_slug = staticmethod(extract_slug)
+
+    def __init__(self, known_slugs=(), chapters_by_slug=None):
+        self._known = frozenset(known_slugs)
+        self._chapters = dict(chapters_by_slug or {})
+        self.requested = []
+
+    def fetch_known_slugs(self, *, progress=None):
+        return self._known
+
+    def fetch_chapters(self, slug, *, limit=50):
+        self.requested.append(slug)
+        return self._chapters.get(slug, [Chapter(chapter_num=999, url="x", published_at=None)])
+
+
+def _catalogue_entry(external_id, title, *, candidates=None):
+    return CatalogueEntry(
+        external_id=external_id,
+        catalogue_id=f"k{external_id}",
+        title=title,
+        title_candidates=candidates if candidates is not None else [title],
+        alt_titles=[],
+        synopsis=None,
+        genres=[],
+        cover_url=None,
+        total_chapters=None,
+        publication_status="ongoing",
+    )
+
+
+def _export(tmp_path, *entries):
+    body = "".join(
+        "<manga>"
+        f"<manga_mangadb_id>{external_id}</manga_mangadb_id>"
+        f"<my_read_chapters>{read}</my_read_chapters>"
+        f"<my_status>{status}</my_status>"
+        "</manga>"
+        for external_id, status, read in entries
+    )
+    path = tmp_path / "kitsu-manga.xml"
+    path.write_text(f"<myanimelist><myinfo/>{body}</myanimelist>", encoding="utf-8")
+    return path
+
+
+def _wire(monkeypatch, catalogue, source):
+    from manga_tracker import cli
+
+    monkeypatch.setattr(cli, "KitsuCatalogue", lambda transport: catalogue)
+    monkeypatch.setattr(cli, "ManganatoClient", lambda transport: source)
+
+
+def _explode(*_args, **_kwargs):
+    raise AssertionError("this run must construct nothing and open nothing")
+
+
+def _raise_oserror(*_args, **_kwargs):
+    raise OSError("read-only file system")
+
+
+def test_import_kitsu_defaults_to_the_mounted_volume_paths():
+    """IMP-1 scenario 1. Inside the container `data/` is the volume, so both
+    defaults name the file the operator actually dropped there."""
+    args = build_parser().parse_args(["import-kitsu"])
+
+    assert args.file == "data/kitsu-manga.xml"
+    assert args.pending_file == "data/kitsu-pendientes.csv"
+    assert args.dry_run is False
+
+
+def test_import_kitsu_dry_run_reports_the_composition_and_builds_nothing(tmp_path, monkeypatch, capsys):
+    """A dry run has to be free. The real run costs 13-37 minutes of delayed
+    requests, so validating the file must not construct a client, open the
+    database or reach the network - or nobody will ever validate first."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "KitsuCatalogue", _explode)
+    monkeypatch.setattr(cli, "ManganatoClient", _explode)
+    monkeypatch.setattr(cli, "connect", _explode)
+    monkeypatch.setattr(cli, "run_import", _explode)
+    export = _export(tmp_path, ("1", "Reading", 5), ("2", "On Hold", 3), ("3", "Completed", 99))
+
+    assert main(["import-kitsu", "--file", str(export), "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert "3 entr(ies) in the export" in out
+    # 2 non-terminal, 1 terminal: the two numbers that tell the operator how
+    # long the real run will take.
+    assert "2 need a slug at the source; 1 terminal one(s) cost no request." in out
+    assert "Dry run: nothing written, nothing requested." in out
+    assert not (tmp_path / "db.sqlite3").exists()
+    assert not (tmp_path / "kitsu-pendientes.csv").exists()
+
+
+def test_import_kitsu_rejects_a_missing_export_before_creating_anything(tmp_path, monkeypatch, capsys):
+    """Half a run is worse than no run: the file is read before the connection,
+    before the `sites` row and before the first request, so a missing export
+    leaves no database behind to wonder about."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "KitsuCatalogue", _explode)
+    monkeypatch.setattr(cli, "ManganatoClient", _explode)
+    monkeypatch.setattr(cli, "connect", _explode)
+    missing = tmp_path / "nope.xml"
+
+    assert main(["import-kitsu", "--file", str(missing)]) == 1
+
+    out = capsys.readouterr().out
+    assert "Cannot read the export" in out and str(missing) in out
+    assert not (tmp_path / "db.sqlite3").exists()
+
+
+def test_import_kitsu_reports_a_malformed_export_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "connect", _explode)
+    empty = tmp_path / "kitsu-manga.xml"
+    empty.write_text("<myanimelist><myinfo/></myanimelist>", encoding="utf-8")
+
+    assert main(["import-kitsu", "--file", str(empty)]) == 1
+    assert "zero <manga> entries" in capsys.readouterr().out
+
+
+def test_import_kitsu_reports_an_unreachable_catalogue_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    """IMP-1 scenario 2. Without the catalogue there is not even a title, so
+    the only honest outcome is an empty database and a message - never a few
+    rows and an exit code nobody reads."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    source = FakeSource()
+    _wire(monkeypatch, FakeCatalogue(error=CatalogueTransient("kitsu.io timed out")), source)
+    export = _export(tmp_path, ("1", "Reading", 5))
+
+    assert main(["import-kitsu", "--file", str(export), "--pending-file", str(tmp_path / "p.csv")]) == 1
+
+    out = capsys.readouterr().out
+    assert "Import aborted before the first entry was written" in out
+    assert "kitsu.io timed out" in out
+    conn = connect(str(tmp_path / "db.sqlite3"))
+    assert conn.execute("SELECT COUNT(*) FROM mangas").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 0
+    assert source.requested == []
+    assert not (tmp_path / "p.csv").exists()
+
+
+def test_import_kitsu_loads_what_it_can_and_writes_the_rest_to_the_pending_list(tmp_path, monkeypatch, capsys):
+    """The shape of the real run in miniature: most entries land, the ones the
+    source does not publish leave as a CSV with the url column empty."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    catalogue = FakeCatalogue([
+        _catalogue_entry("1", "One Piece", candidates=["One Piece"]),
+        _catalogue_entry("2", "Ryuusa no Ori", candidates=["Ryuusa no Ori"]),
+    ])
+    source = FakeSource(known_slugs=["one-piece"])
+    _wire(monkeypatch, catalogue, source)
+    export = _export(tmp_path, ("1", "Reading", 5), ("2", "On Hold", 12))
+    pending_path = tmp_path / "kitsu-pendientes.csv"
+
+    assert main(["import-kitsu", "--file", str(export), "--pending-file", str(pending_path)]) == 0
+
+    assert catalogue.resolve_calls == 1
+    assert source.requested == ["one-piece"]
+    conn = connect(str(tmp_path / "db.sqlite3"))
+    assert [row[0] for row in conn.execute("SELECT title FROM mangas")] == ["One Piece"]
+    with open(pending_path, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert rows == [{"title": "Ryuusa no Ori", "url": "", "last_chapter_read": "12", "status": "on_hold"}]
+    out = capsys.readouterr().out
+    # Printed before the file is written, so half an hour of requests is not
+    # lost to a bad path.
+    assert out.index("need a url pasted by hand") < out.index(f"Wrote 1 row(s) to {pending_path}")
+    assert "seed --file" in out
+
+
+def test_import_kitsu_writes_no_pending_file_when_nothing_is_pending(tmp_path, monkeypatch, capsys):
+    """An empty list means there is nothing to paste. Writing a header-only
+    file would overwrite the urls the operator pasted into the previous one,
+    and that file is hand-typed and not reconstructible."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    _wire(monkeypatch, FakeCatalogue([_catalogue_entry("1", "One Piece")]), FakeSource(known_slugs=["one-piece"]))
+    export = _export(tmp_path, ("1", "Reading", 5))
+    pending_path = tmp_path / "kitsu-pendientes.csv"
+
+    assert main(["import-kitsu", "--file", str(export), "--pending-file", str(pending_path)]) == 0
+
+    assert not pending_path.exists()
+    assert "Nothing pending" in capsys.readouterr().out
+
+
+def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_written(
+    tmp_path, monkeypatch, capsys
+):
+    """The list is the run's only irreplaceable output. A bad path must cost
+    the file, not the information."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    _wire(monkeypatch, FakeCatalogue([_catalogue_entry("1", "Ryuusa no Ori")]), FakeSource())
+    monkeypatch.setattr(cli, "write_pending", _raise_oserror)
+    export = _export(tmp_path, ("1", "Reading", 5))
+
+    # Nothing loaded, so the exit code is 1: an import that placed no row at
+    # all is a failure even when every entry was accounted for.
+    assert main(["import-kitsu", "--file", str(export)]) == 1
+
+    out = capsys.readouterr().out
+    assert "'Ryuusa no Ori' (reading, read 5)" in out
+    assert "COULD NOT write the pending list" in out

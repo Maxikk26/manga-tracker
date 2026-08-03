@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A manually invoked, one-shot CLI utility that reads Kitsu's MyAnimeList-format XML export plus a catalogue lookup, reconciles entries against existing `mangas`/`bookmarks` rows, matches active/on-hold/want-to-read entries against manganato via sitemap membership, and loads history — closing V1a done-criterion 4 (docs/spec-importador-kitsu.md v1.2).
+A manually invoked, one-shot CLI utility that reads Kitsu's MyAnimeList-format XML export plus a catalogue lookup, reconciles entries against existing `mangas`/`bookmarks` rows, matches active/on-hold/want-to-read entries against manganato via sitemap membership, and loads history — closing V1a done-criterion 4 (docs/spec-importador-kitsu.md v1.3).
 
 ## Requirements
 
@@ -175,6 +175,6 @@ Re-running the importer MUST NOT create duplicate `mangas`, `manga_sites`, `chap
 
 ## References
 
-- docs/spec-importador-kitsu.md v1.2
+- docs/spec-importador-kitsu.md v1.3
 - docs/spec-modelo-de-datos.md v1.7
 - docs/spec-seed-manual.md v2.3

@@ -1,6 +1,6 @@
 # Design: Kitsu importer (`importador-kitsu`)
 
-Contract: `docs/spec-importador-kitsu.md` **v1.2**, which closed all five gaps the proposal raised. Nothing here is blocked on the owner.
+Contract: `docs/spec-importador-kitsu.md` **v1.3**. v1.2 closed the five gaps the proposal raised; v1.3 closed two more — a bookmark with `origin = manual` is protected exactly like a `seed` one, and a failed catalogue-enumeration unit aborts the whole import instead of matching against an incomplete slug set. Both were already anticipated here, by D3 and D5 respectively, so this is a pin correction and not a reopened decision. Nothing here is blocked on the owner.
 
 ## Technical Approach
 
@@ -129,4 +129,4 @@ No migration. Every column this writes exists in `schema.sql`, and `origin='kits
 
 ## Open Questions
 
-None. v1.2 closed the reconciliation key, `last_read_at`, `alt_titles`/`synopsis`, the catalogue transport, and the sitemap delay.
+None. v1.2 closed the reconciliation key, `last_read_at`, `alt_titles`/`synopsis`, the catalogue transport, and the sitemap delay; v1.3 closed the `manual`-origin bookmark rule and abort-on-failed-shard.
