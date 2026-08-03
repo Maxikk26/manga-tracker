@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from manga_tracker.catalogue.contracts import CatalogueUnexpected, Response
+from manga_tracker.catalogue.contracts import CatalogueTransient, CatalogueUnexpected, Response
 from manga_tracker.catalogue.kitsu import BATCH_SIZE, PAGE_LIMIT, KitsuCatalogue
+from manga_tracker.catalogue.transport import TRANSIENT_STATUS_CODES
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -20,10 +21,21 @@ def _fixture(name: str) -> dict:
 
 class ScriptedTransport:
     """Returns one scripted `Response` per call, in order; records every call
-    so a test can assert how many requests (and to which URL) were made."""
+    so a test can assert how many requests (and to which URL) were made.
 
-    def __init__(self, payloads: list[dict]):
-        self._responses = [Response(status=200, text=json.dumps(payload), headers={}) for payload in payloads]
+    `status` and raw `text` are parameterizable on purpose. The first version
+    hardcoded `status=200` and always serialized valid JSON, which made three of
+    kitsu.py's guards — the transient-status branch, the non-200 branch and the
+    JSONDecodeError guard — unreachable from every test in this file. They would
+    have stayed green while broken, which is this project's recurring failure
+    and exactly what a fake that cannot express failure guarantees.
+    """
+
+    def __init__(self, payloads: list[dict], *, status: int = 200, raw: str | None = None):
+        self._responses = [
+            Response(status=status, text=raw if raw is not None else json.dumps(payload), headers={})
+            for payload in payloads
+        ]
         self.calls: list[dict] = []
 
     def get(self, url, *, headers, timeout):
@@ -168,3 +180,47 @@ def test_resolve_chunks_more_than_batch_size_ids_into_separate_mapping_calls():
 
     mapping_calls = [call for call in transport.calls if "/mappings" in call["url"]]
     assert len(mapping_calls) == 2  # BATCH_SIZE + 1 ids never fit in one call
+
+
+@pytest.mark.parametrize("status", sorted(TRANSIENT_STATUS_CODES))
+def test_a_transient_status_raises_catalogue_transient(status):
+    """Reachable only because ScriptedTransport can now express a failure.
+
+    While the fake hardcoded 200 this branch could not be entered by any test in
+    this file, so deleting it would not have turned the suite red.
+    """
+    transport = ScriptedTransport([{}], status=status)
+    with pytest.raises(CatalogueTransient):
+        KitsuCatalogue(transport).resolve(["146982"])
+
+
+def test_an_unexpected_status_raises_catalogue_unexpected():
+    transport = ScriptedTransport([{}], status=418)
+    with pytest.raises(CatalogueUnexpected):
+        KitsuCatalogue(transport).resolve(["146982"])
+
+
+def test_a_body_that_is_not_json_raises_catalogue_unexpected():
+    """A well-formed HTTP 200 carrying something that is not JSON. Kitsu behind a
+    captive portal or an error page returns exactly this shape."""
+    transport = ScriptedTransport([{}], raw="<html>Just a moment...</html>")
+    with pytest.raises(CatalogueUnexpected):
+        KitsuCatalogue(transport).resolve(["146982"])
+
+
+def test_a_mapping_whose_item_carries_no_data_raises():
+    """The per-mapping guard, isolated at last.
+
+    The existing missing-include fixture trips the earlier `mappings and not
+    included` check first, so this specific raise had no test that could reach
+    it. Here `included` is populated, so only the per-mapping branch can fire.
+    """
+    payload = {
+        "data": [{
+            "attributes": {"externalId": "146982"},
+            "relationships": {"item": {"links": {"related": "..."}}},  # no `data`
+        }],
+        "included": [{"type": "manga", "id": "55797", "attributes": {"canonicalTitle": "X"}}],
+    }
+    with pytest.raises(CatalogueUnexpected):
+        KitsuCatalogue(ScriptedTransport([payload])).resolve(["146982"])
