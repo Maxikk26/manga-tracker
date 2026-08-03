@@ -42,6 +42,19 @@ COMPOSITION_ROOT = {"cli.py", "__main__.py"}
 # Concrete implementations only the composition root may name.
 CONCRETE_IMPLEMENTATIONS = {"sources.manganato", "notifier.telegram"}
 
+# word (lowercased) -> the only directory allowed to say it.
+#
+# Source knowledge leaks as vocabulary long before it leaks as an import, and
+# the AST check above structurally cannot see it: `"/sitemap.xml"` is a string,
+# not an import. The sitemap is manganato's own mechanism for publishing its
+# catalogue — a caller asks for known slugs and must no more learn that a
+# sitemap exists than it learns how a chapter URL is assembled. The day another
+# module names one, it has started depending on how this source works.
+VOCABULARY_RULES = {
+    "sitemap": "sources/manganato/",
+    "shard": "sources/manganato/",
+}
+
 
 def _imports(path: Path) -> set[str]:
     """Absolute module names imported by this file.
@@ -139,6 +152,24 @@ def test_directional_rules_actually_fire():
             assert _matches(_internal(offender), prefix), (
                 f"rule {package} -> {prefix} cannot match a real import of {offender}"
             )
+
+
+def test_source_vocabulary_stays_inside_its_own_client():
+    """The boundary as words, not just as imports.
+
+    A module that never imports `sources.manganato` but prints "fetching shard
+    3 of 10" has still learned how manganato works, and a change of source
+    would leave that string lying. Progress is therefore reported as `(unit,
+    total)` integers, and the naming stays where the knowledge is.
+    """
+    violations = []
+    for path in PKG.rglob("*.py"):
+        rel = path.relative_to(PKG).as_posix()
+        text = path.read_text(encoding="utf-8").lower()
+        for word, home in VOCABULARY_RULES.items():
+            if word in text and not rel.startswith(home):
+                violations.append(f"{rel} says {word!r}; only {home} may — that is source knowledge")
+    assert not violations, "\n".join(violations)
 
 
 def test_third_party_confinement():

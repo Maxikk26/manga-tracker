@@ -5,8 +5,17 @@ about the reading list, bookmark states, or the DB (CD Parte A / CLAUDE.md)."""
 import json
 from urllib.parse import urlparse
 
-from manga_tracker.sources.contracts import Chapter, FeedItem, MangaDetails, NotFound, Transport, Unexpected
+from manga_tracker.sources.contracts import (
+    Chapter,
+    FeedItem,
+    MangaDetails,
+    NotFound,
+    ProgressCallback,
+    Transport,
+    Unexpected,
+)
 from manga_tracker.sources.manganato.parsing import parse_feed, parse_manga_details
+from manga_tracker.sources.manganato.sitemap import fetch_published_urls
 
 BASE_URL = "https://www.manganato.gg"
 FEED_PATH = "/manga-list/latest-manga"
@@ -103,6 +112,29 @@ class ManganatoClient:
             )
             for raw in data["chapters"][:limit]
         ]
+
+    def fetch_known_slugs(self, *, progress: ProgressCallback | None = None) -> frozenset[str]:
+        """Every slug the source publishes right now (KIT Seccion "Matching
+        contra manganato"), so a caller can test membership instead of probing
+        the source once per title: ~91.000 slugs for a handful of requests
+        rather than one delayed request per candidate.
+
+        Sequential and delay-bound like every other operation here, which is
+        why `progress` exists — the wait is minutes long and silence is
+        indistinguishable from a hang.
+
+        Aborts rather than trimming: any failure the transport's retry did not
+        absorb propagates, because a short set would read as "the source does
+        not have these titles" and send the operator hunting for URLs that
+        already exist.
+        """
+        urls = fetch_published_urls(self._transport, base_url=BASE_URL, progress=progress)
+        slugs = frozenset(slug for url in urls if (slug := extract_slug(url)) is not None)
+        if not slugs:
+            raise Unexpected(
+                f"the source published {len(urls)} URLs, none of them a manga: URL layout changed"
+            )
+        return slugs
 
     def build_chapter_url(self, slug: str, chapter_num: float) -> str:
         return build_chapter_url(slug, chapter_num)

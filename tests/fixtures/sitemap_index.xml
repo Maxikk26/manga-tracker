@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trimmed from the live https://www.manganato.gg/sitemap.xml (2026-07-31).
+     The real index lists sitemap0.xml plus sitemap-comic-1 .. sitemap-comic-10;
+     kept here are the navigation entry (which carries no manga and must be
+     skipped) and two comic shards. -->
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://www.manganato.gg/sitemap0.xml</loc>
+    <lastmod>2026-07-31T01:30:04+00:00</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://www.manganato.gg/sitemap-comic-1.xml</loc>
+    <lastmod>2026-07-31T01:30:11+00:00</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://www.manganato.gg/sitemap-comic-2.xml</loc>
+    <lastmod>2026-07-31T01:30:18+00:00</lastmod>
+  </sitemap>
+</sitemapindex>
