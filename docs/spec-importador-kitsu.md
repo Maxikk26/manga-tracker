@@ -1,8 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.2 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.3 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
 
-Cambios vs 1.1: se cierran cinco huecos que la fase de propuesta encontró leyendo el código contra este documento, los cinco verificados. **La reconciliación con el seed pasa a tres llaves en orden** — la v1.0 decía `kitsu_id`, y como el seed nunca lo escribe eso habría duplicado los 16 títulos ya cargados. `last_read_at` se fija a medianoche UTC. Se agregan `alt_titles`, `synopsis` y `total_chapters`, que el modelo ya prevé y la v1.0 omitió. El catálogo lleva **transporte propio confinado**, porque las reglas de confinamiento no le dejaban ninguna ruta HTTP legal. Y se corrige la afirmación de que el sitemap se lee sin delay: es falsa contra el transporte real. Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
+Cambios vs 1.2: se cierran dos huecos que las fases de diseño y spec encontraron. **Se define qué bookmark puede tocar el import según su `origin`** — la v1.2 solo nombraba `seed` y dejaba `manual` y `kitsu_import` sin regla; de paso queda dicho que re-importar es hoy la única vía por la que `reading_history` se puebla. Y **un shard de sitemap que falla aborta el import** en vez de seguir con un conjunto incompleto. Cambios vs 1.1: se cierran cinco huecos que la fase de propuesta encontró leyendo el código contra este documento, los cinco verificados. **La reconciliación con el seed pasa a tres llaves en orden** — la v1.0 decía `kitsu_id`, y como el seed nunca lo escribe eso habría duplicado los 16 títulos ya cargados. `last_read_at` se fija a medianoche UTC. Se agregan `alt_titles`, `synopsis` y `total_chapters`, que el modelo ya prevé y la v1.0 omitió. El catálogo lleva **transporte propio confinado**, porque las reglas de confinamiento no le dejaban ninguna ruta HTTP legal. Y se corrige la afirmación de que el sitemap se lee sin delay: es falsa contra el transporte real. Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
 
 Fase 3 de V1a ("backfill"). Cierra el criterio de terminado 4: el histórico completo en la base con la lista de pendientes documentada.
 
@@ -26,7 +26,7 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Qué queda nulo** | `last_read_at` salvo en 28 terminados, donde se escribe a **medianoche UTC**. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
 | **Cómo no duplica lo ya cargado** | Reconcilia por **tres llaves en orden**: `kitsu_id`, slug, título exacto. La v1.0 usaba solo `kitsu_id`, que el seed nunca escribe — habría duplicado tus 16 títulos | §Reconciliación |
 | **Qué metadata trae** | Título, `alt_titles`, `synopsis`, géneros, portada, estado y `total_chapters` cuando exista. Las columnas ya estaban en el esquema: **sin migración** | §La frontera del catálogo |
-| **Qué no se toca nunca** | Los bookmarks con `origin = seed`. Del import solo reciben metadata en `mangas` | §Carga |
+| **Qué no se toca nunca** | Los bookmarks con `origin` `seed` o `manual`. Los `kitsu_import` sí se actualizan desde el export, y ese UPDATE es hoy lo único que puebla `reading_history` | §Reconciliación |
 | **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
 | **Si Kitsu cierra o cambia** | El catálogo va **detrás de un contrato**, como la fuente. Se escribe otra implementación —AniList está verificada como alternativa— y se cambia una línea en `cli.py` | §La frontera del catálogo |
 
@@ -75,6 +75,20 @@ Se resuelve por tres llaves, en este orden, y la primera que acierte gana:
 Al reconciliar por las llaves 2 o 3, **el import escribe el `kitsu_id` que faltaba** en esa fila. Así la segunda corrida ya acierta por la llave 1 y el orden deja de importar.
 
 Lo que no cambia en ningún caso: si esa fila tiene un bookmark con `origin = seed`, **el bookmark no se toca**. Solo se enriquece `mangas`.
+
+### Qué bookmark puede tocar el import, por `origin`
+
+La v1.2 solo nombraba `seed`, y eso dejaba dos casos sin regla. Se cierran así:
+
+| `origin` | Qué hace el import | Por qué |
+|---|---|---|
+| `seed` | **Nunca lo toca.** Solo enriquece `mangas` | Regla dura del modelo de datos. Lo escribí yo a mano y vale más que el catálogo |
+| `manual` | **Nunca lo toca** | Mismo argumento, con más razón: es una corrección deliberada mía |
+| `kitsu_import` | **Lo actualiza** con el estado y progreso del archivo | Esas filas las creó este import y el export es su fuente de verdad, igual que el CSV lo es para el cargador del seed |
+
+**Consecuencia deliberada, y es la parte interesante.** Al actualizar un bookmark propio, si el progreso cambió respecto a la corrida anterior, **el trigger de `reading_history` captura el evento**. Eso es dato honesto: leí capítulos, lo registré en Kitsu, y el re-import lo trae. No es un evento falso — el trigger dispara solo en UPDATE justo para distinguir esto del alta masiva.
+
+Y tiene un efecto que conviene decir en voz alta: mientras no exista UI para marcar leído, **re-correr el import con un export fresco es la única vía por la que `reading_history` se puebla**. No reemplaza a la UI, porque depende de que yo mantenga Kitsu al día y de acordarme de re-exportar, pero convierte el import de una operación de una sola vez en algo que vale la pena repetir cada tanto.
 
 ## La frontera del catálogo
 
@@ -259,6 +273,8 @@ Un candidato acierta si su slug **está en ese conjunto**. Eso reemplaza 152 son
 **Corrección a la v1.0, que decía "sin delay entre ellas".** Era falso: `CurlCffiTransport` aplica la política de 5-15s a toda llamada desde la segunda, sin excepción, así que los 10 shards cuestan entre 1 y 2.5 minutos. La medición original se hizo con `curl_cffi` directo y por eso no lo vio.
 
 **No se le hace excepción**, y la razón es de diseño, no de pereza: la política de cortesía vale para la fuente completa, y abrir un caso especial para "esta ruta sí es de máquinas" invita a que el próximo también lo sea. Dos minutos y medio en un import de media hora no compran nada que justifique una grieta en esa regla.
+
+**Si un shard del sitemap falla tras sus reintentos, el import aborta.** No se sigue con un conjunto de slugs incompleto: un shard perdido son ~10.000 slugs ausentes, y el efecto no sería un error visible sino títulos empujados a la lista de pendientes como si no existieran en la fuente. Eso te haría pegar URLs a mano para cosas que sí están. Fallar ruidosamente cuesta re-correr; fallar en silencio cuesta trabajo manual inventado y la sospecha de que el matching no sirve.
 
 Lo que sí se verificó es que **no hace falta tocar el contrato**: `Response` expone `text: str` y no `content: bytes`, y `ET.fromstring` parsea los 10.000 elementos desde ese string sin problema, incluso con la declaración de encoding en la cabecera. Aun así siguen siendo 19 a 38 minutos de sondeo evitados.
 
