@@ -9,19 +9,24 @@ PKG = Path(__file__).resolve().parent.parent / "manga_tracker"
 
 # top-level package -> other top-level packages it must never import
 DIRECTIONAL_RULES = {
-    "sources": {"storage", "discovery", "notifier", "seed"},
-    "notifier": {"storage", "sources", "discovery", "seed"},
-    "storage": {"sources", "discovery", "notifier", "seed"},
+    "sources": {"storage", "discovery", "notifier", "seed", "catalogue"},
+    "notifier": {"storage", "sources", "discovery", "seed", "catalogue"},
+    "storage": {"sources", "discovery", "notifier", "seed", "catalogue"},
     "discovery": {"sources.manganato", "notifier.telegram"},
     "seed": {"sources.manganato", "notifier.telegram"},
+    # catalogue is not downstream of the source client, nor of storage,
+    # discovery, notifier or seed (design D8, CAT-6).
+    "catalogue": {"storage", "discovery", "notifier", "seed", "sources"},
 }
 
-# third-party module -> the only file (relative to manga_tracker/) allowed to import it
+# third-party module -> the file(s) (relative to manga_tracker/) allowed to import it
 CONFINEMENT_RULES = {
-    "curl_cffi": "sources/manganato/transport.py",
-    "bs4": "sources/manganato/parsing.py",
-    "apscheduler": "scheduler.py",
-    "urllib.request": "notifier/telegram.py",
+    "curl_cffi": frozenset({"sources/manganato/transport.py"}),
+    "bs4": frozenset({"sources/manganato/parsing.py"}),
+    "apscheduler": frozenset({"scheduler.py"}),
+    # catalogue/transport.py joins notifier/telegram.py: both are documented
+    # JSON HTTPS calls with no anti-bot need (design D1).
+    "urllib.request": frozenset({"notifier/telegram.py", "catalogue/transport.py"}),
 }
 SQLITE_MODULE = "sqlite3"
 SQLITE_PACKAGE = "storage"
@@ -144,7 +149,9 @@ def test_third_party_confinement():
             if _matches(module, SQLITE_MODULE) and not rel.startswith(SQLITE_PACKAGE + "/"):
                 violations.append(f"{rel} imports confined module {module!r}")
                 continue
-            for confined, allowed_file in CONFINEMENT_RULES.items():
-                if _matches(module, confined) and rel != allowed_file:
-                    violations.append(f"{rel} imports confined module {module!r}, only {allowed_file} may")
+            for confined, allowed_files in CONFINEMENT_RULES.items():
+                if _matches(module, confined) and rel not in allowed_files:
+                    violations.append(
+                        f"{rel} imports confined module {module!r}, only {sorted(allowed_files)} may"
+                    )
     assert not violations, "\n".join(violations)

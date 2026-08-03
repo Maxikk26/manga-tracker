@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "id": "7776",
+      "type": "manga",
+      "relationships": {
+        "categories": {"data": [{"id": "5", "type": "categories"}, {"id": "12", "type": "categories"}]}
+      }
+    },
+    {
+      "id": "8888",
+      "type": "manga",
+      "relationships": {
+        "categories": {"data": [{"id": "5", "type": "categories"}]}
+      }
+    }
+  ],
+  "included": [
+    {"id": "5", "type": "categories", "attributes": {"title": "Action"}},
+    {"id": "12", "type": "categories", "attributes": {"title": "Fantasy"}}
+  ]
+}
