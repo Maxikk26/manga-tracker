@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<myanimelist>
+  <myinfo>
+    <user_export_type>2</user_export_type>
+    <user_total_manga>2</user_total_manga>
+  </myinfo>
+  <manga>
+    <manga_mangadb_id>146982</manga_mangadb_id>
+    <my_read_chapters>264</my_read_chapters>
+    <my_start_date>2021-09-07</my_start_date>
+    <my_status>Reading</my_status>
+  </manga>
+  <manga>
+    <manga_mangadb_id>777</manga_mangadb_id>
+    <my_read_chapters>3</my_read_chapters>
+    <my_start_date>2023-02-02</my_start_date>
+    <my_status>Rewatching</my_status>
+  </manga>
+</myanimelist>

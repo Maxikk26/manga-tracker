@@ -9,14 +9,19 @@ PKG = Path(__file__).resolve().parent.parent / "manga_tracker"
 
 # top-level package -> other top-level packages it must never import
 DIRECTIONAL_RULES = {
-    "sources": {"storage", "discovery", "notifier", "seed", "catalogue"},
-    "notifier": {"storage", "sources", "discovery", "seed", "catalogue"},
-    "storage": {"sources", "discovery", "notifier", "seed", "catalogue"},
+    "sources": {"storage", "discovery", "notifier", "seed", "catalogue", "importer"},
+    "notifier": {"storage", "sources", "discovery", "seed", "catalogue", "importer"},
+    "storage": {"sources", "discovery", "notifier", "seed", "catalogue", "importer"},
     "discovery": {"sources.manganato", "notifier.telegram"},
     "seed": {"sources.manganato", "notifier.telegram"},
     # catalogue is not downstream of the source client, nor of storage,
-    # discovery, notifier or seed (design D8, CAT-6).
-    "catalogue": {"storage", "discovery", "notifier", "seed", "sources"},
+    # discovery, notifier, seed or its own consumer (design D8, CAT-6).
+    "catalogue": {"storage", "discovery", "notifier", "seed", "sources", "importer"},
+    # The importer reads both contracts and writes through storage — that is
+    # its job. What it must never do is name a concrete implementation: the
+    # day it does, swapping Kitsu for AniList stops being a one-line change in
+    # cli.py (design D8, IMP-13).
+    "importer": {"catalogue.kitsu", "catalogue.transport", "sources.manganato"},
 }
 
 # third-party module -> the file(s) (relative to manga_tracker/) allowed to import it
