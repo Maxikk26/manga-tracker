@@ -154,6 +154,6 @@ Tras cumplir 1-4: 1-2 semanas de uso real antes de abrir la spec de V1b.
 2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada v1.2.
 3. Spec del bot Telegram (formato exacto de digest y heartbeat, manejo del token). ✅ cerrada v1.1. **Ya no bloquea el corazón.**
 4. Spec del seed manual (formato del archivo de entrada, validaciones). ✅ cerrada v2.1.
-5. Spec del importador Kitsu + matching de slugs. ✅ cerrada v1.0 (`spec-importador-kitsu.md`). Con ella el paquete queda completo.
+5. Spec del importador Kitsu + matching de slugs. ✅ cerrada v1.1 (`spec-importador-kitsu.md`). Con ella el paquete queda completo.
 
 **Nota de mantenimiento de esta lista**: las versiones de arriba son un espejo, no la fuente. La fuente es el encabezado de cada documento. Esta lista quedó desactualizada entre la v1.0 y la v1.3 de este one-pager —llegó a decir que la spec del bot seguía pendiente cuando ya estaba cerrada— así que al versionar cualquier spec hay que revisar también esta sección.

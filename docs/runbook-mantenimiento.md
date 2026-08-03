@@ -250,5 +250,5 @@ Dato del último chequeo: los dominios hermanos `natomanga.com` y `mangakakalot.
 ## Lo que queda pendiente
 
 - `onhold_sweep` y el aviso de slug muerto por Telegram: fase 2. Hoy el contador cuenta pero no avisa, y un mapeo pausado no tiene reintento automático.
-- Import de Kitsu: la spec está escrita (`spec-importador-kitsu.md` v1.0); falta implementarla. Es el criterio 4 de V1a.
+- Import de Kitsu: la spec está escrita (`spec-importador-kitsu.md` v1.1); falta implementarla. Es el criterio 4 de V1a, y su catálogo va detrás de un contrato — la implementación debe extender `DIRECTIONAL_RULES` con el paquete `catalogue`.
 - Pipeline de CI: después de V1a/V1b. Tiene más sentido automatizar este runbook cuando ya lo hayas ejecutado a mano unas veces.

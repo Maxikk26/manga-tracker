@@ -1,6 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.0 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.1 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+
+Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
 
 Fase 3 de V1a ("backfill"). Cierra el criterio de terminado 4: el histórico completo en la base con la lista de pendientes documentada.
 
@@ -24,6 +26,7 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Qué queda nulo** | `last_read_at`, salvo en terminados. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
 | **Qué no se toca nunca** | Los bookmarks con `origin = seed`. Del import solo reciben metadata en `mangas` | §Carga |
 | **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
+| **Si Kitsu cierra o cambia** | El catálogo va **detrás de un contrato**, como la fuente. Se escribe otra implementación —AniList está verificada como alternativa— y se cambia una línea en `cli.py` | §La frontera del catálogo |
 
 Lo que **no** hace: no importa anime, no toca el scheduler, y no habilita el sitemap como mecanismo de detección — esa evaluación está cerrada en contra.
 
@@ -50,6 +53,54 @@ Esto corrige tres afirmaciones vigentes en el paquete, que asumían que la metad
 3. **El match de slug se resuelve por membresía en el sitemap, no sondeando la fuente.** Ver la sección de resolución. Cambia 152 requests con delay por 10.
 4. **Un match encontrado se verifica antes de aceptarse.** La membresía prueba que el slug existe, no que sea el manga correcto. La verificación sale casi gratis porque el import ya tiene que llamar a `fetch_chapters`.
 5. **`my_score` se descarta en V1a.** No tiene columna, y agregarla es el mismo problema de migración del punto 1. Reversible por la misma razón: el XML se conserva.
+6. **El catálogo va detrás de un contrato, igual que la fuente.** Kitsu es la implementación de hoy, no una dependencia estructural. Ver la sección siguiente.
+
+## La frontera del catálogo
+
+Este proyecto ya tiene una respuesta para depender de un tercero: **el cliente de la fuente está detrás de un contrato**, y por eso un cambio de dominio o de UI en manganato toca un solo módulo. El catálogo merece exactamente lo mismo y por el mismo motivo.
+
+**Kitsu no es la fuente de MAL ni al revés.** Medido el 2026-08-02: un manga de Kitsu declara mapeos a `myanimelist`, `mangaupdates` y `anilist` — tres pares, no un upstream. Kitsu es un catálogo propio con referencias cruzadas.
+
+Y la elección de catálogo **es independiente de dónde viva mi biblioteca**. El export sale en formato de MAL venga de donde venga, y no trae títulos; hace falta una API igual. Se eligió Kitsu por medición, no por dónde está mi cuenta:
+
+| Catálogo | Auth | Lote | Título en inglés |
+|---|---|---|---|
+| **Kitsu** | no | sí, 20 por request | **94%**, medido sobre las 152 |
+| AniList | no | sí, GraphQL, y resuelve por `idMal` **sin paso de mapeo** | peor en la muestra probada |
+| MAL oficial | **403 sin registrar una app** | — | — |
+| Jikan (no oficial) | no | **no**, una request por manga | **1 de 15 respondió** |
+
+### El contrato
+
+Una sola operación, y es **por lotes a propósito**: el lote es lo que hace barato al import, y un contrato de a uno filtraría una forma mala hacia el resto.
+
+```
+CatalogueEntry
+    external_id          el id de MAL con el que se pidió
+    catalogue_id         el id propio del catálogo (hoy va a mangas.kitsu_id)
+    title                título canónico, para mostrar
+    title_candidates     lista ORDENADA de nombres para buscar el slug
+    genres               lista
+    cover_url
+    publication_status   ongoing | finished
+
+CatalogueClient
+    resolve(external_ids) -> lista de CatalogueEntry
+```
+
+**`title_candidates` es la pieza que justifica la frontera.** El orden de preferencia es conocimiento del catálogo, no del importador: en Kitsu es `titles.en` → `abbreviatedTitles` → `canonicalTitle` → `titles.en_jp`, y en AniList sería `english` → `synonyms` → `romaji`. El importador recibe una lista ya ordenada y prueba en orden; **no sabe que existe un campo llamado `abbreviatedTitles`**, igual que el descubrimiento no sabe cómo se arma una URL de manganato.
+
+### Dónde vive
+
+```
+manga_tracker/catalogue/contracts.py   el contrato, sin dependencias
+manga_tracker/catalogue/kitsu.py       la implementación de hoy
+manga_tracker/importer/                el importador, que solo conoce el contrato
+```
+
+Se extiende `DIRECTIONAL_RULES` de `tests/test_architecture.py`: `catalogue` no puede importar `storage`, `discovery`, `notifier`, `seed` ni `sources`; e `importer` no puede importar `catalogue.kitsu` ni `sources.manganato` — esos los cablea `cli.py`, que es la única raíz de composición. Sin esa regla la frontera es una intención, no una restricción, y ya hay historial en este proyecto de fronteras que solo existían en la cabeza de quien las escribió.
+
+**Qué compra concretamente**: si Kitsu cierra o cambia, se escribe `catalogue/anilist.py` y se cambia una línea en `cli.py`. El importador, el matching y el esquema no se tocan — salvo el nombre de la columna `kitsu_id`, que sería la única baja.
 
 ## El archivo
 
