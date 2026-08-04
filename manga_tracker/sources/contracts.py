@@ -2,7 +2,14 @@
 no URLs, HTML, or JSON shape — only the contract a client must satisfy."""
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
+
+# Reported as `(unit, total)` before each remote call of a multi-request
+# operation, so a caller can show that a long silence is progress and not a
+# hang. Both values are plain integers on purpose: what a unit *is* — a page,
+# a batch, a file — is the client's business, and naming it here would leak
+# one source's internals into the contract every source shares.
+ProgressCallback = Callable[[int, int], None]
 
 
 @dataclass(frozen=True)
@@ -83,3 +90,17 @@ class SourceClient(Protocol):
     # string, not an import.
     def build_manga_url(self, slug: str) -> str: ...
     def extract_slug(self, url: str) -> str | None: ...
+
+    # Every slug the source currently publishes, for membership tests: asking
+    # "does this slug exist?" once for the whole catalogue instead of probing
+    # the source title by title. How a client enumerates its catalogue is its
+    # own knowledge — the caller receives a set of slugs and learns nothing
+    # about which files, pages or endpoints produced it.
+    #
+    # It is a frozenset, not a Sequence, because membership is the entire
+    # point: the caller tests ~150 candidates against ~91k slugs.
+    #
+    # A failure that outlives the transport's retry propagates: a partial set
+    # is worse than none, since a slug missing from it is indistinguishable
+    # from a title the source does not carry (KIT v1.3).
+    def fetch_known_slugs(self, *, progress: ProgressCallback | None = None) -> frozenset[str]: ...

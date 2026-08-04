@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.9) y `spec-seed-manual.md` (v2.3).
+Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-seed-manual.md` (v2.3).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
@@ -23,7 +23,7 @@ cd manga-tracker
 cp .env.example .env
 ```
 
-Rellena las seis variables. **El archivo tiene que tener contenido**: un `.env` vacío hace fallar `test-telegram` con "Missing required environment variable(s)", y el mensaje no distingue "archivo vacío" de "archivo ausente".
+Rellena las **siete** variables del bloque de abajo, y cuéntalas contra tu archivo: `cp .env.example .env` puede dejarte con menos de las que este runbook lista, y la que falta no se nota hasta que el comportamiento sale raro en vez de fallar. **El archivo tiene que tener contenido**: un `.env` vacío hace fallar `test-telegram` con "Missing required environment variable(s)", y el mensaje no distingue "archivo vacío" de "archivo ausente".
 
 ```
 TELEGRAM_BOT_TOKEN=...

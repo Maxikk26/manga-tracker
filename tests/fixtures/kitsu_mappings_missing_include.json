@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "5001",
+      "type": "mappings",
+      "attributes": {"externalSite": "myanimelist/manga", "externalId": "146982"},
+      "relationships": {
+        "item": {
+          "links": {"self": "https://kitsu.io/api/edge/mappings/5001/relationships/item"}
+        }
+      }
+    }
+  ],
+  "included": []
+}

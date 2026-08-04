@@ -1,0 +1,78 @@
+{
+  "data": [
+    {
+      "id": "5001",
+      "type": "mappings",
+      "attributes": {"externalSite": "myanimelist/manga", "externalId": "146982"},
+      "relationships": {
+        "item": {
+          "links": {"self": "https://kitsu.io/api/edge/mappings/5001/relationships/item"},
+          "data": {"id": "7776", "type": "manga"}
+        }
+      }
+    },
+    {
+      "id": "5002",
+      "type": "mappings",
+      "attributes": {"externalSite": "myanimelist/manga", "externalId": "200000"},
+      "relationships": {
+        "item": {
+          "links": {"self": "https://kitsu.io/api/edge/mappings/5002/relationships/item"},
+          "data": {"id": "8888", "type": "manga"}
+        }
+      }
+    },
+    {
+      "id": "5003",
+      "type": "mappings",
+      "attributes": {"externalSite": "myanimelist/manga", "externalId": "300000"},
+      "relationships": {
+        "item": {
+          "links": {"self": "https://kitsu.io/api/edge/mappings/5003/relationships/item"},
+          "data": {"id": "9999", "type": "manga"}
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "7776",
+      "type": "manga",
+      "attributes": {
+        "canonicalTitle": "Ore dake Level Up na Ken",
+        "titles": {"en": "Solo Leveling", "en_jp": "Ore Dake Level Up na Ken (jp)", "ja_jp": "俺だけレベルアップな件"},
+        "abbreviatedTitles": ["SL"],
+        "synopsis": "A weak hunter gains the power to level up.",
+        "posterImage": {"original": "https://media.kitsu.app/manga/poster/7776/original.jpg"},
+        "status": "finished",
+        "chapterCount": 179
+      }
+    },
+    {
+      "id": "8888",
+      "type": "manga",
+      "attributes": {
+        "canonicalTitle": "Kage no Jitsuryokusha ni Naritakute!",
+        "titles": {"en_jp": "Kage no Jitsuryokusha ni Naritakute! (jp)"},
+        "abbreviatedTitles": [],
+        "synopsis": null,
+        "posterImage": null,
+        "status": "current",
+        "chapterCount": null
+      }
+    },
+    {
+      "id": "9999",
+      "type": "manga",
+      "attributes": {
+        "canonicalTitle": null,
+        "titles": {},
+        "abbreviatedTitles": [],
+        "synopsis": null,
+        "posterImage": null,
+        "status": "current",
+        "chapterCount": null
+      }
+    }
+  ]
+}

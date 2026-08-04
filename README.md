@@ -8,15 +8,22 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 
 ## Estado
 
-Fase 0 completa: el diseño de V1a está cerrado y documentado en `docs/`. Sin código todavía.
+**En producción desde el 2026-07-30.** Corre solo en el mini-PC, en Docker, sin intervención.
 
-La implementación arranca por la **fase corazón** (esquema, seed, cliente de la fuente, detección, digest de Telegram, Docker) y no se desvía hasta que llegue la primera notificación real.
+| Fase de V1a | Estado |
+|---|---|
+| Fase 0 — diseño | ✅ el paquete de `docs/` está completo |
+| Fase corazón — esquema, seed, cliente, detección, digest, Docker | ✅ desplegada; primera notificación real el 30 de julio |
+| Fase 2 — aviso de slug muerto | ✅ desplegada. `onhold_sweep` sigue pendiente y hoy no barrería nada: no hay bookmarks en `on_hold` hasta que corra el import |
+| Fase 3 — import de Kitsu | 🔨 implementada, sin correr todavía contra la base real |
+
+Criterio de terminado de V1a: los cuatro puntos del one-pager. Faltan el criterio 2 (`onhold_sweep`) y el 4 (que el import haya corrido de verdad).
 
 ## Cómo funciona (resumen)
 
 Híbrido catálogo + scraping ligero:
 
-- **Kitsu** aporta la metadata pesada (títulos canónicos, portadas, sinopsis, géneros).
+- **Kitsu** aporta la metadata pesada (títulos canónicos, portadas, sinopsis, géneros). Llega de su **API, en tiempo de import**, no del archivo exportado: el export de Kitsu viene en formato MyAnimeList y solo trae ids, progreso y estado — ni un título (`spec-importador-kitsu.md` §"Lo primero").
 - **La fuente de lectura** (manganato) se consulta solo para detectar capítulos nuevos, nunca para descargar contenido.
 
 Detección en tres velocidades, todas secuenciales y sin concurrencia:
@@ -61,6 +68,7 @@ Los documentos de `docs/` son la fuente de verdad. Orden de lectura recomendado:
 3. **`spec-cliente-fuente-descubrimiento.md`** — cliente de la fuente (3 operaciones) y la lógica de los tres mecanismos de detección.
 4. **`spec-bot-telegram.md`** — los tres tipos de mensaje y su formato.
 5. **`spec-seed-manual.md`** — formato del CSV de arranque y comportamiento del cargador.
+6. **`spec-importador-kitsu.md`** — el export de Kitsu, cómo se resuelven sus identificadores y cómo se mapean los títulos a la fuente.
 
 Runbooks operativos:
 
@@ -73,7 +81,7 @@ Documentos de apoyo:
 - **`medicion-ventana-feed.md`** — el experimento que fijó el intervalo del feed y degradó su rol a oportunista.
 - **`referencia-repo-viejo.md`** — rescate del intento anterior en Go (2025) y, sobre todo, la lista de antipatrones que lo mataron.
 
-Falta por escribir: la spec del importador de Kitsu (fase 3 de V1a; no bloquea el arranque).
+El paquete está completo: no falta ninguna spec por escribir.
 
 ### Mapa de dependencias entre documentos
 
@@ -81,10 +89,14 @@ Cada documento declara en su encabezado de qué versiones depende. Este mapa dic
 
 | Si versionas… | Debes revisar y actualizar el pin de… |
 |---|---|
-| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot |
-| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual |
-| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana |
-| `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana |
+| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot, **runbook de despliegue, runbook de mantenimiento** |
+| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual, fuente actual, **importador Kitsu** |
+| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana, **importador Kitsu** |
+| `spec-bot-telegram.md` | **runbook de mantenimiento** |
+| `spec-seed-manual.md` | **runbook de despliegue, importador Kitsu** |
+| `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana, **importador Kitsu** |
+
+Las filas en negrita se agregaron el 2026-08-02: **el mapa mismo estaba desactualizado**. Le faltaban los dos runbooks, que pinean el one-pager desde que se escribieron, y dos documentos no tenían fila propia pese a ser pineados por otros. Un mapa incompleto es peor que no tenerlo, porque da la falsa seguridad de haber revisado.
 
 **Un pin desactualizado es una alarma, no un detalle cosmético**: significa que ese documento no vio los cambios posteriores del que pinea. Ya ocurrió una vez — la spec del bot mantuvo un nombre retirado precisamente porque su pin apuntaba a una versión anterior al renombre.
 
