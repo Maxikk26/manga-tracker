@@ -192,7 +192,7 @@ def _write_entry(conn, entry: ExportEntry, catalogue_entry: CatalogueEntry, *, s
         manga_id = repo.write_manga_from_catalogue(
             conn,
             outcome.manga_id,
-            title=catalogue_entry.title,
+            title=readable_title(catalogue_entry),
             kitsu_id=catalogue_entry.catalogue_id,
             alt_titles=catalogue_entry.alt_titles,
             synopsis=catalogue_entry.synopsis,
@@ -239,6 +239,29 @@ def _manga_ids_by_title(conn, normalized_title) -> list[int]:
         if normalize(title) == normalized_title
     ]
 
+
+
+def readable_title(catalogue_entry) -> str:
+    """The title a human recognises, which is not always the canonical one.
+
+    `canonicalTitle` is romaji for most Korean and Japanese works, so writing it
+    put "Hoegwihan Yongbyeongeun Da Gyehoegi Itda" in the digest for a manga the
+    owner knows as "The Regressed Mercenary's Machinations" — unreadable without
+    the cover art. Roughly a third of the first real import's 212 rows landed
+    that way.
+
+    `title_candidates[0]` is the fix, and it is not a heuristic: the catalogue
+    already orders that list by its own preference (`titles.en`, then the
+    alternates, then canonical), so taking the head asks the catalogue which of
+    its names reads best instead of guessing. A "pick the most Latin-looking
+    string" rule was considered and rejected — measured against the real data it
+    got *Solo Max-Level Newbie* backwards.
+
+    This still honours the spec's rule that the catalogue's title outranks the
+    source's. It only settles *which* of the catalogue's titles.
+    """
+    candidates = list(catalogue_entry.title_candidates or ())
+    return candidates[0] if candidates else catalogue_entry.title
 
 def _pending(entry: ExportEntry, catalogue_entry: CatalogueEntry, reason: str) -> PendingEntry:
     """The resolved title travels with it: that is what makes pasting the URL

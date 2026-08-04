@@ -1,6 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.3 — 2026-08-02. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.4 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.5), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+
+Cambios vs 1.3: se fija **qué título se guarda** — el primer candidato de la lista ordenada, no el canónico, porque el canónico es romaji para la mayoría de obras coreanas y japonesas y dejó un tercio de las 212 filas del primer import ilegibles en el digest. Con el modo `--retitle-only` para arreglar lo ya escrito sin re-correr el import.
 
 Cambios vs 1.2: se cierran dos huecos que las fases de diseño y spec encontraron. **Se define qué bookmark puede tocar el import según su `origin`** — la v1.2 solo nombraba `seed` y dejaba `manual` y `kitsu_import` sin regla; de paso queda dicho que re-importar es hoy la única vía por la que `reading_history` se puebla. Y **un shard de sitemap que falla aborta el import** en vez de seguir con un conjunto incompleto. Cambios vs 1.1: se cierran cinco huecos que la fase de propuesta encontró leyendo el código contra este documento, los cinco verificados. **La reconciliación con el seed pasa a tres llaves en orden** — la v1.0 decía `kitsu_id`, y como el seed nunca lo escribe eso habría duplicado los 16 títulos ya cargados. `last_read_at` se fija a medianoche UTC. Se agregan `alt_titles`, `synopsis` y `total_chapters`, que el modelo ya prevé y la v1.0 omitió. El catálogo lleva **transporte propio confinado**, porque las reglas de confinamiento no le dejaban ninguna ruta HTTP legal. Y se corrige la afirmación de que el sitemap se lee sin delay: es falsa contra el transporte real. Cambios vs 1.0: **el catálogo pasa a estar detrás de un contrato**, con Kitsu como implementación y no como dependencia estructural. La v1.0 hablaba de "la API de Kitsu" como si fuera fija, lo cual contradecía la frontera que este proyecto ya aplica a la fuente. Se registran también las mediciones que sostienen la elección —MAL oficial devuelve 403 sin registrar una app, Jikan respondió 1 de 15, AniList sirve como alternativa verificada— y el hecho de que MAL **no es upstream de Kitsu** sino uno de tres pares.
 
@@ -25,6 +27,7 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Qué se guarda de menos** | `my_score` y el id de MAL: no tienen columna y agregarla obliga a migrar. **Reversible**, el XML se conserva | Decisiones 1 y 5 |
 | **Qué queda nulo** | `last_read_at` salvo en 28 terminados, donde se escribe a **medianoche UTC**. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
 | **Cómo no duplica lo ya cargado** | Reconcilia por **tres llaves en orden**: `kitsu_id`, slug, título exacto. La v1.0 usaba solo `kitsu_id`, que el seed nunca escribe — habría duplicado tus 16 títulos | §Reconciliación |
+| **Qué título guarda** | El primer candidato de la lista ordenada del catálogo, **no el canónico**: ese es romaji y dejó un tercio del primer import ilegible | §Qué título se guarda |
 | **Qué metadata trae** | Título, `alt_titles`, `synopsis`, géneros, portada, estado y `total_chapters` cuando exista. Las columnas ya estaban en el esquema: **sin migración** | §La frontera del catálogo |
 | **Qué no se toca nunca** | Los bookmarks con `origin` `seed` o `manual`. Los `kitsu_import` sí se actualizan desde el export, y ese UPDATE es hoy lo único que puebla `reading_history` | §Reconciliación |
 | **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
@@ -57,6 +60,20 @@ Esto corrige tres afirmaciones vigentes en el paquete, que asumían que la metad
 5. **`my_score` se descarta en V1a.** No tiene columna, y agregarla es el mismo problema de migración del punto 1. Reversible por la misma razón: el XML se conserva.
 6. **El catálogo va detrás de un contrato, igual que la fuente.** Kitsu es la implementación de hoy, no una dependencia estructural. Ver la sección siguiente.
 7. **La reconciliación con el seed se resuelve por tres llaves en orden, no por `kitsu_id` solo.** Ver la sección siguiente a esa. Es la decisión que evita duplicar los 16 títulos que ya están cargados.
+
+## Qué título se guarda
+
+El del catálogo manda sobre el de la fuente — eso no cambia. Lo que la v1.3 no decía es **cuál** de los títulos del catálogo.
+
+Se guarda **el primer candidato de la lista ordenada**, no el canónico. El canónico de Kitsu es romaji para la mayoría de obras coreanas y japonesas, y el primer import real lo demostró: escribió `Hoegwihan Yongbyeongeun Da Gyehoegi Itda` para un manga que yo reconozco como *The Regressed Mercenary's Machinations*. Ese registro tiene `titles.en` nulo y el nombre en inglés en sus alternativos. **Alrededor de un tercio de las 212 filas importadas quedó así**, ilegible en el digest sin la portada al lado.
+
+La lista de candidatos ya viene ordenada por la preferencia del propio catálogo (`titles.en`, luego alternativos, luego canónico), así que tomar su cabeza es preguntarle al catálogo cuál de sus nombres se lee mejor. **No es una heurística de "el más latino"**: esa se consideró y se descartó porque, medida contra la data real, invertía casos como *Solo Max-Level Newbie*.
+
+Si la lista viene vacía —posible, cuando el catálogo no tiene ningún nombre en alfabeto latino— se cae al canónico. Escribir vacío no es opción: la columna es NOT NULL.
+
+### Modo `--retitle-only`
+
+Las filas ya escritas no se arreglan solas, y re-correr el import completo costaría media hora y requests a la fuente para cambiar un texto. El modo `--retitle-only` vuelve a resolver el catálogo y actualiza **solo** `mangas.title`: cero requests a la fuente, cero escrituras en bookmarks o en `chapter_history`. Imprime cada cambio como `viejo -> nuevo`, porque un cambio masivo de títulos que no se puede leer antes de aceptarlo no es revisable.
 
 ## Reconciliación con las filas del seed
 

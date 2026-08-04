@@ -756,3 +756,42 @@ def test_entries_load_in_the_priority_order_of_the_manual_work_that_follows(tmp_
     assert [row[0] for row in conn.execute("SELECT title FROM mangas ORDER BY id")] == [
         "Title 4", "Title 3", "Title 1", "Title 2",
     ]
+
+
+# --- the readable title -------------------------------------------------------
+
+def test_the_stored_title_is_the_first_candidate_not_the_canonical_one():
+    """`canonicalTitle` is romaji for most Korean and Japanese works.
+
+    The first real import wrote "Hoegwihan Yongbyeongeun Da Gyehoegi Itda" for a
+    manga the owner knows as "The Regressed Mercenary's Machinations" - Kitsu id
+    73088, whose `titles.en` is null and whose first alternate is exactly the
+    English name. Unreadable in a Telegram digest without the cover art, and
+    roughly a third of that import's 212 rows landed the same way.
+
+    `title_candidates` is already ordered by the catalogue's own preference, so
+    the head of it is the answer. Deliberately NOT a "most Latin-looking string"
+    heuristic: measured against the real data, that got *Solo Max-Level Newbie*
+    backwards.
+    """
+    from manga_tracker.importer.run import readable_title
+
+    class Entry:
+        title = "Hoegwihan Yongbyeongeun Da Gyehoegi Itda"
+        title_candidates = ("The Regressed Mercenary's Machinations",
+                            "Every Returned Mercenary Has a Plan",
+                            "Hoegwihan Yongbyeongeun Da Gyehoegi Itda")
+
+    assert readable_title(Entry()) == "The Regressed Mercenary's Machinations"
+
+
+def test_an_entry_with_no_candidates_falls_back_to_the_canonical_title():
+    """Empty is possible - the catalogue may carry a title in no Latin script at
+    all. Falling back beats writing an empty string into a NOT NULL column."""
+    from manga_tracker.importer.run import readable_title
+
+    class Entry:
+        title = "Only This"
+        title_candidates = ()
+
+    assert readable_title(Entry()) == "Only This"
