@@ -1,6 +1,6 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.5 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.5), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.5 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
 
 Cambios vs 1.4: se salta el candidato escrito en un alfabeto que el lector no puede leer — la primera pasada real dejó cuatro filas en chino, ruso y coreano teniendo una alternativa legible más adelante en la misma lista. Y **el modo `--retitle-only` se borra**: era una migración de una sola vez, ya cumplida, y volver a correrlo pisaría dos títulos corregidos a mano.
 

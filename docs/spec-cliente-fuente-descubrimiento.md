@@ -1,6 +1,13 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.5 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.10), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
+Versión 1.6 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
+
+Cambios vs 1.5: el **Mecanismo 3 se construye**, y con él se cierran cuatro cosas que la v1.5 dejaba ambiguas o desactualizadas, todas en su sección y en la de slugs muertos:
+
+- **La población queda escrita como la unión** que ya estaba implícita en las dos afirmaciones de este documento: mapeos con bookmark en `on_hold`, **más** todo mapeo no-terminal pausado por el contador de fallos. Leídas por separado se contradecían; leídas juntas no. Un mapeo pausado siempre es `reading` o `want_to_read` —es la única población que el barrido diario, y por tanto el contador, llega a tocar—, así que la lectura "solo on-hold" habría dejado a **todo** mapeo pausado sin ningún reintento y habría vuelto falsa la promesa de reintento semanal del Mensaje 3 para el 100% de los avisos que ese mensaje puede emitir.
+- **El pre-filtro por hora de actualización aplica también acá.** 72 títulos on-hold es la misma escala que forzó el pre-filtro en el diario. La interacción con los slugs muertos es de corrección y está anotada: un slug muerto está ausente del índice de la fuente, y "desconocido no es sin cambios" lo pide igual.
+- **El aviso de slug muerto NO sale de este barrido**, y el motivo es la regla "un solo aviso por manga": el diario puede garantizarla porque su población excluye a quien llegó al umbral; este la incluye a propósito, así que un aviso desde acá se repetiría cada domingo mientras el slug siguiera muerto. Costo declarado, no escondido: un título `on_hold` cuyo slug muere no se anuncia nunca y solo se ve en `consecutive_failures` y en el log.
+- **"Al terminar se dispara el heartbeat semanal" queda superado.** `spec-bot-telegram.md` v1.2 desacopló el heartbeat y le dio horario propio; manda el documento más específico y más reciente, que es la regla de conflicto de este proyecto.
 
 Cambios vs 1.4: el `active_sweep` gana un **pre-filtro**: pregunta a la fuente qué títulos se movieron y pide capítulos solo de esos. Lo fuerza el import de Kitsu, que llevó la población de 16 a 89 mapeos — la cifra de "menos de 20" que este documento asumía quedó obsoleta. Con las cuatro reglas que lo hacen seguro y el acoplamiento de la hora del barrido al horario de refresco de la fuente (22:00 local).
 
@@ -188,13 +195,30 @@ Sustituye la mitigación anterior, que era una persona acordándose de correr el
 
 ## Mecanismo 3: barrido silencioso de on-hold (`onhold_sweep`)
 
-**Frecuencia**: semanal, domingo de madrugada (parámetro configurable).
+**Frecuencia**: semanal, domingo, a hora fija (parámetro configurable, hoy la misma que el barrido diario — ver "La hora compartida" abajo).
 
-**Población**: mapeos cuyo manga tiene bookmark en `on_hold`. Incluye los pausados por fallos: este barrido es su vía de reintento (ver abajo).
+**Población** (v1.6, escrita como unión): mapeos no-terminales que cumplan **cualquiera** de las dos condiciones:
 
-**Procedimiento**: idéntico al diario, con `detected_via = onhold_sweep`, salvo que **nunca notifica**: todas las actualizaciones son silenciosas e inmediatas.
+1. su manga tiene bookmark en `on_hold` — 72 tras el import de Kitsu, donde antes había cero; o
+2. su contador de fallos llegó al umbral, sea cual sea su estado no-terminal. Este barrido es su **única** vía de reintento.
 
-**Al terminar**: se dispara el heartbeat semanal. El descubrimiento entrega los números (mangas barridos, actualizaciones aplicadas, timestamp de la última corrida exitosa de detección leído de `job_runs`); el formato del mensaje pertenece a la spec del bot.
+Los terminales quedan fuera sin excepción, y la condición 2 es justo donde eso podría romperse por descuido: un título que se marcó `dropped` *porque* su slug murió carga el contador por encima del umbral y volvería a entrar por esa mitad de la unión. "Los terminales no consumen nada, nunca" es absoluto y gana.
+
+**Por qué la unión y no solo on-hold.** Un mapeo pausado siempre es `reading` o `want_to_read`: el contador solo lo alimenta el barrido diario, cuya población son exactamente esos dos estados. Así que leer esta población como "solo on-hold" deja a todo mapeo pausado sin ningún reintento —contradiciendo el paso 4 de slugs muertos, en este mismo documento— y vuelve mentira la promesa de reintento semanal del Mensaje 3 para todos los avisos que ese mensaje puede emitir.
+
+**Procedimiento**: idéntico al diario —incluido el pre-filtro por hora de actualización— con `detected_via = onhold_sweep`, salvo que **nunca notifica**: todas las actualizaciones son silenciosas e inmediatas. "Nunca notifica" es literal y cubre los tres mensajes: ni digest, ni aviso de slug muerto, ni heartbeat.
+
+Consecuencia deseada, no efecto colateral: si un mapeo pausado **activo** vuelve a responder, su capítulo se registra en `chapter_history`, el contador se resetea y `latest_chapter_num` **no** avanza. Por notificar-antes-de-actualizar, el aviso sigue debiéndose, y el barrido diario —al que el reset acaba de devolver ese mapeo— lo manda al día siguiente. Este barrido contesta "¿el slug está vivo?"; los avisos al lector son del diario.
+
+**El aviso de slug muerto no sale de acá** (v1.6). El Mensaje 3 exige "un solo aviso por manga". El barrido diario puede garantizarlo porque su población excluye todo mapeo en el umbral, así que el cruce ocurre exactamente una vez. Este barrido incluye esos mapeos a propósito, así que un aviso desde acá se repetiría cada domingo mientras el slug siguiera muerto, que es precisamente lo que el Mensaje 3 prohíbe. El contador sí se comporta igual que en cualquier otra parte: solo un "no encontrado" lo incrementa, cualquier éxito lo resetea, y se le permite pasar del umbral (un mapeo en 9 está tan excluido del diario como uno en 5, y el número es honesto sobre cuánto lleva ausente el slug).
+
+**Costo declarado**: un título `on_hold` cuyo slug muere **no se anuncia nunca**. Se ve en `manga_sites.consecutive_failures` y en el log, en ningún otro lado. Se acepta porque la alternativa —repetir el aviso cada semana— entrena a ignorar el único mensaje que existe para romper un silencio.
+
+**El pre-filtro aplica también acá, y la interacción con los slugs muertos es de corrección.** Un slug muerto es uno que la fuente dejó de publicar, así que está ausente de su índice de horas de actualización; la regla "desconocido no es sin cambios" lo pide igual y el reintento semanal sobrevive. Si esa regla se convirtiera algún día en "ausente = sin cambios", el reintento desaparecería en silencio justo para los mapeos cuya única vía es esta, y el Mensaje 3 empezaría a prometer algo que ya no pasa.
+
+**La hora compartida.** El día y la hora son configurables y por defecto la hora es la del barrido diario, así que los tres jobs cron caen en el mismo minuto del domingo. Con concurrencia cero (un solo worker) eso es una **cola**, no un solapamiento: el barrido de on-hold espera a que termine el diario en vez de correr a su lado, que es exactamente lo que la política de requests quiere. La espera está acotada por el peor barrido diario realista (~35 minutos de timeouts), muy dentro de la ventana de gracia, así que no se descarta ninguna corrida. Mover la hora es cambiar un parámetro; no hay razón estructural para hacerlo salvo que la espera moleste.
+
+**Al terminar**: nada. La v1.5 decía "se dispara el heartbeat semanal", y **eso quedó superado**: `spec-bot-telegram.md` v1.2 desacopló el heartbeat de este barrido, le dio horario propio y contenido nuevo, con su motivo registrado ahí. Manda el documento más específico y más reciente. El heartbeat late aunque este barrido no haya corrido, y tampoco lo cuenta como "última detección exitosa": un barrido que no notifica nada no es evidencia de que los mecanismos que sí notifican estén vivos.
 
 ## Slugs muertos (handoff 2 de la spec del modelo)
 
@@ -204,8 +228,8 @@ Sustituye la mitigación anterior, que era una persona acordándose de correr el
 
 1. Cada error de tipo **"no encontrado"** en un barrido incrementa el contador del mapeo. Los errores transitorios **no** lo incrementan (un timeout no dice nada sobre la validez del slug).
 2. Cualquier respuesta exitosa lo devuelve a cero.
-3. Al alcanzar **5 fallos consecutivos** (cinco días seguidos en el barrido diario), se envía **un solo aviso** por Telegram indicando qué manga dejó de responder y que hay que revisar su slug. El aviso no se repite mientras el contador siga alto.
-4. Un mapeo con el contador en 5 o más queda **pausado para el barrido diario**: se salta, no consume request. Sigue entrando al **barrido semanal**, que actúa como reintento de baja frecuencia: si el manga vuelve, el contador se resetea y todo se reanuda solo.
+3. Al alcanzar **5 fallos consecutivos** (cinco días seguidos en el barrido diario), se envía **un solo aviso** por Telegram indicando qué manga dejó de responder y que hay que revisar su slug. El aviso no se repite mientras el contador siga alto, y esa garantía descansa en el paso 4: solo el barrido diario emite el aviso, y su población excluye a quien ya llegó al umbral, así que el cruce ocurre exactamente una vez en la vida de un slug muerto. El barrido semanal, cuya población **sí** incluye esos mapeos, no emite aviso jamás por ese mismo motivo (Mecanismo 3).
+4. Un mapeo con el contador en 5 o más queda **pausado para el barrido diario**: se salta, no consume request. Sigue entrando al **barrido semanal**, que actúa como reintento de baja frecuencia: si el manga vuelve, el contador se resetea y todo se reanuda solo — el barrido diario lo recupera al día siguiente y es él quien notifica. En el semanal el contador sigue subiendo con cada "no encontrado" y se le permite pasar del umbral: un mapeo en 9 está tan excluido del diario como uno en 5, así que la exclusión se escribe como "menor que el umbral" y no como "igual al umbral".
 5. La reparación es manual: corrijo el slug en la base (o vía seed) y el contador se resetea en el siguiente chequeo exitoso.
 
 **Umbral revisable**: 5 es un valor inicial razonable (una semana laboral de reintentos). Si en uso real resulta molesto o lento, se ajusta; es un parámetro, no una decisión estructural.
@@ -218,10 +242,10 @@ Todo mecanismo abre una fila al arrancar y la cierra al terminar:
 |---|---|
 | `job_name` | `feed_check`, `active_sweep` u `onhold_sweep`. |
 | `started_at` / `finished_at` | Inicio y fin reales de la corrida. **`finished_at` se toma en el momento de cerrar, no del timestamp con que la corrida arrancó.** Una corrida propaga un solo `now` a todo lo que escribe —`detected_at`, `last_checked_at`— y eso es correcto: una corrida, un instante de observación. Pero `finished_at` significa *cuándo terminó*, y reusar el de apertura hacía que toda corrida reportara duración cero. Se detectó en vivo: un barrido de 166 segundos reales registró inicio y fin en el mismo segundo. Importa porque el caso para el que existe esta tabla es un barrido degradándose en timeouts —hasta ~35 minutos con 16 mapeos a 30s de timeout más reintentos— y eso es invisible si la duración siempre es cero. |
-| `status` | `ok` si todo salió bien; `partial` si hubo fallos individuales (items con error, o digest fallido) pero la corrida completó; `error` si la corrida abortó (excepción no controlada, feed inaccesible por completo). |
+| `status` | `ok` si todo salió bien; `partial` si hubo fallos individuales (items con error, o digest fallido) pero la corrida completó; `error` si la corrida abortó (excepción no controlada, feed inaccesible por completo). **`onhold_sweep` nunca cierra `partial`**: `partial` es el status de una corrida que completó y cuyo envío falló, y esta corrida no tiene envío que pueda fallar. Solo `ok` o `error`. |
 | `items_checked` | Items reales del feed procesados, o mangas consultados en el barrido. |
 | `updates_found` | Capítulos nuevos detectados (activos + silenciosos). |
-| `notifications_sent` | Líneas incluidas en el digest enviado con éxito. Cero si hubo silencio o si el envío falló. |
+| `notifications_sent` | Líneas incluidas en el digest enviado con éxito, más el aviso de slug muerto si salió. Cero si hubo silencio o si el envío falló, y **siempre cero en `onhold_sweep`**, que no tiene nada que enviar. |
 | `error_summary` | Tipo y mensaje corto de lo que falló. El detalle largo va al log. |
 
 **Correlación obligatoria**: toda línea de log emitida durante la corrida incluye el id de esta fila, según la convención de la spec del modelo.
@@ -235,8 +259,8 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
 | Parámetro | Valor inicial |
 |---|---|
 | Intervalo del chequeo por feed | 1 hora (fijado por medición del 2026-07-28) |
-| Frecuencia y hora del barrido de activos | Diario, madrugada a hora fija |
-| Día y hora del barrido de on-hold | Domingo, madrugada |
+| Frecuencia y hora del barrido de activos | Diario, hora fija (hoy 22:00 local, acoplada al refresco de la fuente) |
+| Día y hora del barrido de on-hold | Domingo, misma hora que el barrido de activos por defecto, configurable aparte |
 | Delay entre requests | Random entre 5 y 15 segundos |
 | Timeout por request | 30 segundos |
 | Reintentos por ítem | 1 |
