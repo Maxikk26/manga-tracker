@@ -18,6 +18,7 @@ Contract-only: `catalogue.contracts` and `sources.contracts`. It never learns
 which catalogue answered or how the source enumerates itself.
 """
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -261,7 +262,34 @@ def readable_title(catalogue_entry) -> str:
     source's. It only settles *which* of the catalogue's titles.
     """
     candidates = list(catalogue_entry.title_candidates or ())
+    # Skipping a candidate written in a script the reader cannot read is NOT the
+    # "most Latin-looking" heuristic rejected above: that one reordered by ratio
+    # and got *Solo Max-Level Newbie* backwards. This preserves the catalogue's
+    # order exactly and only declines a name that cannot be read at all.
+    #
+    # It is here because the first real retitle needed it. Four rows landed in
+    # Chinese, Russian and Korean while a readable alternate sat later in the
+    # very same list: `Kenja no Mago` offered ['賢者之孫', '현자의 손자',
+    # "Magi's Grandson"] and took the first.
+    readable = [name for name in candidates if _is_latin_script(name)]
+    if readable:
+        return readable[0]
     return candidates[0] if candidates else catalogue_entry.title
+
+
+def _is_latin_script(name: str) -> bool:
+    """Whether a title's letters are Latin, ignoring punctuation and digits.
+
+    Checked per character rather than with `isascii`, because a perfectly
+    readable title carries non-ASCII punctuation - "The Regressed Mercenary's
+    Machinations" uses U+2019 - while an unreadable one may be pure CJK with
+    ASCII parentheses around it. The letters are what decide.
+    """
+    letters = [ch for ch in name or "" if ch.isalpha()]
+    if not letters:
+        return False
+    latin = sum(1 for ch in letters if "LATIN" in unicodedata.name(ch, ""))
+    return latin / len(letters) >= 0.8
 
 def _pending(entry: ExportEntry, catalogue_entry: CatalogueEntry, reason: str) -> PendingEntry:
     """The resolved title travels with it: that is what makes pasting the URL
