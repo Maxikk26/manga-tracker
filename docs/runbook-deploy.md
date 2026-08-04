@@ -1,8 +1,10 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.1 — 2026-07-30. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-seed-manual.md` (v2.3).
+Versión 1.2 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-seed-manual.md` (v2.3).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
+
+Cambios en v1.2: `ACTIVE_SWEEP_HOUR` pasa de 3 a 22 y queda explicado por qué está acoplado al horario de refresco de la fuente; se advierte que un `.env` existente gana sobre el default, así que actualizar el repositorio no mueve la hora en un servidor ya configurado.
 
 Cambios en v1.1, todos del segundo despliegue: los comandos de arranque van por `docker compose run --rm` y no por `uv`, porque el servidor no tiene `uv` — la v1.0 prescribía comandos que no corrían ahí. La inspección de la imagen usa el nombre del servicio, no un tag inexistente. Se documenta que el seed va antes del `up -d` y qué hacer si no fue así, y que un barrido con `items_checked = 0` no significa nada.
 
@@ -30,12 +32,16 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 DB_PATH=../manga-tracker-data/manga-tracker.db
 LOG_LEVEL=INFO
-ACTIVE_SWEEP_HOUR=3
+ACTIVE_SWEEP_HOUR=22
 LOCAL_TIMEZONE=America/Caracas
-HEARTBEAT_HOUR=3
+HEARTBEAT_HOUR=22
 ```
 
 Sin comillas y sin espacios alrededor del `=`. `.env` está en `.gitignore`; `.env.example` se versiona a propósito.
+
+**`ACTIVE_SWEEP_HOUR` está acoplado al horario de la fuente, no es gusto.** El barrido pregunta a la fuente qué títulos se movieron antes de pedir capítulos, y la fuente refresca esos datos una vez al día a las 01:30 UTC. Las 22:00 locales son 02:00 UTC, media hora después. Ponerlo a las 03:00 locales significa leer un índice de 5.5 horas y perder las publicaciones de esa ventana hasta el día siguiente: la garantía de ~24h pasa a ~29.5h. Si cambias esta hora, revisa la otra.
+
+**Y ojo con un `.env` que ya exista**: una variable escrita ahí gana sobre el valor por defecto del código, así que actualizar el repositorio **no** mueve la hora en un servidor que ya la tenía fijada. Hay que editarla a mano.
 
 ### Cómo obtener el chat id
 
@@ -160,7 +166,7 @@ docker compose run --rm manga-tracker run-job heartbeat
 docker compose up -d
 ```
 
-**El orden importa: el seed va ANTES del `up -d`.** Si el contenedor arranca con la base vacía, su barrido de arranque (`catch-up`) corre contra cero títulos, y en V1a eso cuenta como barrido hecho durante 24h. Sembrar después deja el sistema sin barrido garantizado hasta el cron de las 03:00. Si ya arrancaste antes de sembrar, fuerza el barrido a mano con el paso 4.
+**El orden importa: el seed va ANTES del `up -d`.** Si el contenedor arranca con la base vacía, su barrido de arranque (`catch-up`) corre contra cero títulos, y en V1a eso cuenta como barrido hecho durante 24h. Sembrar después deja el sistema sin barrido garantizado hasta el cron de las 22:00. Si ya arrancaste antes de sembrar, fuerza el barrido a mano con el paso 4.
 
 **No te saltes el paso 2.** En el primer despliegue real detectó dos filas malas: un título con una coma que partió el CSV en cinco columnas, y otro al que le faltaba la primera letra. La primera la atrapa el validador; la segunda solo la ve un humano leyendo el reporte, porque un título mal escrito es válido para el cargador.
 
@@ -174,8 +180,8 @@ Si el seed acaba de fijar el último capítulo de cada título, no hay nada nuev
 
 ```
 cada hora        feed_check     1 request. Oportunista, no garantiza nada
-03:00 local      active_sweep   un request por título. Esta es la garantía
-domingo 03:00    heartbeat      señal de vida
+22:00 local      active_sweep   pregunta a la fuente qué se movió y pide solo eso
+domingo 22:00    heartbeat      señal de vida
 al arrancar      catch-up       si el último barrido quedó viejo, corre uno ya
 ```
 

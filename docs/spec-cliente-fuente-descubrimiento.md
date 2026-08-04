@@ -1,6 +1,8 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.4 — 2026-07-29. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.10), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
+Versión 1.5 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.10), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
+
+Cambios vs 1.4: el `active_sweep` gana un **pre-filtro**: pregunta a la fuente qué títulos se movieron y pide capítulos solo de esos. Lo fuerza el import de Kitsu, que llevó la población de 16 a 89 mapeos — la cifra de "menos de 20" que este documento asumía quedó obsoleta. Con las cuatro reglas que lo hacen seguro y el acoplamiento de la hora del barrido al horario de refresco de la fuente (22:00 local).
 
 Cambios vs 1.3: se agrega la recuperación al arrancar del `active_sweep`, que sustituye la mitigación manual del reinicio fuera de hora (ver la sección al final del Mecanismo 2); y se precisa que `finished_at` se toma al cerrar la corrida y no del timestamp de apertura, porque reusarlo hacía que toda corrida reportara duración cero. Ambos cambios salieron de correr el sistema en producción, no de revisión de documentos.
 Cambios vs 1.2: se corrige una contradicción interna en la regla de detección. El paso 3 afirmaba que la publicación se registra "antes de cualquier decisión", mientras que el paso 4 decía que los estados terminales no registran historia; leído en orden, un match del feed contra un manga `dropped` habría escrito en `chapter_history` lo que la propia spec prohíbe. El filtro de terminales pasa a ser el paso 3, antes del registro, y "antes de cualquier decisión" se precisa como "antes de la decisión de notificar". Pasos renumerados a seis.
@@ -146,11 +148,24 @@ Consecuencia aceptada: si el digest se envía pero el proceso muere antes de act
 
 ## Mecanismo 2: barrido de activos (`active_sweep`)
 
-**Frecuencia**: una vez al día, a hora fija de madrugada (parámetro configurable), **más una corrida de recuperación al arrancar el proceso si la última exitosa quedó vieja** (ver abajo). **Este es el mecanismo de detección principal del sistema**, no un respaldo: la medición de la ventana del feed demostró que el feed no puede garantizar nada. Si en uso real la latencia de hasta 24h resulta molesta, subir este barrido a cada 6-8 horas cuesta ~60-80 requests diarios y no requiere ningún cambio estructural: es el mismo mecanismo con otro valor de frecuencia.
+**Frecuencia**: una vez al día, a hora fija (parámetro configurable, hoy 22:00 local — ver el pre-filtro), **más una corrida de recuperación al arrancar el proceso si la última exitosa quedó vieja** (ver abajo). **Este es el mecanismo de detección principal del sistema**, no un respaldo: la medición de la ventana del feed demostró que el feed no puede garantizar nada. Si en uso real la latencia de hasta 24h resulta molesta, subir este barrido a cada 6-8 horas cuesta ~60-80 requests diarios y no requiere ningún cambio estructural: es el mismo mecanismo con otro valor de frecuencia.
 
-**Población**: todos los mapeos de manganato cuyo manga tiene bookmark en `reading` o `want_to_read`, excluyendo los pausados por fallos (ver slugs muertos). A escala real: menos de 20.
+**Población**: todos los mapeos de manganato cuyo manga tiene bookmark en `reading` o `want_to_read`, excluyendo los pausados por fallos (ver slugs muertos). A escala real: **89 tras el import de Kitsu**, no los menos de 20 que este documento asumió hasta la v1.5.
 
-**Procedimiento**: por cada mapeo, `fetch_chapters` con el delay de la política; se toma el capítulo más nuevo de la respuesta y se pasa por la regla de detección con `detected_via = active_sweep`. Al terminar todos, se envía el digest acumulado (mismo cierre que el feed).
+**Procedimiento**: se le pregunta primero a la fuente **cuándo cambió cada slug por última vez** (operación auxiliar del cliente, una sola llamada por corrida para todo el catálogo). Luego, solo por cada mapeo que se haya movido, `fetch_chapters` con el delay de la política; se toma el capítulo más nuevo de la respuesta y se pasa por la regla de detección con `detected_via = active_sweep`. Al terminar todos, se envía el digest acumulado (mismo cierre que el feed).
+
+### El pre-filtro por hora de actualización (v1.5)
+
+Con menos de 20 mapeos, pedir capítulos de todos costaba minutos y no valía optimizar. Con **89** cuesta 89 requests y de 7 a 22 minutos diarios, y la fuente publica por sí misma cuándo cambió cada título: preguntarlo una vez reemplaza ~89 requests por ~10.
+
+Cuatro reglas, y las cuatro son de corrección, no de ahorro:
+
+1. **Se pide capítulos solo si la fuente reporta una hora mayor a la guardada.** Igual no es mayor: tras un barrido exitoso, `latest_chapter_at` queda idéntico a lo que la fuente reporta, así que **la igualdad es el estado normal** de un título sin cambios. Tratarla como "se movió" pediría la población completa en cada corrida y la optimización valdría cero.
+2. **Sin hora guardada, o si la fuente no lista ese slug, se pide igual.** Desconocido no es "sin cambios". Un slug que el índice de la fuente todavía no alcanzó quedaría saltado para siempre, cayendo del único mecanismo que garantiza detección.
+3. **Si la consulta del índice falla, se barre la población completa.** El pre-filtro es una optimización; el barrido es la garantía de latencia. Degradar a barrer todo cuesta requests; degradar a no barrer costaría detección en silencio.
+4. **`items_checked` cuenta la población completa, no el subconjunto pedido.** Una corrida que examinó 89 y pidió 3 examinó 89. La recuperación al arrancar filtra por `items_checked > 0`, así que contar solo lo pedido haría que un barrido legítimo pareciera uno que no barrió nada — el defecto exacto que una vez dejó que un barrido contra base vacía satisficiera la ventana de 24h.
+
+**La hora del barrido queda acoplada al horario de la fuente.** Refresca esos datos una vez al día a las 01:30 UTC (medido sobre 32 muestras más una confirmación a 24h exactas). Las 22:00 locales son 02:00 UTC, media hora después; a las 03:00 locales se leería un índice de 5.5 horas y las publicaciones de esa ventana esperarían al día siguiente, estirando la garantía de ~24h a ~29.5h. Mover una hora obliga a revisar la otra.
 
 **Nota sobre la respuesta completa**: la llamada devuelve hasta 50 capítulos, pero solo el más nuevo se compara. Los demás se registran igualmente en `chapter_history` si no estaban (idempotencia mediante); es data gratis para la cadencia futura.
 

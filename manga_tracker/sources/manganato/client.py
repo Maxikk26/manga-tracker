@@ -15,7 +15,7 @@ from manga_tracker.sources.contracts import (
     Unexpected,
 )
 from manga_tracker.sources.manganato.parsing import parse_feed, parse_manga_details
-from manga_tracker.sources.manganato.sitemap import fetch_published_urls
+from manga_tracker.sources.manganato.sitemap import fetch_published_entries, fetch_published_urls
 
 BASE_URL = "https://www.manganato.gg"
 FEED_PATH = "/manga-list/latest-manga"
@@ -135,6 +135,34 @@ class ManganatoClient:
                 f"the source published {len(urls)} URLs, none of them a manga: URL layout changed"
             )
         return slugs
+
+    def fetch_slug_update_times(
+        self, *, progress: ProgressCallback | None = None
+    ) -> dict[str, str | None]:
+        """`{slug: last update the source reports}`, for every slug it publishes.
+
+        Lets a sweep ask "did this move since I last looked?" before spending a
+        request per title. That mattered little at 16 mappings; after the Kitsu
+        import the daily sweep covers 89, so the same answer costs ~10 requests
+        instead of 89.
+
+        The value is the source's own text, unconverted — comparing it to a
+        stored timestamp is the caller's business, and reparsing here would
+        invent precision the sitemap does not promise. `None` means the entry
+        carried no timestamp, which a caller must read as "unknown", never as
+        "unchanged".
+
+        Aborts on any failure the transport's retry did not absorb, exactly like
+        `fetch_known_slugs`: a short map would read as "these never move".
+        """
+        times: dict[str, str | None] = {}
+        for url, stamp in fetch_published_entries(self._transport, base_url=BASE_URL, progress=progress):
+            slug = extract_slug(url)
+            if slug is not None:
+                times[slug] = stamp
+        if not times:
+            raise Unexpected("the source published no manga URL at all: URL layout changed")
+        return times
 
     def build_chapter_url(self, slug: str, chapter_num: float) -> str:
         return build_chapter_url(slug, chapter_num)

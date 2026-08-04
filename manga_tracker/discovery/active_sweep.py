@@ -69,12 +69,59 @@ def _population(conn):
     reaches fetch_chapters, so it consumes no request."""
     return conn.execute(
         "SELECT ms.id, ms.manga_id, m.title, b.status, ms.source_key, "
-        "ms.latest_chapter_num, b.last_chapter_read "
+        "ms.latest_chapter_num, b.last_chapter_read, ms.latest_chapter_at "
         "FROM manga_sites ms JOIN mangas m ON m.id = ms.manga_id "
         "JOIN bookmarks b ON b.manga_id = ms.manga_id "
         "WHERE b.status IN ('reading', 'want_to_read') AND ms.consecutive_failures < ?",
         (DEAD_SLUG_THRESHOLD,),
     ).fetchall()
+
+
+def _update_times(client, logger) -> dict[str, str | None] | None:
+    """What the source says each slug last changed, or None to sweep everything.
+
+    Asking once turns a request-per-title sweep into a request-per-*changed*-title
+    one. At the 16 mappings this design was sized for that saved nothing worth
+    having; the Kitsu import took the population to 89, where the same answer
+    costs about ten requests instead of eighty-nine.
+
+    A failure here degrades to sweeping the whole population, and that direction
+    is deliberate: the sweep is the only latency guarantee in the design, and
+    making it depend on an optimisation would trade a bounded cost for an
+    unbounded silence. Logged loudly, because a sweep that quietly costs 9x more
+    than usual is worth knowing about.
+    """
+    try:
+        return client.fetch_slug_update_times()
+    except Exception:
+        logger.exception(
+            "could not read the source's update times; sweeping the whole population instead "
+            "(correct, just slower and more requests)"
+        )
+        return None
+
+
+def _has_moved(update_times, source_key: str, stored_at: str | None) -> bool:
+    """Whether a mapping is worth a request.
+
+    Three cases say yes, and only one says no:
+
+    - No stored timestamp: never successfully checked, so nothing to compare.
+    - The slug is absent from the map, or its entry carries no timestamp: unknown
+      is not unchanged. A slug the source has not caught up with yet would
+      otherwise be skipped forever.
+    - The source's timestamp is greater than the stored one: it moved.
+
+    String comparison is correct here and not a shortcut: both sides are
+    ISO-8601 UTC, which orders lexicographically. Parsing them would mean
+    reconciling the index's `+00:00` with the endpoint's `Z` for no gain.
+    """
+    if stored_at is None:
+        return True
+    reported = update_times.get(source_key)
+    if reported is None:
+        return True
+    return reported > stored_at
 
 
 def active_sweep(conn, client, sender, *, now: str, logger) -> None:
@@ -105,8 +152,18 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     candidates = []
     pending_dead: list[tuple[int, str, str]] = []
     items_checked = 0
-    for ms_id, manga_id, title, status, source_key, latest, last_read in _population(conn):
+    skipped = 0
+    population = _population(conn)
+    update_times = _update_times(client, logger) if population else None
+    for ms_id, manga_id, title, status, source_key, latest, last_read, stored_at in population:
+        # Counted before the skip decision, and that is load-bearing: a run that
+        # examined 89 mappings and requested 3 examined 89. `sweep_is_overdue`
+        # filters on items_checked > 0, so under-reporting here would let a
+        # legitimate sweep look like one that swept nothing.
         items_checked += 1
+        if update_times is not None and not _has_moved(update_times, source_key, stored_at):
+            skipped += 1
+            continue
         try:
             chapters = client.fetch_chapters(source_key)
         except NotFound:
@@ -151,6 +208,11 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
         if candidate is not None:
             candidates.append(candidate)
 
+    if update_times is not None:
+        logger.info(
+            "active_sweep examined %s mapping(s), requested %s, skipped %s the source reports unchanged",
+            items_checked, items_checked - skipped, skipped,
+        )
     outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     dead_failed = _report_dead_slugs(conn, pending_dead, sender, now=now, logger=logger)
     close_run(
