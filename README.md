@@ -80,6 +80,7 @@ Documentos de apoyo:
 - **`manganato-fuente-actual.md`** — auditoría en vivo de la fuente: endpoints, selectores, anti-bot, y el playbook de qué hacer si cambia de dominio o UI.
 - **`medicion-ventana-feed.md`** — el experimento que fijó el intervalo del feed y degradó su rol a oportunista.
 - **`referencia-repo-viejo.md`** — rescate del intento anterior en Go (2025) y, sobre todo, la lista de antipatrones que lo mataron.
+- **`decision-arquitectura-v1b.md`** — dónde vive el panel de V1b y con qué se monta: mismo repositorio, React + Vite, API en Python. No es la spec del panel.
 
 El paquete está completo: no falta ninguna spec por escribir.
 
@@ -95,6 +96,7 @@ Cada documento declara en su encabezado de qué versiones depende. Este mapa dic
 | `spec-bot-telegram.md` | **runbook de mantenimiento** |
 | `spec-seed-manual.md` | **runbook de despliegue, importador Kitsu** |
 | `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana, **importador Kitsu** |
+| `one-pager-v1a.md` (de nuevo) | **decisión de arquitectura de V1b** |
 
 Las filas en negrita se agregaron el 2026-08-02: **el mapa mismo estaba desactualizado**. Le faltaban los dos runbooks, que pinean el one-pager desde que se escribieron, y dos documentos no tenían fila propia pese a ser pineados por otros. Un mapa incompleto es peor que no tenerlo, porque da la falsa seguridad de haber revisado.
 
