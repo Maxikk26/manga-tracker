@@ -1,6 +1,6 @@
 # Spec: Seed manual — manga-tracker V1a
 
-Versión 2.3 — 2026-07-29. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.4).
+Versión 2.3 — 2026-07-29. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.5).
 
 Cambios vs 2.2: la lista real y la base pasan a un directorio hermano del repositorio, fuera de él, porque `git clean -xdf` borra lo ignorado y ambos guardan data irreemplazable. Motivo completo en la sección del archivo.
 Cambios vs 2.1: se cierra el hueco del arreglo de capítulos vacío (ver la regla al final de la sección de carga). El documento cubría la fila con 404 pero no la fila cuyo slug existe y devuelve `success: true` con cero capítulos, que no es un error bajo la taxonomía del cliente y por tanto no tenía regla.

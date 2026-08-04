@@ -104,3 +104,6 @@ class SourceClient(Protocol):
     # is worse than none, since a slug missing from it is indistinguishable
     # from a title the source does not carry (KIT v1.3).
     def fetch_known_slugs(self, *, progress: ProgressCallback | None = None) -> frozenset[str]: ...
+    def fetch_slug_update_times(
+        self, *, progress: ProgressCallback | None = None
+    ) -> dict[str, str | None]: ...

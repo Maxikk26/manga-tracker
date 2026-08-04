@@ -342,3 +342,52 @@ def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_w
     out = capsys.readouterr().out
     assert "'Ryuusa no Ori' (reading, read 5)" in out
     assert "COULD NOT write the pending list" in out
+
+
+def test_retitle_only_never_touches_the_source_or_a_bookmark(tmp_path, monkeypatch, capsys):
+    """The mode exists so a text fix costs no requests to a source that had
+    nothing to do with the defect. If it can reach the source at all, it is the
+    wrong shape."""
+    from manga_tracker import cli
+
+    export = tmp_path / "k.xml"
+    export.write_text(
+        "<myanimelist><myinfo><user_export_type>2</user_export_type></myinfo>"
+        "<manga><manga_mangadb_id>1</manga_mangadb_id><my_read_chapters>5</my_read_chapters>"
+        "<my_status>Reading</my_status></manga></myanimelist>",
+        encoding="utf-8",
+    )
+    db = tmp_path / "t.db"
+    conn = connect(str(db))
+    conn.execute(
+        "INSERT INTO mangas (title, kitsu_id, created_at, updated_at) VALUES ('Romaji Name', '99', 'x', 'x')"
+    )
+    conn.execute("INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+                 "VALUES (1, 'reading', 'seed', 'x', 'x')")
+    conn.commit()
+    conn.close()
+
+    class Catalogue:
+        def resolve(self, ids):
+            class Entry:
+                external_id = "1"
+                catalogue_id = "99"
+                title = "Romaji Name"
+                title_candidates = ("Readable English Name",)
+            return [Entry()]
+
+    def _boom(*a, **k):
+        raise AssertionError("--retitle-only must not construct a source client")
+
+    monkeypatch.setattr(cli, "KitsuCatalogue", lambda *a, **k: Catalogue())
+    monkeypatch.setattr(cli, "ManganatoClient", _boom)
+    monkeypatch.setenv("DB_PATH", str(db))
+
+    assert cli.main(["import-kitsu", "--retitle-only", "--file", str(export)]) == 0
+
+    out = capsys.readouterr().out
+    assert "'Romaji Name' -> 'Readable English Name'" in out  # printed before committing
+    conn = connect(str(db))
+    assert conn.execute("SELECT title FROM mangas WHERE id = 1").fetchone()[0] == "Readable English Name"
+    # The bookmark is untouched: this mode writes one column of one table.
+    assert conn.execute("SELECT origin, progress_is_approx FROM bookmarks WHERE manga_id = 1").fetchone() == ("seed", 0)

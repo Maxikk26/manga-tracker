@@ -32,6 +32,32 @@ COMIC_SHARD_MARKER = "sitemap-comic-"
 ERROR_EXCERPT_CHARS = 200
 
 
+def fetch_published_entries(
+    transport: Transport,
+    *,
+    base_url: str,
+    progress: ProgressCallback | None = None,
+) -> list[tuple[str, str | None]]:
+    """Every `(url, last_modified)` pair the sitemap publishes, in document order.
+
+    The timestamp is passed through as raw text, never reparsed — the same rule
+    the chapters endpoint follows. It is the newest chapter's `updated_at` at
+    snapshot time (verified 2026-07-31: exact match to the second on 4 of 4
+    sampled titles), which is what lets a caller skip a title that has not moved.
+
+    `None` when the entry carries no `<lastmod>`. A caller must treat that as
+    "unknown", never as "unchanged".
+    """
+    shard_urls = _fetch_shard_list(transport, base_url=base_url)
+    total = len(shard_urls)
+    entries: list[tuple[str, str | None]] = []
+    for unit, shard_url in enumerate(shard_urls, start=1):
+        if progress is not None:
+            progress(unit, total)
+        entries.extend(_fetch_shard_pairs(transport, shard_url))
+    return entries
+
+
 def fetch_published_urls(
     transport: Transport,
     *,
@@ -50,16 +76,9 @@ def fetch_published_urls(
     silent — real titles pushed to the caller's pending list as if the source
     did not carry them.
     """
-    shard_urls = _fetch_shard_list(transport, base_url=base_url)
-    total = len(shard_urls)
-    urls: list[str] = []
-    for unit, shard_url in enumerate(shard_urls, start=1):
-        # (unit, total) and nothing else: the observer sees advancement, never
-        # a word of this file's vocabulary.
-        if progress is not None:
-            progress(unit, total)
-        urls.extend(_fetch_shard_entries(transport, shard_url))
-    return urls
+    # (unit, total) and nothing else: the observer sees advancement, never a
+    # word of this file's vocabulary.
+    return [url for url, _ in fetch_published_entries(transport, base_url=base_url, progress=progress)]
 
 
 def _fetch_shard_list(transport: Transport, *, base_url: str) -> list[str]:
@@ -89,15 +108,22 @@ def _fetch_shard_list(transport: Transport, *, base_url: str) -> list[str]:
     return shards
 
 
-def _fetch_shard_entries(transport: Transport, shard_url: str) -> list[str]:
+def _fetch_shard_pairs(transport: Transport, shard_url: str) -> list[tuple[str, str | None]]:
     root = _parse(_fetch(transport, shard_url), shard_url)
-    urls = [loc.text.strip() for loc in root.findall("sm:url/sm:loc", SITEMAP_NS) if loc.text]
-    if not urls:
+    pairs: list[tuple[str, str | None]] = []
+    for entry in root.findall("sm:url", SITEMAP_NS):
+        loc = entry.find("sm:loc", SITEMAP_NS)
+        if loc is None or not loc.text:
+            continue
+        lastmod = entry.find("sm:lastmod", SITEMAP_NS)
+        stamp = lastmod.text.strip() if lastmod is not None and lastmod.text else None
+        pairs.append((loc.text.strip(), stamp))
+    if not pairs:
         # Same rule as the feed's ad filter: zero items after parsing is a
         # structure change, not an empty list. The smallest shard measured
         # carried 1.471 URLs.
         raise Unexpected(f"sitemap shard {shard_url} carries zero <url> entries: layout changed")
-    return urls
+    return pairs
 
 
 def _fetch(transport: Transport, url: str) -> str:

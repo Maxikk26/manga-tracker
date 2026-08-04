@@ -198,7 +198,7 @@ sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_chec
 
 `feed_check` corre cada hora, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
 
-**`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 03:00 aparece como `07:00Z` y el heartbeat del domingo también. Si ves el barrido cayendo a las `03:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
+**`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 22:00 aparece como `02:00Z` del día siguiente y el heartbeat del domingo también. Si ves el barrido cayendo a las `22:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
 
 **Silencio en Telegram no es señal de fallo.** Con títulos al día es el estado esperado durante días. Lo que sí es señal es un heartbeat que no llegó un lunes.
 
