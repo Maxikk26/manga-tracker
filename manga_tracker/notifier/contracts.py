@@ -22,9 +22,11 @@ class DeadSlugNotice:
     """BOT "Mensaje 3": one mapping that just crossed the not-found threshold.
 
     Discovery decides who crossed and how many failures it took; the notifier
-    only renders it. `retries_weekly` is False for as long as `onhold_sweep`
-    does not exist, because the message must not promise a retry that nothing
-    performs - see the spec's registered deviation.
+    only renders it. `retries_weekly` says whether a weekly sweep will really
+    retry this mapping, because the message must not promise a retry that
+    nothing performs (BOT's registered deviation). It is True in production
+    since `onhold_sweep` landed; the default stays False so that a caller who
+    forgets it under-promises rather than lies.
     """
 
     manga_title: str

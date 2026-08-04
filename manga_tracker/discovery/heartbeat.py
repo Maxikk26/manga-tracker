@@ -1,16 +1,25 @@
 """Weekly heartbeat: recorded spec deviation from BOT's onhold_sweep-tied
-"Mensaje 2" (docs/spec-bot-telegram.md v1.1) - this deployment has zero
-on_hold bookmarks, so those counts would render 0 forever. Reports what
-job_runs/bookmarks/manga_sites can actually say instead: last successful
-detection run, tracked/behind counts, degraded runs past week. Read-only -
-adds no new state; job_runs already records every run (see docs follow-up)."""
+"Mensaje 2" (docs/spec-bot-telegram.md v1.1) - the deployment had zero on_hold
+bookmarks when it was written, so those counts would have rendered 0 forever,
+and a message that always reports zeros trains you to ignore it. What did not
+come back with the Kitsu import's 72 on-hold titles is the *dependency*: this
+beats on its own schedule whether or not that sweep ran, which is the whole
+point of decoupling it. Reports what job_runs/bookmarks/manga_sites can actually
+say: last successful detection run, tracked/behind counts, degraded runs past
+week. Read-only - adds no new state; job_runs already records every run."""
 
 from datetime import datetime, timedelta, timezone
 
 from manga_tracker.notifier.contracts import HeartbeatReport
 
 JOB_NAME = "heartbeat"
-DETECTION_JOBS = ("feed_check", "active_sweep")  # onhold_sweep stays out of scope
+# onhold_sweep is deliberately NOT here, now that it exists. It notifies nothing,
+# so a successful weekly run is no evidence that the mechanisms which do notify
+# are alive - counting it would let a healthy-looking heartbeat sit on top of six
+# days of dead feed and sweep runs, which is precisely the "cron comentado"
+# failure this message exists to expose. BOT v1.2 leaves adding its numbers as an
+# option ("pueden sumarse"), never as a substitute for these two.
+DETECTION_JOBS = ("feed_check", "active_sweep")
 DEGRADED_WINDOW_DAYS = 7
 
 

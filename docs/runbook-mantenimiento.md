@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.5 — 2026-08-02. Documento operativo. Depende de `one-pager-v1a.md` (v1.10) y `spec-bot-telegram.md` (v1.4).
+Versión 1.6 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-bot-telegram.md` (v1.5).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.6: **el `onhold_sweep` existe**, así que la sección de slugs muertos deja de decir que un mapeo pausado no se reintenta solo —ahora sí, cada domingo— y el ejemplo del mensaje se actualiza al texto que el bot manda de verdad. Se saca ese barrido de la lista de pendientes, junto con el import de Kitsu, que ya corrió. Y una fila nueva en la tabla de guardianes verdes, encontrada en la pasada de mutación de este mismo cambio.
 
 Cambios en v1.5: se escribe la convención del **resumen al inicio de cada documento** — se venía aplicando de memoria y por eso estaba en tres formas distintas; incluye la lista de qué documentos la deben todavía. Y se fija que la rama es una unidad de **entrega**, no de autoría — un spec que se va a implementar enseguida viaja con su implementación, y el nombre de la rama describe la entrega completa. Se lista también qué sí va solo.
 
@@ -64,6 +66,7 @@ Historial de este proyecto, todos con la suite en verde:
 | Tests de formato del digest | **afirmaban el texto en inglés**: confirmaban la desviación del spec en vez de atraparla |
 | "100 líneas → 3 partes" en el test de partición | el 3 estaba medido a mano contra el copy inglés; el español acorta las líneas y saltó sin que el split estuviera roto |
 | Test de zona horaria del scheduler con `America/Caracas` | pasaba con el fix **sin efecto**, porque el `tzlocal` de la máquina de desarrollo ya era esa zona. Un test de configuración tiene que usar un valor que el ambiente no pueda suministrar por accidente |
+| Test de "el barrido de on-hold nunca notifica", con un mapeo `on_hold` | la regla de detección compartida devuelve `None` para `on_hold`, así que un barrido que empezara a mandar digest **no tenía nada que mandar en ese test** y seguía verde. Solo un mapeo activo pausado produce un candidato, y hubo que meter uno en el mismo test. Encontrado inyectando la llamada a `send_and_advance` y viendo el test pasar |
 
 La regla que generaliza: **un guardián cubre la clase de error que sabe mirar, y nada más.**
 
@@ -179,11 +182,13 @@ Si quieres forzar uno de todas formas:
 docker compose exec manga-tracker python -m manga_tracker run-job active_sweep
 ```
 
+Los cuatro jobs se pueden forzar así (`feed_check`, `active_sweep`, `onhold_sweep`, `heartbeat`). El semanal es el que más se agradece a mano: esperar al domingo para ver si un slug pausado volvió es lento, y correrlo cuesta un request por título que la fuente reporte movido.
+
 ### Si el cambio toca el esquema
 
 No hay migraciones en V1a: `schema.sql` usa `IF NOT EXISTS` y se ejecuta en cada conexión, así que **agregar** una tabla o un índice es transparente. Pero:
 
-- **Cambiar una restricción CHECK con la base poblada obliga a migrar.** Por eso los valores de `job_name` y `detected_via` ya incluyen `onhold_sweep` y `seed_backfill` aunque no se usen todavía.
+- **Cambiar una restricción CHECK con la base poblada obliga a migrar.** Por eso los valores de `job_name` y `detected_via` incluyeron `onhold_sweep` y `seed_backfill` desde el primer esquema, antes de que existiera código que los escribiera. Se cobró: el `onhold_sweep` entró con la base ya poblada y **no hizo falta migración ninguna**.
 - Respalda antes: `cp ~/manga-tracker-data/manga-tracker.db ~/backups/pre-cambio.db`.
 
 ## Operación cotidiana
@@ -198,7 +203,9 @@ sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_chec
 
 `feed_check` corre cada hora, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
 
-**`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 22:00 aparece como `02:00Z` del día siguiente y el heartbeat del domingo también. Si ves el barrido cayendo a las `22:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
+**`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 22:00 aparece como `02:00Z` del día siguiente, y el heartbeat y el barrido de on-hold del domingo también. Si ves el barrido cayendo a las `22:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
+
+**Los domingos hay tres jobs en la misma hora y eso es esperado.** `active_sweep`, `heartbeat` y `onhold_sweep` comparten hora por defecto, y con un solo worker se **encolan**: los verás con `started_at` escalonado por lo que tardó el anterior, no simultáneos. Es lo que se quiere — cero concurrencia contra la fuente. Si la espera llegara a molestar, `ONHOLD_SWEEP_HOUR` mueve solo el semanal.
 
 **Silencio en Telegram no es señal de fallo.** Con títulos al día es el estado esperado durante días. Lo que sí es señal es un heartbeat que no llegó un lunes.
 
@@ -217,13 +224,15 @@ Un `partial` por digest fallido **se auto-corrige**: `latest_chapter_num` no ava
 **Ahora te avisa por Telegram.** Al cruzar el umbral llega un mensaje diciendo qué título dejó de responder y con qué slug:
 
 > ⚠️ **Slug sin respuesta** — Black Haze (2025)
-> El slug `black-haze-2025` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario y no se reintenta solo. Revisa si cambió de URL en la fuente y corrígelo.
+> El slug `black-haze-2025` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario; se reintenta en el semanal. Revisa si cambió de URL en la fuente y corrígelo.
 
-Llega **una sola vez por manga**, y eso no depende de una bandera en la base: un mapeo en el umbral sale de la población, así que no vuelve a consumir request ni a incrementar. El cruce ocurre exactamente una vez por slug muerto — y por eso mismo el contador **no avanza hasta que el aviso salió**. Si el envío falla, la corrida cierra `partial`, el contador se queda en 4 y la siguiente corrida reintenta. Cuesta un request extra; compra que el aviso no se pueda perder.
+Llega **una sola vez por manga**, y eso no depende de una bandera en la base: solo el barrido diario emite el aviso y su población excluye a quien llegó al umbral, así que el cruce ocurre exactamente una vez por slug muerto — y por eso mismo el contador **no avanza hasta que el aviso salió**. Si el envío falla, la corrida cierra `partial`, el contador se queda en 4 y la siguiente corrida reintenta. Cuesta un request extra; compra que el aviso no se pueda perder.
 
-Mientras `onhold_sweep` no exista (fase 2), el mensaje dice explícitamente que **no se reintenta solo**. No promete un reintento semanal que nadie ejecuta.
+**Y ahora sí se reintenta solo** (v1.6). El mensaje promete el reintento semanal porque el `onhold_sweep` existe y su población incluye todo mapeo no-terminal pausado por el contador. Si la fuente le devuelve el slug, el contador se resetea y el barrido diario lo recupera al día siguiente, sin que toques nada. La redacción del aviso sigue condicionada a que ese barrido cubra a los pausados, así que volvería a callarse antes que mentir.
 
-`consecutive_failures` cuenta los fallos de tipo "no encontrado". A los 5, el mapeo se salta en el barrido diario y no consume request.
+Lo que ese aviso **no** cubre: solo lo emite el barrido diario, cuya población son los activos, así que un título en `on_hold` cuyo slug muere no genera aviso alguno. Se ve nada más en la consulta de abajo y en el log. Vale la pena correrla de vez en cuando por eso.
+
+`consecutive_failures` cuenta los fallos de tipo "no encontrado". A los 5, el mapeo se salta en el barrido diario y no consume request; en el semanal sigue entrando, y ahí el contador puede pasar de 5 —un mapeo en 9 está tan excluido del diario como uno en 5, y el número dice cuánto lleva ausente el slug—.
 
 ```
 sqlite3 ~/manga-tracker-data/manga-tracker.db "select m.title, ms.source_key, ms.consecutive_failures from manga_sites ms join mangas m on m.id=ms.manga_id where ms.consecutive_failures > 0"
@@ -249,6 +258,8 @@ Dato del último chequeo: los dominios hermanos `natomanga.com` y `mangakakalot.
 
 ## Lo que queda pendiente
 
-- `onhold_sweep` y el aviso de slug muerto por Telegram: fase 2. Hoy el contador cuenta pero no avisa, y un mapeo pausado no tiene reintento automático.
-- Import de Kitsu: la spec está escrita (`spec-importador-kitsu.md` v1.1); falta implementarla. Es el criterio 4 de V1a, y su catálogo va detrás de un contrato — la implementación debe extender `DIRECTIONAL_RULES` con el paquete `catalogue`.
 - Pipeline de CI: después de V1a/V1b. Tiene más sentido automatizar este runbook cuando ya lo hayas ejecutado a mano unas veces.
+- Sumar los números del `onhold_sweep` al heartbeat: opcional según `spec-bot-telegram.md`, no hecho. Lo que **no** cambia es que ese barrido no cuenta como "última detección exitosa": no notifica nada, así que una corrida suya no prueba que los mecanismos que sí notifican estén vivos.
+- El aviso de slug muerto no cubre los `on_hold`: solo lo emite el barrido diario. Declarado en `spec-cliente-fuente-descubrimiento.md` v1.6, no es un pendiente de implementación sino una decisión — la alternativa era repetir el aviso cada domingo.
+
+Cerrados: `onhold_sweep` y el aviso de slug muerto (fase 2, completa) y el import de Kitsu (corrió; el criterio 4 de V1a está cumplido).

@@ -20,6 +20,8 @@ from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK
 from manga_tracker.discovery.feed_check import feed_check
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT
 from manga_tracker.discovery.heartbeat import heartbeat
+from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP
+from manga_tracker.discovery.onhold_sweep import onhold_sweep
 from manga_tracker.storage.db import connect
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,14 @@ logger = logging.getLogger(__name__)
 FEED_GRACE_SECONDS = 300
 SWEEP_GRACE_SECONDS = 3600
 HEARTBEAT_GRACE_SECONDS = 3600  # weekly, informational only - never detection-critical
-_JOBS = {FEED_CHECK: feed_check, ACTIVE_SWEEP: active_sweep, HEARTBEAT: heartbeat}
+# The on-hold sweep shares its default hour with the daily one, so it normally
+# starts by waiting for it in the single-worker queue. An hour covers the worst
+# realistic daily sweep (~35 minutes of timeouts) with margin; a shorter window
+# would let the queueing itself misfire the weekly run, and a missed week is a
+# week without the only retry a paused mapping gets.
+ONHOLD_SWEEP_GRACE_SECONDS = 3600
+_JOBS = {FEED_CHECK: feed_check, ACTIVE_SWEEP: active_sweep, HEARTBEAT: heartbeat,
+         ONHOLD_SWEEP: onhold_sweep}
 
 
 def _utc_now() -> str:
@@ -109,10 +118,13 @@ def _scheduler_timezone(timezone_name: str) -> str:
 
 
 def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name: str,
-                     active_sweep_hour: int = 3, heartbeat_hour: int = 3) -> BlockingScheduler:
+                     active_sweep_hour: int = 3, heartbeat_hour: int = 3,
+                     onhold_sweep_hour: int = 3) -> BlockingScheduler:
     """max_workers=1 is set explicitly - APScheduler 3.x's ThreadPoolExecutor
     defaults to 10 (verified against the installed package), so zero
-    concurrency is a configuration fact here, never an inherited default.
+    concurrency is a configuration fact here, never an inherited default. It is
+    also what makes the Sunday collision safe: three jobs share that hour by
+    default and one worker turns the overlap into a queue.
 
     `timezone_name` has no default on purpose: it decides when everything runs,
     and the bug it fixes was precisely an implicit default nobody passed.
@@ -139,12 +151,23 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name
         trigger=CronTrigger(hour=active_sweep_hour, minute=0, timezone=tz), id=ACTIVE_SWEEP,
         max_instances=1, misfire_grace_time=SWEEP_GRACE_SECONDS,
     )
-    # Own weekly schedule, decoupled from onhold_sweep (recorded spec deviation).
+    # Own weekly schedule, decoupled from onhold_sweep (recorded spec deviation,
+    # BOT v1.2): it beats whether or not that sweep ran, and it is registered
+    # here rather than fired at the end of the sweep as CD's Mecanismo 3 says.
     # day_of_week is read in this zone too: Sunday local, not Sunday UTC.
     scheduler.add_job(
         _make_job(heartbeat, HEARTBEAT, db_path, client, sender, {}),
         trigger=CronTrigger(day_of_week="sun", hour=heartbeat_hour, minute=0, timezone=tz),
         id=HEARTBEAT, max_instances=1, misfire_grace_time=HEARTBEAT_GRACE_SECONDS,
+    )
+    # Mecanismo 3: weekly, Sunday, same zone - so Sunday local, not Sunday UTC.
+    # It never sends anything, so nothing here is detection-critical for the
+    # reader's alerts; what it does own is the weekly retry of every mapping the
+    # dead-slug counter paused.
+    scheduler.add_job(
+        _make_job(onhold_sweep, ONHOLD_SWEEP, db_path, client, sender, {}),
+        trigger=CronTrigger(day_of_week="sun", hour=onhold_sweep_hour, minute=0, timezone=tz),
+        id=ONHOLD_SWEEP, max_instances=1, misfire_grace_time=ONHOLD_SWEEP_GRACE_SECONDS,
     )
     scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
     return scheduler

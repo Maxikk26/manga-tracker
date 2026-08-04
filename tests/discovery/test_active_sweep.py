@@ -165,7 +165,9 @@ def test_crossing_the_threshold_notifies_and_only_then_advances_the_counter():
     assert len(sender.dead_slug_calls) == 1
     notice = sender.dead_slug_calls[0][0]
     assert (notice.manga_title, notice.source_key, notice.failure_count) == ("OP", "gone", 5)
-    assert notice.retries_weekly is False  # onhold_sweep does not exist yet
+    # True since onhold_sweep landed: its population includes every mapping
+    # paused at this threshold, so the retry the message promises really happens.
+    assert notice.retries_weekly is True
     assert _failures(conn, ms_id) == 5
     assert _status(conn) == ("ok", 1)
 

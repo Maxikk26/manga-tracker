@@ -10,7 +10,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT
-from manga_tracker.scheduler import HEARTBEAT_GRACE_SECONDS, _make_job, build_scheduler, run_job_once
+from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP
+from manga_tracker.scheduler import (
+    HEARTBEAT_GRACE_SECONDS,
+    ONHOLD_SWEEP_GRACE_SECONDS,
+    _make_job,
+    build_scheduler,
+    run_job_once,
+)
 from manga_tracker.storage.db import connect
 
 
@@ -46,17 +53,19 @@ def test_cron_hours_are_local_hours_not_utc():
     tokyo = ZoneInfo("Asia/Tokyo")  # UTC+9: 03:00 local is 18:00 UTC the day before
     noon_utc = datetime(2026, 7, 30, 12, 0, tzinfo=dt_timezone.utc)
     jobs = {job.id: job
-            for job in _scheduler(timezone_name="Asia/Tokyo", active_sweep_hour=3, heartbeat_hour=3).get_jobs()}
+            for job in _scheduler(timezone_name="Asia/Tokyo", active_sweep_hour=3, heartbeat_hour=3,
+                                  onhold_sweep_hour=3).get_jobs()}
 
-    for job_id in (ACTIVE_SWEEP, HEARTBEAT):
+    for job_id in (ACTIVE_SWEEP, HEARTBEAT, ONHOLD_SWEEP):
         trigger = jobs[job_id].trigger
         assert str(trigger.timezone) == "Asia/Tokyo"
         fires_at = trigger.get_next_fire_time(None, noon_utc)
         assert fires_at.astimezone(tokyo).hour == 3
         assert fires_at.astimezone(dt_timezone.utc).hour == 18  # the bug put a 3 here
 
-    # The heartbeat's weekday is read in that zone too: Sunday local, not Sunday UTC.
-    assert jobs[HEARTBEAT].trigger.get_next_fire_time(None, noon_utc).astimezone(tokyo).weekday() == 6
+    # Both weekly jobs read their weekday in that zone too: Sunday local, not Sunday UTC.
+    for job_id in (HEARTBEAT, ONHOLD_SWEEP):
+        assert jobs[job_id].trigger.get_next_fire_time(None, noon_utc).astimezone(tokyo).weekday() == 6
 
     # And the production configuration: 03:00 America/Caracas is 07:00 UTC.
     caracas_sweep = {job.id: job for job in _scheduler(active_sweep_hour=3).get_jobs()}[ACTIVE_SWEEP]
@@ -78,14 +87,49 @@ def test_executor_max_workers_is_explicit_not_the_apscheduler_default():
     assert _scheduler()._executors["default"]._pool._max_workers == 1
 
 
-def test_both_jobs_registered_with_expected_trigger_types_and_grace():
+def test_every_job_registered_with_expected_trigger_types_and_grace():
     jobs = {job.id: job for job in _scheduler().get_jobs()}
-    assert set(jobs) == {FEED_CHECK, ACTIVE_SWEEP, HEARTBEAT}
+    assert set(jobs) == {FEED_CHECK, ACTIVE_SWEEP, HEARTBEAT, ONHOLD_SWEEP}
     assert isinstance(jobs[FEED_CHECK].trigger, IntervalTrigger)
     assert isinstance(jobs[ACTIVE_SWEEP].trigger, CronTrigger)
     assert jobs[FEED_CHECK].max_instances == 1 and jobs[ACTIVE_SWEEP].max_instances == 1
     assert jobs[FEED_CHECK].misfire_grace_time == 300
     assert jobs[ACTIVE_SWEEP].misfire_grace_time == 3600
+
+
+def test_onhold_sweep_registered_weekly_on_its_own_configurable_hour():
+    """CD Mecanismo 3: weekly, Sunday, configurable hour.
+
+    The hour is asserted against a value passed in, not against the default: in
+    production it arrives from `ONHOLD_SWEEP_HOUR`, which defaults to the daily
+    sweep's hour in `config.py` (tested there). The grace window has to outlast
+    the queueing that default causes - all three cron jobs then fire in the same
+    minute and max_workers=1 makes that a queue - or it would misfire the very
+    run it protects.
+    """
+    jobs = {job.id: job for job in _scheduler(onhold_sweep_hour=22).get_jobs()}
+    trigger = jobs[ONHOLD_SWEEP].trigger
+    assert isinstance(trigger, CronTrigger)
+    assert str(next(f for f in trigger.fields if f.name == "day_of_week")) == "sun"
+    assert str(next(f for f in trigger.fields if f.name == "hour")) == "22"
+    assert jobs[ONHOLD_SWEEP].max_instances == 1
+    assert jobs[ONHOLD_SWEEP].misfire_grace_time == ONHOLD_SWEEP_GRACE_SECONDS
+    assert ONHOLD_SWEEP_GRACE_SECONDS >= 3600  # the worst realistic daily sweep is ~35 minutes
+
+
+def test_run_job_once_dispatches_the_onhold_sweep(tmp_path):
+    """`run-job onhold_sweep`: waiting until Sunday to see a weekly job work is
+    not workable, and it is also how a paused mapping gets retried on demand."""
+    db_path = str(tmp_path / "onhold.db")
+
+    class FakeClient:
+        def fetch_slug_update_times(self, *, progress=None):
+            raise AssertionError("an empty population must not cost even the index request")
+
+    run_job_once(ONHOLD_SWEEP, db_path=db_path, site_id=1, client=FakeClient(), sender=object())
+
+    rows = connect(db_path).execute("SELECT job_name, status FROM job_runs").fetchall()
+    assert rows == [(ONHOLD_SWEEP, "ok")]
 
 
 def test_heartbeat_registered_weekly_with_expected_id():

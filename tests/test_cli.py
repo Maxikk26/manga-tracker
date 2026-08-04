@@ -106,6 +106,55 @@ def test_test_telegram_reports_on_both_paths(monkeypatch, capsys):
     assert "FAILED" in capsys.readouterr().out
 
 
+def test_run_job_accepts_every_job_the_scheduler_can_dispatch():
+    """argparse's `choices` is a second, hand-maintained list of job names, and a
+    job missing from it is unreachable from the CLI however well `_JOBS`
+    dispatches it. Driven off `_JOBS` so the two cannot drift."""
+    from manga_tracker.scheduler import _JOBS
+
+    parser = build_parser()
+    for job_name in _JOBS:
+        assert parser.parse_args(["run-job", job_name]).job == job_name
+
+
+def test_run_hands_the_scheduler_every_configured_hour(tmp_path, monkeypatch):
+    """A configured hour that reaches nothing is this repo's recurring defect.
+
+    `LOCAL_TIMEZONE` once reached the message formatter and nothing else, so the
+    messages reported the right local time about jobs firing at the wrong one -
+    and the first fix for it "looked correct and did nothing". Every hour in
+    `AppConfig` is therefore asserted to arrive at `build_scheduler`, with three
+    distinct values so that dropping one, or crossing two, cannot pass.
+    """
+    from manga_tracker import cli
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "run.db"))
+    monkeypatch.setenv("ACTIVE_SWEEP_HOUR", "22")
+    monkeypatch.setenv("HEARTBEAT_HOUR", "9")
+    monkeypatch.setenv("ONHOLD_SWEEP_HOUR", "4")
+    monkeypatch.setenv("LOCAL_TIMEZONE", "Asia/Tokyo")
+
+    captured = {}
+
+    class Scheduler:
+        def start(self):
+            pass  # never blocks: no real scheduler is started in tests
+
+    monkeypatch.setattr(cli, "TelegramSender", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "catch_up_sweep_if_overdue", lambda **k: False)
+    monkeypatch.setattr(cli, "build_scheduler", lambda **kwargs: captured.update(kwargs) or Scheduler())
+
+    assert cli.main(["run"]) == 0
+    assert captured["active_sweep_hour"] == 22
+    assert captured["heartbeat_hour"] == 9
+    assert captured["onhold_sweep_hour"] == 4
+    assert captured["timezone_name"] == "Asia/Tokyo"
+
+
 # --- import-kitsu -------------------------------------------------------------
 #
 # The doubles below can express failure on purpose. A catalogue that always
@@ -342,52 +391,3 @@ def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_w
     out = capsys.readouterr().out
     assert "'Ryuusa no Ori' (reading, read 5)" in out
     assert "COULD NOT write the pending list" in out
-
-
-def test_retitle_only_never_touches_the_source_or_a_bookmark(tmp_path, monkeypatch, capsys):
-    """The mode exists so a text fix costs no requests to a source that had
-    nothing to do with the defect. If it can reach the source at all, it is the
-    wrong shape."""
-    from manga_tracker import cli
-
-    export = tmp_path / "k.xml"
-    export.write_text(
-        "<myanimelist><myinfo><user_export_type>2</user_export_type></myinfo>"
-        "<manga><manga_mangadb_id>1</manga_mangadb_id><my_read_chapters>5</my_read_chapters>"
-        "<my_status>Reading</my_status></manga></myanimelist>",
-        encoding="utf-8",
-    )
-    db = tmp_path / "t.db"
-    conn = connect(str(db))
-    conn.execute(
-        "INSERT INTO mangas (title, kitsu_id, created_at, updated_at) VALUES ('Romaji Name', '99', 'x', 'x')"
-    )
-    conn.execute("INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
-                 "VALUES (1, 'reading', 'seed', 'x', 'x')")
-    conn.commit()
-    conn.close()
-
-    class Catalogue:
-        def resolve(self, ids):
-            class Entry:
-                external_id = "1"
-                catalogue_id = "99"
-                title = "Romaji Name"
-                title_candidates = ("Readable English Name",)
-            return [Entry()]
-
-    def _boom(*a, **k):
-        raise AssertionError("--retitle-only must not construct a source client")
-
-    monkeypatch.setattr(cli, "KitsuCatalogue", lambda *a, **k: Catalogue())
-    monkeypatch.setattr(cli, "ManganatoClient", _boom)
-    monkeypatch.setenv("DB_PATH", str(db))
-
-    assert cli.main(["import-kitsu", "--retitle-only", "--file", str(export)]) == 0
-
-    out = capsys.readouterr().out
-    assert "'Romaji Name' -> 'Readable English Name'" in out  # printed before committing
-    conn = connect(str(db))
-    assert conn.execute("SELECT title FROM mangas WHERE id = 1").fetchone()[0] == "Readable English Name"
-    # The bookmark is untouched: this mode writes one column of one table.
-    assert conn.execute("SELECT origin, progress_is_approx FROM bookmarks WHERE manga_id = 1").fetchone() == ("seed", 0)

@@ -19,6 +19,7 @@ class AppConfig:
     log_level: str
     active_sweep_hour: int  # design open question 2: local hour, default 3 (early morning)
     heartbeat_hour: int  # weekly heartbeat (Sunday) - defaults to active_sweep_hour, independently configurable
+    onhold_sweep_hour: int  # weekly on-hold sweep (Sunday) - same default and the same independence
     timezone_name: str  # BOT "hora local (America/Caracas)... configurable si me mudo"
     telegram: TelegramConfig | None  # present only if both vars were set
 
@@ -47,7 +48,20 @@ def load_config() -> AppConfig:
         # at 03:00, and it is unaffected by the source-refresh timing that forced the
         # sweep's hour.
         heartbeat_hour=int(os.environ.get("HEARTBEAT_HOUR", str(active_sweep_hour))),
-        # LOCAL_TIMEZONE / HEARTBEAT_HOUR: not documented in .env.example -
+        # ONHOLD_SWEEP_HOUR: same default as the heartbeat, and the collision it
+        # implies is chosen rather than tolerated. On a Sunday all three cron
+        # jobs then fire at the same minute, and max_workers=1 turns that into a
+        # queue: the on-hold sweep waits for the daily one instead of running
+        # beside it, which is the outcome the request policy wants - zero
+        # concurrency against the source, whatever the schedule says. The wait
+        # is bounded by the worst realistic daily sweep (~35 min of timeouts),
+        # well inside the misfire grace window, so nothing is dropped. The other
+        # direction is what a different default would risk: two sweeps at
+        # different hours are two windows in which requests could overlap if
+        # max_workers ever grew. Move it only if the queueing itself becomes a
+        # problem - that is what the variable is for.
+        onhold_sweep_hour=int(os.environ.get("ONHOLD_SWEEP_HOUR", str(active_sweep_hour))),
+        # LOCAL_TIMEZONE / HEARTBEAT_HOUR / ONHOLD_SWEEP_HOUR: not documented in .env.example -
         # that file is under a blanket .env* read/write restriction in this
         # sandbox; see apply-progress.
         timezone_name=os.environ.get("LOCAL_TIMEZONE", "America/Caracas"),

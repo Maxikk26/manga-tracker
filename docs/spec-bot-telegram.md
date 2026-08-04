@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.4 — 2026-07-31. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.10) y `spec-cliente-fuente-descubrimiento.md` (v1.5).
+Versión 1.5 — 2026-08-04. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11) y `spec-cliente-fuente-descubrimiento.md` (v1.6).
+
+Cambios vs 1.4: **la desviación registrada del Mensaje 3 queda resuelta**. `onhold_sweep` existe, y su población incluye todo mapeo pausado por el contador, así que el reintento semanal que el aviso se negaba a prometer ahora ocurre de verdad y el mensaje lo dice. La redacción condicionada hizo su trabajo: se corrigió sola al entrar el barrido, sin que nadie tuviera que acordarse del texto. Se registra también el hueco que este mensaje **no** cubre: el aviso lo emite únicamente el barrido diario, cuya población son los activos, así que un título `on_hold` cuyo slug muere no genera aviso alguno.
 
 Cambios vs 1.3: el Mensaje 3 se construye. Dos decisiones que la v1.3 no cubría, ambas en su sección: el aviso **no promete** el reintento semanal mientras `onhold_sweep` no exista (desviación registrada, redacción condicionada para que se corrija sola), y el contador de fallos **no avanza hasta que el aviso salió** — el cruce del umbral ocurre exactamente una vez por slug muerto, así que avanzar primero haría que un envío fallido destruyera el único aviso que ese mapeo va a generar. Se fija también que `notifications_sent` cuenta este aviso.
 
@@ -116,24 +118,28 @@ Y el problema que resuelve es más urgente de lo que la v1.1 asumía: con varios
 
 Cuando exista `onhold_sweep`, sus números pueden sumarse al mensaje. Lo que no vuelve es la dependencia: el heartbeat late aunque ese barrido no exista.
 
+**Actualización (v1.5): `onhold_sweep` ya existe y el heartbeat sigue desacoplado.** El barrido corre con horario propio y el heartbeat con el suyo; ninguno espera al otro. Sumar sus números al mensaje sigue siendo opcional y no se hizo. Lo que sí se decidió es que `onhold_sweep` **no cuenta como "última detección exitosa"**: es un barrido que no notifica nada, así que una corrida suya no es evidencia de que los mecanismos que sí notifican estén vivos. Contarlo dejaría un heartbeat de aspecto sano encima de seis días de `feed_check` y `active_sweep` muertos, que es exactamente el fallo que este mensaje existe para exponer.
+
 ## Mensaje 3: aviso de slug muerto
 
 **Cuándo**: cuando un mapeo alcanza el umbral de fallos consecutivos de tipo "no encontrado" (5, según la spec 3). **Un solo aviso por manga**: no se repite mientras el contador siga alto.
+
+**Quién lo emite, y qué hueco deja** (v1.5): solo el **barrido diario**. Es el único que puede garantizar "un solo aviso por manga", porque su población excluye todo mapeo que ya llegó al umbral y el cruce ocurre entonces exactamente una vez. El barrido semanal, cuya población incluye a propósito esos mapeos, no emite aviso nunca; si lo hiciera, repetiría el mismo mensaje cada domingo mientras el slug siguiera muerto. Consecuencia asumida y declarada: la población del diario son los activos, así que **un título `on_hold` cuyo slug muere no genera ningún aviso**. Se ve en `consecutive_failures` y en el log. Se acepta porque la alternativa es el aviso repetido, que entrena a ignorar el mensaje.
 
 **Contenido**: qué manga dejó de responder, su slug actual, y qué significa (probablemente cambió de slug o lo quitaron de la fuente). Indica que quedó fuera del barrido diario y que se seguirá reintentando en el semanal, y que la reparación es corregir el slug a mano.
 
 **Ejemplo ilustrativo**:
 
 > ⚠️ Slug sin respuesta — Some Manga Title
-> El slug `some-manga-slug` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario y no se reintenta solo. Revisa si cambió de URL en la fuente y corrígelo.
+> El slug `some-manga-slug` lleva 5 chequeos sin encontrarlo. Queda fuera del barrido diario; se reintenta en el semanal. Revisa si cambió de URL en la fuente y corrígelo.
 
 Varios mangas que crucen el umbral en la misma corrida se agrupan en un solo mensaje, con el mismo criterio de separación por línea en blanco del digest.
 
-### Desviación registrada (v1.4): el mensaje no promete el reintento semanal
+### Desviación registrada (v1.4), resuelta en la v1.5: el reintento semanal ya se puede prometer
 
-Hasta la v1.3 el ejemplo cerraba con "se reintenta en el semanal", que asume que `onhold_sweep` existe. **No existe todavía**, y el one-pager ya acepta que durante la fase corazón un mapeo pausado en el umbral no tiene vía automática de recuperación. Un mensaje que promete un reintento que nadie ejecuta es peor que no tener mensaje: entrena a esperar sentado.
+Hasta la v1.3 el ejemplo cerraba con "se reintenta en el semanal", que asume que `onhold_sweep` existe. En la v1.4 **no existía**, el one-pager aceptaba que un mapeo pausado en el umbral no tenía vía automática de recuperación, y la conclusión sigue valiendo como regla: un mensaje que promete un reintento que nadie ejecuta es peor que no tener mensaje, porque entrena a esperar sentado.
 
-La redacción va condicionada a si el barrido semanal existe, así que **se corrige sola** cuando entre la fase 2 en vez de depender de que alguien se acuerde.
+Por eso la redacción se condicionó a si el barrido semanal existe en vez de fijarse en un texto. **Y eso es lo que se cobró en la v1.5**: el barrido entró, su población incluye todo mapeo pausado, la condición pasó a verdadera y cada aviso se corrigió solo, sin que nadie tuviera que recordar esta sección. La condición se queda: no es un paso de migración, es el acoplamiento honesto entre lo que el mensaje promete y lo que un barrido de verdad hace. Si algún día el barrido semanal dejara de cubrir a los pausados, el aviso volvería a callarse en vez de mentir.
 
 ### Orden de operaciones del aviso (v1.4): notificar antes de avanzar el contador
 

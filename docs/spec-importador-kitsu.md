@@ -1,6 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.4 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.5), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.5 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+
+Cambios vs 1.4: se salta el candidato escrito en un alfabeto que el lector no puede leer — la primera pasada real dejó cuatro filas en chino, ruso y coreano teniendo una alternativa legible más adelante en la misma lista. Y **el modo `--retitle-only` se borra**: era una migración de una sola vez, ya cumplida, y volver a correrlo pisaría dos títulos corregidos a mano.
 
 Cambios vs 1.3: se fija **qué título se guarda** — el primer candidato de la lista ordenada, no el canónico, porque el canónico es romaji para la mayoría de obras coreanas y japonesas y dejó un tercio de las 212 filas del primer import ilegibles en el digest. Con el modo `--retitle-only` para arreglar lo ya escrito sin re-correr el import.
 
@@ -27,7 +29,7 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Qué se guarda de menos** | `my_score` y el id de MAL: no tienen columna y agregarla obliga a migrar. **Reversible**, el XML se conserva | Decisiones 1 y 5 |
 | **Qué queda nulo** | `last_read_at` salvo en 28 terminados, donde se escribe a **medianoche UTC**. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
 | **Cómo no duplica lo ya cargado** | Reconcilia por **tres llaves en orden**: `kitsu_id`, slug, título exacto. La v1.0 usaba solo `kitsu_id`, que el seed nunca escribe — habría duplicado tus 16 títulos | §Reconciliación |
-| **Qué título guarda** | El primer candidato de la lista ordenada del catálogo, **no el canónico**: ese es romaji y dejó un tercio del primer import ilegible | §Qué título se guarda |
+| **Qué título guarda** | El primer candidato **legible** de la lista ordenada del catálogo, no el canónico: ese es romaji y dejó un tercio del primer import ilegible | §Qué título se guarda |
 | **Qué metadata trae** | Título, `alt_titles`, `synopsis`, géneros, portada, estado y `total_chapters` cuando exista. Las columnas ya estaban en el esquema: **sin migración** | §La frontera del catálogo |
 | **Qué no se toca nunca** | Los bookmarks con `origin` `seed` o `manual`. Los `kitsu_import` sí se actualizan desde el export, y ese UPDATE es hoy lo único que puebla `reading_history` | §Reconciliación |
 | **Si lo corres dos veces** | Seguro, y por restricciones de la base, no por cuidado del operador | §Re-ejecución |
@@ -71,9 +73,13 @@ La lista de candidatos ya viene ordenada por la preferencia del propio catálogo
 
 Si la lista viene vacía —posible, cuando el catálogo no tiene ningún nombre en alfabeto latino— se cae al canónico. Escribir vacío no es opción: la columna es NOT NULL.
 
-### Modo `--retitle-only`
+### El modo `--retitle-only` existió y se borró (v1.5)
 
-Las filas ya escritas no se arreglan solas, y re-correr el import completo costaría media hora y requests a la fuente para cambiar un texto. El modo `--retitle-only` vuelve a resolver el catálogo y actualiza **solo** `mangas.title`: cero requests a la fuente, cero escrituras en bookmarks o en `chapter_history`. Imprime cada cambio como `viejo -> nuevo`, porque un cambio masivo de títulos que no se puede leer antes de aceptarlo no es revisable.
+Fue una migración de una sola vez: arregló las 227 filas que la v1.3 había escrito con el título canónico, en dos pasadas — 165 filas la primera, y 4 más tras cerrar el hueco del alfabeto ilegible. Cumplido eso no queda nada que retitular, porque toda fila nueva o actualizada ya pasa por la regla correcta al escribirse.
+
+**Se borró en vez de dejarse por si acaso, y el motivo es concreto**: dos títulos que el catálogo devuelve mal —*Parallel Paradise* como `Parareru Paradaisu`, *Dungeon Reset* como `Tencen Liseys`— se corrigieron a mano en la base. Volver a correr ese modo los pisaría, en silencio y sin que nadie lo pidiera. Un modo que solo puede hacer daño de aquí en adelante es un arma cargada, no una herramienta.
+
+Si alguna vez hace falta otra vez, el código está en el historial de git.
 
 ## Reconciliación con las filas del seed
 

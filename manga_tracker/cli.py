@@ -20,9 +20,10 @@ from manga_tracker.config import AppConfig, load_config, require_telegram
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
+from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
 from manga_tracker.importer.export import ExportError, read_export
 from manga_tracker.importer.pending import write_pending
-from manga_tracker.importer.run import STATUS_LOAD_ORDER, readable_title, run_import
+from manga_tracker.importer.run import STATUS_LOAD_ORDER, run_import
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
 from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, reap_stale_runs, run_job_once
@@ -76,11 +77,6 @@ def _cmd_import_kitsu(args: argparse.Namespace, config: AppConfig) -> int:
     # constructor, and the importer below never learns which one answered.
     catalogue = KitsuCatalogue(UrllibJsonTransport())
 
-    if args.retitle_only:
-        # No `ensure_site`, no source client, no request to manganato: this mode
-        # rewrites one text column and must not be able to do anything else.
-        return _retitle(conn, catalogue, entries)
-
     site_id = ensure_site(conn, "manganato", BASE_URL)
     client = ManganatoClient(CurlCffiTransport())
     try:
@@ -98,37 +94,6 @@ def _cmd_import_kitsu(args: argparse.Namespace, config: AppConfig) -> int:
     return 0 if report.loaded else 1
 
 
-
-def _retitle(conn, catalogue, entries) -> int:
-    """Rewrite `mangas.title` from the catalogue, and touch nothing else.
-
-    The first real import stored `canonicalTitle`, which is romaji for most
-    Korean and Japanese works — roughly a third of 212 rows became unreadable in
-    the digest. Re-running the whole import to fix a text column would cost half
-    an hour and ~136 delayed requests to a source that has nothing to do with
-    the defect, so this mode exists instead.
-
-    Every change is printed before the commit. A bulk retitle nobody can read
-    before accepting is not reviewable, and this is the operator's only chance to
-    notice the catalogue offering something worse than what is stored.
-    """
-    resolved = catalogue.resolve([entry.external_id for entry in entries])
-    changed = 0
-    for candidate in resolved:
-        better = readable_title(candidate)
-        if not better or not better.strip():
-            continue
-        row = conn.execute(
-            "SELECT id, title FROM mangas WHERE kitsu_id = ?", (candidate.catalogue_id,)
-        ).fetchone()
-        if row is None or row[1] == better:
-            continue
-        print(f"  {row[1]!r} -> {better!r}")
-        conn.execute("UPDATE mangas SET title = ? WHERE id = ?", (better, row[0]))
-        changed += 1
-    conn.commit()
-    print(f"Retitled {changed} row(s) of {len(resolved)} resolved. Nothing else was touched.")
-    return 0
 
 
 def _report_export_composition(entries) -> None:
@@ -211,7 +176,8 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
                      timezone_name=config.timezone_name,
                      active_sweep_hour=config.active_sweep_hour,
-                     heartbeat_hour=config.heartbeat_hour).start()  # blocks until interrupted
+                     heartbeat_hour=config.heartbeat_hour,
+                     onhold_sweep_hour=config.onhold_sweep_hour).start()  # blocks until interrupted
     return 0
 
 
@@ -267,17 +233,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_kitsu.add_argument(
         "--dry-run", action="store_true", help="Validate the export and report; write nothing, request nothing"
     )
-    import_kitsu.add_argument(
-        "--retitle-only", action="store_true",
-        help="Rewrite mangas.title from the catalogue and nothing else; no request to the source",
-    )
     import_kitsu.set_defaults(handler=_cmd_import_kitsu)
 
     run = subparsers.add_parser("run", help="Start the scheduler (blocks until interrupted)")
     run.set_defaults(handler=_cmd_run)
 
     run_job = subparsers.add_parser("run-job", help="Run one job body once, outside the scheduler")
-    run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB, HEARTBEAT_JOB])
+    run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB, ONHOLD_SWEEP_JOB, HEARTBEAT_JOB])
     run_job.set_defaults(handler=_cmd_run_job)
 
     test_telegram = subparsers.add_parser(

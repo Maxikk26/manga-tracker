@@ -14,10 +14,10 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 |---|---|
 | Fase 0 — diseño | ✅ el paquete de `docs/` está completo |
 | Fase corazón — esquema, seed, cliente, detección, digest, Docker | ✅ desplegada; primera notificación real el 30 de julio |
-| Fase 2 — aviso de slug muerto | ✅ desplegada. `onhold_sweep` sigue pendiente y hoy no barrería nada: no hay bookmarks en `on_hold` hasta que corra el import |
-| Fase 3 — import de Kitsu | 🔨 implementada, sin correr todavía contra la base real |
+| Fase 2 — aviso de slug muerto + `onhold_sweep` | ✅ completa. El aviso lleva desplegado desde el arranque; el barrido semanal entra en el próximo redespliegue y ya tiene población: el import dejó 72 bookmarks en `on_hold` donde había cero |
+| Fase 3 — import de Kitsu | ✅ corrió contra la base real |
 
-Criterio de terminado de V1a: los cuatro puntos del one-pager. Faltan el criterio 2 (`onhold_sweep`) y el 4 (que el import haya corrido de verdad).
+Criterio de terminado de V1a: los cuatro puntos del one-pager. Los cuatro están cubiertos; el 2 se marca en el redespliegue que suba el `onhold_sweep` al mini-PC, que es lo único que falta y no es código.
 
 ## Cómo funciona (resumen)
 
@@ -31,8 +31,8 @@ Detección en tres velocidades, todas secuenciales y sin concurrencia:
 | Mecanismo | Frecuencia | Población | Rol |
 |---|---|---|---|
 | `feed_check` | Cada hora | Lo que aparezca en el feed del sitio | Oportunista: baja la latencia cuando alcanza. No garantiza nada (la ventana del feed son ~41 min, medidos). |
-| `active_sweep` | Diario | Mis lecturas activas (<20) | **Mecanismo principal.** Garantiza latencia máxima ~24 h. |
-| `onhold_sweep` | Semanal | On-hold | Actualiza en silencio; nunca notifica. |
+| `active_sweep` | Diario | Mis lecturas activas (89 tras el import), menos las pausadas por slug muerto | **Mecanismo principal.** Garantiza latencia máxima ~24 h. Pregunta primero a la fuente qué títulos se movieron. |
+| `onhold_sweep` | Semanal (domingo) | On-hold (72), **más** todo mapeo pausado por slug muerto | Actualiza en silencio; **nunca envía nada**. Es la única vía de reintento de un slug pausado. |
 
 Los estados terminales (`completed`, `dropped`) no reciben ningún request, nunca.
 

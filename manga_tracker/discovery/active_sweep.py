@@ -8,6 +8,7 @@ requests."""
 import logging
 
 from manga_tracker.discovery.detection import DETECTED_VIA_VALUES, Mapping, apply_detection
+from manga_tracker.discovery.prefilter import has_moved, slug_update_times
 from manga_tracker.discovery.runs import RunAlreadyOpen, close_run, open_run, send_and_advance
 from manga_tracker.notifier.contracts import DeadSlugNotice
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
@@ -18,11 +19,13 @@ JOB_NAME = "active_sweep"
 DETECTED_VIA = "active_sweep"
 assert DETECTED_VIA in DETECTED_VIA_VALUES
 DEAD_SLUG_THRESHOLD = 5
-# `onhold_sweep` is phase 2, so a mapping paused at the threshold has no
-# automatic recovery yet (one-pager, accepted risk). The notice says so instead
-# of promising the weekly retry the bot spec's illustration describes; flip this
-# when that sweep lands and every message corrects itself.
-DEAD_SLUG_RETRIES_WEEKLY = False
+# True since `onhold_sweep` landed, and that is the whole reason the wording was
+# made conditional rather than fixed: the notice promised no weekly retry while
+# nothing performed one, and it now promises the retry that does happen. The
+# weekly sweep's population includes every mapping paused at this threshold, so
+# the promise holds for exactly the mappings this notice can be sent about -
+# which are all `reading`/`want_to_read`, since only this sweep sends it.
+DEAD_SLUG_RETRIES_WEEKLY = True
 
 
 def _report_dead_slugs(conn, pending: list, sender, *, now: str, logger) -> bool:
@@ -30,13 +33,16 @@ def _report_dead_slugs(conn, pending: list, sender, *, now: str, logger) -> bool
 
     This is CD's "Orden de operaciones" - notify before advancing - applied to
     Mensaje 3, and here it is load-bearing rather than stylistic. A mapping at
-    the threshold is excluded from the population, so it never issues another
-    request and never increments again: the crossing happens exactly once in the
-    life of a dead slug. Advancing the counter first would mean a failed send
-    loses the only notice that mapping will ever generate, and the title would
-    drop out of the daily sweep in the silence this whole message exists to
-    break. Holding the increment back costs one extra request next run and turns
-    a lost notice into a re-detected one.
+    the threshold is excluded from *this* population, so it never crosses twice:
+    the crossing happens exactly once in the life of a dead slug. (`onhold_sweep`
+    does keep requesting it weekly and does keep counting its failures, which is
+    why the exclusion is written as `< THRESHOLD` rather than `== THRESHOLD` -
+    a counter at 6 or 9 stays out of the daily sweep and produces no second
+    notice.) Advancing the counter first would mean a failed send loses the only
+    notice that mapping will ever generate, and the title would drop out of the
+    daily sweep in the silence this whole message exists to break. Holding the
+    increment back costs one extra request next run and turns a lost notice into
+    a re-detected one.
 
     Returns True when the notice failed, matching send_and_advance's convention
     so the caller can close the run `partial`.
@@ -77,53 +83,6 @@ def _population(conn):
     ).fetchall()
 
 
-def _update_times(client, logger) -> dict[str, str | None] | None:
-    """What the source says each slug last changed, or None to sweep everything.
-
-    Asking once turns a request-per-title sweep into a request-per-*changed*-title
-    one. At the 16 mappings this design was sized for that saved nothing worth
-    having; the Kitsu import took the population to 89, where the same answer
-    costs about ten requests instead of eighty-nine.
-
-    A failure here degrades to sweeping the whole population, and that direction
-    is deliberate: the sweep is the only latency guarantee in the design, and
-    making it depend on an optimisation would trade a bounded cost for an
-    unbounded silence. Logged loudly, because a sweep that quietly costs 9x more
-    than usual is worth knowing about.
-    """
-    try:
-        return client.fetch_slug_update_times()
-    except Exception:
-        logger.exception(
-            "could not read the source's update times; sweeping the whole population instead "
-            "(correct, just slower and more requests)"
-        )
-        return None
-
-
-def _has_moved(update_times, source_key: str, stored_at: str | None) -> bool:
-    """Whether a mapping is worth a request.
-
-    Three cases say yes, and only one says no:
-
-    - No stored timestamp: never successfully checked, so nothing to compare.
-    - The slug is absent from the map, or its entry carries no timestamp: unknown
-      is not unchanged. A slug the source has not caught up with yet would
-      otherwise be skipped forever.
-    - The source's timestamp is greater than the stored one: it moved.
-
-    String comparison is correct here and not a shortcut: both sides are
-    ISO-8601 UTC, which orders lexicographically. Parsing them would mean
-    reconciling the index's `+00:00` with the endpoint's `Z` for no gain.
-    """
-    if stored_at is None:
-        return True
-    reported = update_times.get(source_key)
-    if reported is None:
-        return True
-    return reported > stored_at
-
-
 def active_sweep(conn, client, sender, *, now: str, logger) -> None:
     """The 5-15s delay between consecutive requests is the transport's job
     (already injectable there); `client` here is the `SourceClient` Protocol,
@@ -154,14 +113,14 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     items_checked = 0
     skipped = 0
     population = _population(conn)
-    update_times = _update_times(client, logger) if population else None
+    times = slug_update_times(client, logger) if population else None
     for ms_id, manga_id, title, status, source_key, latest, last_read, stored_at in population:
         # Counted before the skip decision, and that is load-bearing: a run that
         # examined 89 mappings and requested 3 examined 89. `sweep_is_overdue`
         # filters on items_checked > 0, so under-reporting here would let a
         # legitimate sweep look like one that swept nothing.
         items_checked += 1
-        if update_times is not None and not _has_moved(update_times, source_key, stored_at):
+        if times is not None and not has_moved(times, source_key, stored_at):
             skipped += 1
             continue
         try:
@@ -208,7 +167,7 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
         if candidate is not None:
             candidates.append(candidate)
 
-    if update_times is not None:
+    if times is not None:
         logger.info(
             "active_sweep examined %s mapping(s), requested %s, skipped %s the source reports unchanged",
             items_checked, items_checked - skipped, skipped,

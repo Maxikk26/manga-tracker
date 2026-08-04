@@ -10,13 +10,21 @@ This file covers what the README does not: the architectural rules that are easy
 
 ## Repository state
 
-There is **no application code yet**. Phase 0 is complete: the V1a design is closed across eight documents in `docs/`. `docs/` is the source of truth, not a description of existing code.
+**In production since 2026-07-30**, running unattended in Docker on a home mini-PC. `docs/` is still the source of truth: it is where behaviour is decided, and the code follows it, not the other way round.
 
-Consequences:
+Real commands — do not invent others:
 
-- There is no build, lint, or test tooling to run. No `pyproject.toml`, no `requirements.txt`, no `Dockerfile`, no test suite. Do not invent commands — when scaffolding lands, record the real ones in this section.
-- Decided but not yet scaffolded: Python, SQLite (single file, Docker volume), curl-cffi, APScheduler inside the process, one container.
-- The only executable precedent is the throwaway feed-window measurement script, which deliberately lives outside the repo (see `docs/medicion-ventana-feed.md`).
+```
+uv run pytest -q                 the suite; 303 tests as of 2026-08-04
+docker compose build             required when manga_tracker/, pyproject.toml or the Dockerfile change
+docker compose up -d             the ONLY redeploy verb; `restart` does not recreate and silently keeps the old image
+```
+
+What exists: `manga_tracker/` with `sources/manganato/`, `storage/`, `seed/`, `discovery/`, `notifier/`, `catalogue/`, `importer/`, plus `scheduler.py` and `cli.py`. Python 3.12 under `uv` with a committed lockfile, SQLite in a Docker volume, curl-cffi, APScheduler in-process, one container.
+
+V1a status: the heart phase, the dead-slug notice, the Kitsu importer and `onhold_sweep` are all built. The database holds 227 mangas and 227 bookmarks from the real import.
+
+Two things this section got wrong for a week, because nobody updated it: it claimed there was no application code and no test tooling, long after both existed. **A stale statement here is expensive** — it is read at the start of every session and believed. When behaviour changes, this file changes with it.
 
 ## Spec authority, and where the docs contradict each other
 
