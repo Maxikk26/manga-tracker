@@ -110,13 +110,14 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
 def _format_dead_slug(notice: DeadSlugNotice) -> str:
     """BOT "Mensaje 3". Says what stopped answering, its slug, and what to do.
 
-    Registered deviation from the spec's illustration, and it is about honesty:
-    that example ends "se reintenta en el semanal", which assumes `onhold_sweep`
-    exists. It does not yet, and the one-pager already accepts that a mapping
-    paused at the threshold has no automatic recovery during the heart phase. A
-    message promising a retry nothing performs would be worse than no message.
-    The wording follows `retries_weekly`, so it corrects itself when that sweep
-    lands instead of needing to be remembered.
+    The wording follows `retries_weekly` rather than being fixed, and that is
+    what paid off: while `onhold_sweep` did not exist the notice refused to
+    promise the weekly retry the spec's illustration describes, because a message
+    promising a retry nothing performs is worse than no message. The sweep landed
+    and the flag flipped, so every notice corrected itself without anyone having
+    to remember this function. The False branch stays because the flag is the
+    honest coupling, not a migration step: the promise is only true while a sweep
+    really retries these mappings.
     """
     title = html.escape(_truncate_title(notice.manga_title))
     slug = html.escape(notice.source_key)

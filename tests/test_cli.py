@@ -106,6 +106,55 @@ def test_test_telegram_reports_on_both_paths(monkeypatch, capsys):
     assert "FAILED" in capsys.readouterr().out
 
 
+def test_run_job_accepts_every_job_the_scheduler_can_dispatch():
+    """argparse's `choices` is a second, hand-maintained list of job names, and a
+    job missing from it is unreachable from the CLI however well `_JOBS`
+    dispatches it. Driven off `_JOBS` so the two cannot drift."""
+    from manga_tracker.scheduler import _JOBS
+
+    parser = build_parser()
+    for job_name in _JOBS:
+        assert parser.parse_args(["run-job", job_name]).job == job_name
+
+
+def test_run_hands_the_scheduler_every_configured_hour(tmp_path, monkeypatch):
+    """A configured hour that reaches nothing is this repo's recurring defect.
+
+    `LOCAL_TIMEZONE` once reached the message formatter and nothing else, so the
+    messages reported the right local time about jobs firing at the wrong one -
+    and the first fix for it "looked correct and did nothing". Every hour in
+    `AppConfig` is therefore asserted to arrive at `build_scheduler`, with three
+    distinct values so that dropping one, or crossing two, cannot pass.
+    """
+    from manga_tracker import cli
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "run.db"))
+    monkeypatch.setenv("ACTIVE_SWEEP_HOUR", "22")
+    monkeypatch.setenv("HEARTBEAT_HOUR", "9")
+    monkeypatch.setenv("ONHOLD_SWEEP_HOUR", "4")
+    monkeypatch.setenv("LOCAL_TIMEZONE", "Asia/Tokyo")
+
+    captured = {}
+
+    class Scheduler:
+        def start(self):
+            pass  # never blocks: no real scheduler is started in tests
+
+    monkeypatch.setattr(cli, "TelegramSender", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "catch_up_sweep_if_overdue", lambda **k: False)
+    monkeypatch.setattr(cli, "build_scheduler", lambda **kwargs: captured.update(kwargs) or Scheduler())
+
+    assert cli.main(["run"]) == 0
+    assert captured["active_sweep_hour"] == 22
+    assert captured["heartbeat_hour"] == 9
+    assert captured["onhold_sweep_hour"] == 4
+    assert captured["timezone_name"] == "Asia/Tokyo"
+
+
 # --- import-kitsu -------------------------------------------------------------
 #
 # The doubles below can express failure on purpose. A catalogue that always

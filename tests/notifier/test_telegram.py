@@ -3,7 +3,7 @@ link-preview suppression, the all-or-nothing size split, and the 429/retry
 policy (spec-bot-telegram.md v1.3 "Mensaje 1" + "Idioma de los mensajes").
 No network - the HTTP call is injected."""
 
-from manga_tracker.notifier.contracts import DigestLine
+from manga_tracker.notifier.contracts import DeadSlugNotice, DigestLine
 from manga_tracker.notifier.telegram import DEFAULT_TIMEZONE, MESSAGE_LIMIT, TelegramSender, _format_line, _split_message
 
 NOW = "2026-07-21T22:40:00Z"  # 18:40 in America/Caracas (UTC-4) - BOT's own illustrative example
@@ -167,6 +167,49 @@ def test_header_falls_back_to_utc_when_the_configured_zone_is_unavailable():
     """Never raises: a digest with an odd timestamp beats one that never sends."""
     _, calls = _send([_line("Alpha", 1)], _ok(), now="2026-07-21T22:40:00Z", timezone_name="Not/AZone")
     assert "22:40 UTC" in calls[0]["text"]
+
+
+def test_the_dead_slug_notice_promises_the_weekly_retry_only_when_one_exists():
+    """BOT "Mensaje 3" and its registered deviation, both branches.
+
+    The wording was made conditional so it would correct itself when
+    `onhold_sweep` landed rather than depend on someone remembering this
+    function - and until now neither branch had a test, so "it corrects itself"
+    was an untested claim about the one sentence in the product that must not
+    lie. `active_sweep.DEAD_SLUG_RETRIES_WEEKLY` decides which branch ships.
+    """
+    def render(retries_weekly):
+        api = FakeApi([_ok()])
+        notices = [DeadSlugNotice("Black Haze (2025)", "black-haze-2025", 5, retries_weekly=retries_weekly)]
+        assert TelegramSender("t", "c", api_call=api).send_dead_slug_notice(notices, now=NOW) is True
+        return api.calls[0]["text"]
+
+    promised = render(True)
+    assert "Queda fuera del barrido diario; se reintenta en el semanal." in promised
+    assert "no se reintenta solo" not in promised
+
+    withheld = render(False)
+    assert "Queda fuera del barrido diario y no se reintenta solo." in withheld
+
+    # Everything else is shared, and is the reader's actual repair instruction.
+    for text in (promised, withheld):
+        assert "<b>Slug sin respuesta</b> — Black Haze (2025)" in text
+        assert "<code>black-haze-2025</code> lleva 5 chequeos sin encontrarlo" in text
+        assert "Revisa si cambió de URL en la fuente y corrígelo." in text
+
+
+def test_several_dead_slugs_share_one_message_ordered_by_title():
+    notices = [
+        DeadSlugNotice("Zeta", "zeta", 5, retries_weekly=True),
+        DeadSlugNotice("Alpha", "alpha", 5, retries_weekly=True),
+    ]
+    api = FakeApi([_ok()])
+    assert TelegramSender("t", "c", api_call=api).send_dead_slug_notice(notices, now=NOW) is True
+
+    assert len(api.calls) == 1  # one message, not one per manga
+    text = api.calls[0]["text"]
+    assert text.startswith("2 slugs sin respuesta — ")
+    assert text.index("Alpha") < text.index("Zeta")
 
 
 def test_send_test_message_reaches_the_injected_transport():
