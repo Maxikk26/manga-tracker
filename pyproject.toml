@@ -17,6 +17,12 @@ dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Required so two suites can name their file after the module they test:
+# `tests/catalogue/test_transport.py` and `tests/sources/test_transport.py`
+# collide under the default `prepend` import mode, which derives a module name
+# from the basename alone and refuses the second one. `importlib` gives each
+# file its own module identity without turning `tests/` into a package.
+addopts = "--import-mode=importlib"
 
 [build-system]
 requires = ["hatchling"]
