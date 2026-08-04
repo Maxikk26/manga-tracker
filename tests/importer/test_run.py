@@ -795,3 +795,51 @@ def test_an_entry_with_no_candidates_falls_back_to_the_canonical_title():
         title_candidates = ()
 
     assert readable_title(Entry()) == "Only This"
+
+
+def test_a_candidate_in_an_unreadable_script_is_skipped_for_the_next_one():
+    """Found by the first real retitle, not by review.
+
+    Four rows landed in Chinese, Russian and Korean while a readable alternate
+    sat later in the same list. `Kenja no Mago` offered
+    ['賢者之孫', '현자의 손자', "Magi's Grandson"] and the head was taken.
+
+    This preserves the catalogue's order and only declines a name that cannot be
+    read at all - it is not the reorder-by-ratio heuristic that got *Solo
+    Max-Level Newbie* backwards.
+    """
+    from manga_tracker.importer.run import readable_title
+
+    class Entry:
+        title = "Kenja no Mago"
+        title_candidates = ("\u8ce2\u8005\u4e4b\u5b59", "\ud604\uc790\uc758 \uc190\uc790", "Magi's Grandson")
+
+    assert readable_title(Entry()) == "Magi's Grandson"
+
+
+def test_non_ascii_punctuation_does_not_make_a_title_unreadable():
+    """The letters decide, not the bytes. "Mercenary's" with U+2019 is readable;
+    pure CJK inside ASCII parentheses is not."""
+    from manga_tracker.importer.run import readable_title
+
+    class Readable:
+        title = "x"
+        title_candidates = ("The Regressed Mercenary\u2019s Machinations",)
+
+    class NotReadable:
+        title = "Douluo Dalu II: Jueshi Tangmen"
+        title_candidates = ("\u7edd世\u5510\u95e8(\u6f2b\u753b\uff09", "Soul Land 2")
+
+    assert readable_title(Readable()) == "The Regressed Mercenary\u2019s Machinations"
+    assert readable_title(NotReadable()) == "Soul Land 2"
+
+
+def test_when_no_candidate_is_readable_the_first_one_still_wins():
+    """Better a title in a script I cannot read than an empty NOT NULL column."""
+    from manga_tracker.importer.run import readable_title
+
+    class Entry:
+        title = "fallback"
+        title_candidates = ("\u8ce2\u8005\u4e4b\u5b59",)
+
+    assert readable_title(Entry()) == "\u8ce2\u8005\u4e4b\u5b59"
