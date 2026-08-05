@@ -1,6 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.5 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.3).
+Versión 1.6 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6), de `spec-seed-manual.md` (v2.3) y de `manganato-fuente-actual.md` (v1.4).
+
+Cambios vs 1.5: pin actualizado a la v1.4 de `manganato-fuente-actual.md`, y **la fila de corrección que apuntaba a ese documento queda cerrada**: la afirmación que corregía ya no existe allá, y la fuente resultó dar más metadata de la que ese documento decía, no menos. Ninguna decisión de este spec cambia.
 
 Cambios vs 1.4: se salta el candidato escrito en un alfabeto que el lector no puede leer — la primera pasada real dejó cuatro filas en chino, ruso y coreano teniendo una alternativa legible más adelante en la misma lista. Y **el modo `--retitle-only` se borra**: era una migración de una sola vez, ya cumplida, y volver a correrlo pisaría dos títulos corregidos a mano.
 
@@ -50,7 +52,7 @@ Esto corrige tres afirmaciones vigentes en el paquete, que asumían que la metad
 | Documento | Dice | Corrección |
 |---|---|---|
 | `README.md` §"Kitsu aporta la metadata pesada" | Implica que llega con el import | Llega, pero de la **API**, no del archivo |
-| `manganato-fuente-actual.md` §18 | Igual | Igual |
+| `manganato-fuente-actual.md` §Resumen (era su TL;DR) | Decía que la metadata rica "NO viene de aquí" | **Cerrada en su v1.4**, y en el otro sentido: título, alternativos, autor, estado, géneros y sinopsis **sí** salen de la fuente. Lo que no sale es ningún id de catálogo externo ni el total real de capítulos de la obra |
 | `spec-modelo-de-datos.md` `mangas.kitsu_id` | Poblado por el import | El export trae **id de MAL**; el `kitsu_id` hay que resolverlo |
 
 ## Decisiones discutibles (lo único que hace falta leer para validar)

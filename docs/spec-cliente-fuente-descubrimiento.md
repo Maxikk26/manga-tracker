@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.6 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.3).
+Versión 1.6 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.4).
 
 Cambios vs 1.5: el **Mecanismo 3 se construye**, y con él se cierran cuatro cosas que la v1.5 dejaba ambiguas o desactualizadas, todas en su sección y en la de slugs muertos:
 
