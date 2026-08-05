@@ -49,6 +49,23 @@ def test_fetch_chapters_not_found(status, fixture):
         client.fetch_chapters("gone-manga")
 
 
+def test_fetch_chapters_empty_array_is_a_success_not_an_error():
+    """D14. A well-formed `success: true` carrying zero chapters is a success.
+
+    It is the one payload that looks like a failure and is not: the slug exists,
+    the endpoint answered, and the answer is "no chapters". Under CD's taxonomy
+    that is neither not-found nor transient nor unexpected, so the client returns
+    an empty list and lets each caller decide - and they decide differently on
+    purpose (`active_sweep` resets the dead-slug counter, the seed loader
+    discards the row whole; SEED "Fila cuyo slug existe pero devuelve cero
+    capitulos"). Both of those hinge on this returning `[]` rather than raising,
+    which is why it is asserted here and not inferred.
+    """
+    client, _ = _client(200, "chapters_empty.json")
+
+    assert client.fetch_chapters("quiet-manga") == []
+
+
 def test_fetch_chapters_missing_array_is_unexpected():
     client, _ = _client(200, "chapters_missing_array.json")
 

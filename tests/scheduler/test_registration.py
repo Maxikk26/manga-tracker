@@ -204,6 +204,82 @@ def test_job_wrapper_closes_the_run_row_and_logs_when_the_job_body_raises(tmp_pa
     assert "feed_check failed" in caplog.text
 
 
+def test_a_missed_run_is_logged_loudly_instead_of_vanishing(caplog):
+    """The one failure class `job_runs` cannot record.
+
+    A run that fails closes its row `error`. A run that never started leaves no
+    row, so the only evidence is an absence in a table nobody diffs - and for
+    `active_sweep`, the sole guarantor of the ~24h detection latency, that absence
+    IS the failure. APScheduler's default for a misfire is a debug line.
+
+    Dispatched through the real scheduler rather than by calling the listener, so
+    the event mask is under test too: a listener registered on the wrong constant
+    would never see this event.
+    """
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from apscheduler.events import EVENT_JOB_MISSED, JobExecutionEvent
+
+    scheduled = datetime(2026, 8, 4, 3, 0, tzinfo=dt_timezone.utc)
+    scheduler = _scheduler()
+
+    with caplog.at_level(logging.ERROR):
+        scheduler._dispatch_event(
+            JobExecutionEvent(EVENT_JOB_MISSED, ACTIVE_SWEEP, "default", scheduled)
+        )
+
+    assert "MISSED" in caplog.text
+    assert ACTIVE_SWEEP in caplog.text
+    assert "2026-08-04 03:00" in caplog.text  # which window was lost
+    assert caplog.records[-1].levelno == logging.ERROR  # not debug, not info
+
+
+def test_a_run_refused_for_overlapping_is_logged_too(caplog):
+    """max_instances=1 skipping a run has the same consequence as a misfire - no
+    execution, no row - and APScheduler reports it as a warning on its own logger.
+    Harmless for `feed_check` behind a sweep (design D5); for a sweep it means the
+    previous run has been going over a day."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from apscheduler.events import EVENT_JOB_MAX_INSTANCES, JobSubmissionEvent
+
+    scheduler = _scheduler()
+
+    with caplog.at_level(logging.ERROR):
+        scheduler._dispatch_event(
+            JobSubmissionEvent(EVENT_JOB_MAX_INSTANCES, FEED_CHECK, "default",
+                               [datetime(2026, 8, 4, 4, 0, tzinfo=dt_timezone.utc)])
+        )
+
+    assert "max_instances=1" in caplog.text
+    assert FEED_CHECK in caplog.text
+    assert caplog.records[-1].levelno == logging.ERROR
+
+
+def test_an_erroring_job_keeps_its_own_distinct_backstop_line(caplog):
+    """Three listeners, three messages. Asserted apart because they are three
+    different failures and a shared line would hide which one happened - the
+    backstop fires when something escaped `_make_job` entirely, which is neither
+    a miss nor an overlap."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from apscheduler.events import EVENT_JOB_ERROR, JobExecutionEvent
+
+    scheduler = _scheduler()
+
+    with caplog.at_level(logging.ERROR):
+        scheduler._dispatch_event(
+            JobExecutionEvent(EVENT_JOB_ERROR, HEARTBEAT, "default",
+                              datetime(2026, 8, 4, 3, 0, tzinfo=dt_timezone.utc))
+        )
+
+    assert "unhandled scheduler error" in caplog.text
+    assert "MISSED" not in caplog.text  # the miss listener must not answer this event
+
+
 def test_sweep_is_overdue_reads_job_runs_rather_than_a_persistent_jobstore():
     """The in-memory jobstore forgets a missed window; job_runs does not.
 

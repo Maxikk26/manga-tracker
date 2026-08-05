@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from apscheduler.events import EVENT_JOB_ERROR
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -90,6 +90,44 @@ def _on_job_error(event) -> None:
     logger.error("unhandled scheduler error for job %s", event.job_id)
 
 
+def _on_job_missed(event) -> None:
+    """A scheduled run that never happened - and APScheduler's own answer to that
+    is a debug line nobody reads.
+
+    This is the one failure class `job_runs` cannot record. A run that fails
+    leaves a row closed `error`; a run that never started leaves nothing at all,
+    so the only trace is an absence in a table nobody diffs. For `active_sweep`
+    that absence *is* the failure: it is the sole mechanism guaranteeing the ~24h
+    detection latency, and the whole design's failure mode is a system that
+    reports healthy while detecting nothing.
+
+    A miss means the run fell outside its `misfire_grace_time` (300s for the
+    feed, 3600s for either sweep) - typically because the single worker was still
+    busy, or the process was down across the window. The scheduled time is logged
+    because it names which window was lost.
+    """
+    logger.error(
+        "job %s MISSED its scheduled run at %s and was never executed: the misfire grace "
+        "window expired, so this run leaves no job_runs row at all", event.job_id,
+        event.scheduled_run_time,
+    )
+
+
+def _on_job_max_instances(event) -> None:
+    """A run refused because the previous one is still going (max_instances=1).
+
+    Same consequence as a miss - no row, no execution - from the opposite cause,
+    so it is logged rather than left to APScheduler's warning. For `feed_check`
+    it is expected and harmless (design D5: an hourly run queued behind the daily
+    sweep is correctly dropped). For a sweep it means the previous one has been
+    running for over a day, which no realistic population explains.
+    """
+    logger.error(
+        "job %s was NOT executed: its previous run is still in progress and max_instances=1 "
+        "refused the overlap (scheduled for %s)", event.job_id, event.scheduled_run_times,
+    )
+
+
 def _scheduler_timezone(timezone_name: str) -> str:
     """The zone the cron hours are expressed in. Not optional, and not cosmetic.
 
@@ -169,7 +207,14 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name
         trigger=CronTrigger(day_of_week="sun", hour=onhold_sweep_hour, minute=0, timezone=tz),
         id=ONHOLD_SWEEP, max_instances=1, misfire_grace_time=ONHOLD_SWEEP_GRACE_SECONDS,
     )
+    # Three listeners for three ways a run can fail to produce a job_runs row.
+    # The constant names are the installed package's own (APScheduler 3.11.3
+    # exports EVENT_JOB_ERROR, EVENT_JOB_MISSED and EVENT_JOB_MAX_INSTANCES);
+    # they are read off `apscheduler.events` rather than guessed, and the import
+    # above failing is what would prove a name wrong.
     scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
+    scheduler.add_listener(_on_job_missed, EVENT_JOB_MISSED)
+    scheduler.add_listener(_on_job_max_instances, EVENT_JOB_MAX_INSTANCES)
     return scheduler
 
 

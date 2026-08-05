@@ -106,6 +106,37 @@ def test_dead_slug_counter(outcome, before, expected):
     assert _failures(conn, ms_id) == expected
 
 
+def test_an_empty_chapters_array_is_a_success_that_resets_the_counter():
+    """D14 in the sweep, and the divergence with the seed loader is on purpose.
+
+    Same payload, two rules: here a well-formed empty `chapters` array is a
+    *success*, so it resets `consecutive_failures` like any other - the dead-slug
+    counter is scoped to not-found failures and nothing else (SEED "Nota de
+    alcance"). The seed loader, given the same answer, discards the row whole
+    instead, because without a newest chapter there is no `latest_chapter_num` to
+    seal (`test_zero_chapters_row_reported_and_discarded_whole`).
+
+    The counter starts at 4 deliberately: one more not-found would cross the
+    threshold, so misclassifying this success as a failure would both leave the
+    counter at 5 and fire the dead-slug notice - the assertions below then fail
+    on the classification rather than on an off-by-one.
+    """
+    conn = connect(":memory:")
+    ms_id = _seed(conn, consecutive_failures=4, latest=100, slug="quiet")
+    sender = FakeSender()
+
+    active_sweep(conn, FakeClient({"quiet": []}), sender, now=NOW, logger=LOGGER)
+
+    assert _failures(conn, ms_id) == 0
+    assert sender.dead_slug_calls == []
+    # "nothing else happens": no history written, nothing advanced, no digest.
+    assert conn.execute("SELECT COUNT(*) FROM chapter_history").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (ms_id,)
+    ).fetchone()[0] == 100
+    assert _status(conn) == ("ok", 0)
+
+
 def test_mapping_at_threshold_is_skipped_and_consumes_no_request():
     conn = connect(":memory:")
     _seed(conn, consecutive_failures=5, slug="dead")
