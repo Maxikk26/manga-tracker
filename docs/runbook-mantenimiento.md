@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.6 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-bot-telegram.md` (v1.5).
+Versión 1.7 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-bot-telegram.md` (v1.5).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.7: la deuda de resúmenes baja de tres documentos a dos — `manganato-fuente-actual.md` la pagó en su v1.4 — y queda registrado cómo, porque es el caso que la convención no cubría: el resumen viejo **se absorbe**, no se deja al lado.
 
 Cambios en v1.6: **el `onhold_sweep` existe**, así que la sección de slugs muertos deja de decir que un mapeo pausado no se reintenta solo —ahora sí, cada domingo— y el ejemplo del mensaje se actualiza al texto que el bot manda de verdad. Se saca ese barrido de la lista de pendientes, junto con el import de Kitsu, que ya corrió. Y una fila nueva en la tabla de guardianes verdes, encontrada en la pasada de mutación de este mismo cambio.
 
@@ -101,7 +103,7 @@ No confundir con **"Decisiones discutibles"**, que es otra sección y tiene otro
 
 El motivo es de fricción, no de estética: un spec de 200 líneas que hay que leer entero para aprobarlo **no se aprueba, se posterga**. El resumen es lo que lo vuelve revisable en dos minutos.
 
-Deuda conocida al 2026-08-02: la convención se venía aplicando de memoria y por eso está en tres formas distintas. `spec-bot-telegram.md` y `spec-importador-kitsu.md` traen "Decisiones discutibles"; `manganato-fuente-actual.md` trae un "TL;DR"; `spec-modelo-de-datos.md` trae su resumen **al final** y solo para trazabilidad. Solo el importador tiene hoy la sección `## Resumen` completa. Al versionar cualquiera de los otros, se le agrega.
+Deuda conocida al 2026-08-04: la convención se venía aplicando de memoria y por eso está en tres formas distintas. `spec-bot-telegram.md` y `spec-importador-kitsu.md` traen "Decisiones discutibles"; `spec-modelo-de-datos.md` trae su resumen **al final** y solo para trazabilidad. Tienen hoy la sección `## Resumen` completa el importador y `manganato-fuente-actual.md`, que la pagó en su v1.4 **absorbiendo el TL;DR en vez de dejarlo al lado**: dos resúmenes en un documento son dos verdades que se desincronizan, y en ese caso la copia vieja era una de las que sostenía una afirmación falsa. Al versionar cualquiera de los que faltan, se le agrega.
 
 ### La rama es una unidad de entrega, no de autoría
 
