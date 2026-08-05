@@ -33,6 +33,27 @@ def find_manga_site_by_slug(conn: sqlite3.Connection, site_id: int, slug: str) -
     return (row[0], row[1]) if row else None
 
 
+def find_slug_owner(conn: sqlite3.Connection, site_id: int, slug: str) -> tuple[str, str | None] | None:
+    """`(title, kitsu_id)` of the manga this slug is already mapped to, if any.
+
+    `manga_sites(site_id, source_key)` is UNIQUE, so a slug points at exactly one
+    manga. The seed reuses that mapping by slug on purpose (SEED
+    "Re-ejecucion"), and this exists to tell legitimate reuse apart from SEED
+    "Validacion"'s error "slug que en la base ya apunta a otro manga": a mapping
+    whose manga the file calls something else entirely is a mis-pasted URL, not a
+    re-run.
+
+    `kitsu_id` travels with the title because it decides whether the comparison
+    is meaningful at all - see the loader's `_slug_owner_error`.
+    """
+    row = conn.execute(
+        "SELECT m.title, m.kitsu_id FROM manga_sites ms JOIN mangas m ON m.id = ms.manga_id "
+        "WHERE ms.site_id = ? AND ms.source_key = ?",
+        (site_id, slug),
+    ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
 def find_manga_by_kitsu_id(conn: sqlite3.Connection, kitsu_id: str) -> int | None:
     """Reconciliation key 1. The column is UNIQUE, so this is at most one row."""
     row = conn.execute("SELECT id FROM mangas WHERE kitsu_id = ?", (kitsu_id,)).fetchone()
