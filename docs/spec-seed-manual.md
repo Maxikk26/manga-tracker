@@ -1,7 +1,8 @@
 # Spec: Seed manual — manga-tracker V1a
 
-Versión 2.3 — 2026-07-29. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6).
+Versión 2.4 — 2026-08-04. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6).
 
+Cambios vs 2.3: se cierra **cómo** se detecta el error «slug que en la base ya apunta a otro manga», que estaba enunciado sin decir contra qué se compara. La regla obvia —comparar el título— choca de frente con otra afirmación de este mismo documento: que el título tecleado no necesita ser el canónico porque Kitsu lo puede reemplazar. Se decide la comparación por título **con exención cuando el título es del catálogo**, y queda escrita abajo. Se registra además que el aviso de «más de 30 filas» no alcanza a la lista de pendientes del import de Kitsu (5 filas medidas), que se vuelve a comer por este mismo cargador. Y los pendientes abiertos dejan de decir «ninguno»: la invocación que omite las filas con error nunca se construyó.
 Cambios vs 2.2: la lista real y la base pasan a un directorio hermano del repositorio, fuera de él, porque `git clean -xdf` borra lo ignorado y ambos guardan data irreemplazable. Motivo completo en la sección del archivo.
 Cambios vs 2.1: se cierra el hueco del arreglo de capítulos vacío (ver la regla al final de la sección de carga). El documento cubría la fila con 404 pero no la fila cuyo slug existe y devuelve `success: true` con cero capítulos, que no es un error bajo la taxonomía del cliente y por tanto no tenía regla.
 Cambios vs 2.0: se nombran los archivos y rutas concretas (plantilla versionada, archivo real, carpeta ignorada), que antes quedaban como blancos que el implementador tenía que adivinar; pines corregidos.
@@ -41,6 +42,12 @@ Se validan todas las filas y se imprime el reporte; solo si no hay errores se pr
 
 **Avisos** (no bloquean): título repetido con slugs distintos; `reading` sin capítulo; más de 30 filas (señal de que estoy metiendo aquí lo que le toca al import de Kitsu).
 
+**Contra qué se compara «slug que ya apunta a otro manga»** (decidido en la v2.4). El archivo no tiene más identidad que el título, así que la comparación es contra el título almacenado del manga al que ese slug ya está mapeado: si difieren, la URL está mal pegada y la fila bloquea. Sin esto la fila carga sin error y archiva mi progreso bajo un manga que no estaba leyendo, que es el peor de los desenlaces posibles porque no se ve.
+
+La excepción es necesaria, no defensiva: **si ese manga lleva `kitsu_id`, no se compara nada**. El título entonces es del catálogo y no mío —lo dice la tabla de columnas de este documento: «no necesita ser el canónico; Kitsu lo puede reemplazar después», y el importador lo reemplaza para toda entrada que matchea—, con lo cual comparar el título tecleado a mano rechazaría casi todo el archivo después del primer import y bloquearía justo la re-ejecución que este documento llama segura. Con `kitsu_id` presente el slug se reutiliza en silencio.
+
+El aviso de «más de 30 filas» tampoco se dispara con la lista de pendientes del import: `spec-importador-kitsu.md` la mide en 5 filas (3 matches fallidos + 2 sin mapping), y ese archivo se rellena a mano y se vuelve a pasar por este cargador.
+
 ## Carga, por cada fila válida
 
 1. Crea o localiza la fila en `mangas` con el título tecleado; el resto del catálogo queda nulo.
@@ -64,4 +71,6 @@ Los bookmarks nacidos aquí llevan `origin = seed`, que es lo que impide que el 
 
 ## Pendientes abiertos
 
-Ninguno. No se puede probar de punta a punta hasta que exista `fetch_chapters` (documento 3).
+- **La invocación que omite las filas con error no existe.** La sección de validación la ofrece como alternativa («o se invoca explícitamente omitiendo las filas con error») y el cargador implementa solo el comportamiento estricto: cualquier error detiene la carga completa. Se asume: corregir el CSV y re-correr cuesta una edición, y arrancar con filas cojas cuesta más. Si alguna vez molesta, es una bandera del CLI y nada más.
+
+(El pendiente de la v2.3 —«no se puede probar de punta a punta hasta que exista `fetch_chapters`»— quedó cerrado: esa operación existe y el cargador se prueba contra ella.)
