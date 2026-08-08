@@ -33,6 +33,26 @@ def test_the_weekly_hours_follow_the_daily_sweep_unless_set(monkeypatch):
     assert (config.active_sweep_hour, config.heartbeat_hour, config.onhold_sweep_hour) == (5, 5, 5)
 
 
+def test_the_feed_interval_defaults_to_thirty_minutes_and_stays_configurable(monkeypatch):
+    """30, not the 60 the first measurement's floor produced.
+
+    The floor is the part that had to give: `medicion-ventana-feed.md` derives
+    the interval as window/2 (20 minutes here) and then rounds it up to 60 with
+    a floor it asserts and never argues. Sixty exceeds the 41-minute window it
+    was derived from, so items age off page 1 between runs - which is exactly
+    what five days of production showed, with the feed contributing nothing and
+    every alert coming from the 22:00 sweep.
+
+    The override is asserted against 5, a value that is neither the default nor
+    anything the measurement suggests, so a hardcoded interval cannot pass.
+    """
+    monkeypatch.delenv("FEED_CHECK_MINUTES", raising=False)
+    assert load_config().feed_check_minutes == 30
+
+    monkeypatch.setenv("FEED_CHECK_MINUTES", "5")
+    assert load_config().feed_check_minutes == 5
+
+
 def test_the_onhold_sweep_hour_stays_independently_configurable(monkeypatch):
     """The whole reason the variable exists: the shared default queues the sweep
     behind the daily one, and moving it off that hour must not require touching

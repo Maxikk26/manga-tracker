@@ -175,6 +175,7 @@ def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
     # are LOCAL hours, and without it APScheduler falls back to tzlocal -> UTC.
     build_scheduler(db_path=config.db_path, site_id=site_id, client=client, sender=sender,
                      timezone_name=config.timezone_name,
+                     feed_check_minutes=config.feed_check_minutes,
                      active_sweep_hour=config.active_sweep_hour,
                      heartbeat_hour=config.heartbeat_hour,
                      onhold_sweep_hour=config.onhold_sweep_hour).start()  # blocks until interrupted

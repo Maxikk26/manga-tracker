@@ -3,6 +3,7 @@ the job wrapper's error handling. No real scheduler is ever started (design
 D5) - `build_scheduler` only constructs and registers, never `.start()`s."""
 
 import logging
+from datetime import timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -19,6 +20,15 @@ from manga_tracker.scheduler import (
     run_job_once,
 )
 from manga_tracker.storage.db import connect
+
+
+# The number the whole feed mechanism is sized against: page 1 of the source's
+# feed held 41 minutes of history in peak hour (docs/medicion-ventana-feed.md,
+# sample of 2026-07-28, method validated against all 21 items). It is repeated
+# here as a constant rather than inlined so that the assertion below reads as
+# the rule it is - the interval must stay under the window - instead of as a
+# magic comparison against 41.
+MEASURED_FEED_WINDOW = timedelta(minutes=41)
 
 
 def _scheduler(**overrides):
@@ -95,6 +105,26 @@ def test_every_job_registered_with_expected_trigger_types_and_grace():
     assert jobs[FEED_CHECK].max_instances == 1 and jobs[ACTIVE_SWEEP].max_instances == 1
     assert jobs[FEED_CHECK].misfire_grace_time == 300
     assert jobs[ACTIVE_SWEEP].misfire_grace_time == 3600
+
+
+def test_the_feed_interval_is_the_one_passed_in_and_stays_under_the_measured_window():
+    """The interval is the whole point of the feed run, and until this test
+    nothing asserted its value - only that the trigger was an IntervalTrigger.
+
+    Two separate claims, because they fail differently. The first is that the
+    parameter is wired at all: asserted against a value that is neither the
+    signature default nor the production one, so a hardcoded interval that
+    ignores the argument cannot pass. The second is the property the measurement
+    actually established (medicion-ventana-feed.md): page 1 of the feed held 41
+    minutes of history in peak hour, so an interval at or above that window lets
+    items age out unseen no matter how healthy every run looks.
+    """
+    jobs = {job.id: job for job in _scheduler(feed_check_minutes=7).get_jobs()}
+    assert jobs[FEED_CHECK].trigger.interval == timedelta(minutes=7)
+
+    production = {job.id: job for job in _scheduler(feed_check_minutes=30).get_jobs()}
+    assert production[FEED_CHECK].trigger.interval == timedelta(minutes=30)
+    assert production[FEED_CHECK].trigger.interval < MEASURED_FEED_WINDOW
 
 
 def test_onhold_sweep_registered_weekly_on_its_own_configurable_hour():

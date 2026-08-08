@@ -67,7 +67,9 @@ A concrete consequence: building a chapter URL from a slug and a number is a **c
 
 **The `reading_history` trigger fires on UPDATE only, not INSERT.** This is deliberate: bulk seed and Kitsu import must not generate fake reading events ("read 340 mangas the day of the import"). Downward corrections are captured too and are honest data — the consumer treats negative deltas as corrections, not reading.
 
-**The feed does not guarantee detection.** Measured window is 41 minutes at peak, so hourly runs miss roughly a third of peak publications. `active_sweep` is the primary mechanism. If 24h latency becomes annoying, raise the sweep frequency — do not touch the feed.
+**The feed does not guarantee detection.** Measured window is 41 minutes at peak; `active_sweep` is the primary mechanism and the only guarantee. The feed interval must stay **under** that window (`FEED_CHECK_MINUTES`, default 30) — an interval longer than the window loses publications by construction, not by luck.
+
+This file used to say "raise the sweep frequency — do not touch the feed", and both halves are now wrong. The feed ran hourly against a 41-minute window for five months; when the reading list dropped to ~1 chapter a day, that structural third became everything, and production went five days (4-8 Aug 2026) with the feed contributing zero detections. And raising the sweep frequency stopped working when the prefilter landed: the sweep asks the source which titles moved, the source refreshes that answer once a day at 01:30 UTC, so an intra-day sweep reads a stale answer and skips nearly everything. The lever was written in July and killed by an August change without anyone updating the sentence. Full evidence in `medicion-ventana-feed.md` §"Revisión 2026-08-08".
 
 **Zero real items after ad filtering is an error, not an empty list.** It means the feed structure changed. The ad filter runs first, before any other parsing: discard items with a `hidden` attribute or a class starting with `js-banner-`.
 
