@@ -50,6 +50,12 @@ def feed_check(conn, client, sender, *, site_id: int, now: str, logger) -> None:
 def _check(conn, client, sender, site_id: int, run_id, *, now: str, logger) -> None:
     items = client.fetch_latest_feed()
     candidates = []
+    # Counted separately from `candidates`, because CD defines updates_found as
+    # "capitulos nuevos detectados (activos + silenciosos)" and a silent one
+    # never produces a candidate. Using len(candidates) made every feed match on
+    # an on_hold title invisible in job_runs - and after the Kitsu import that is
+    # 141 of the 229 tracked mangas, so most of what the feed finds.
+    recorded = 0
     for item in items:
         mapping = _mapping_for(conn, site_id, item.source_key)
         if mapping is None:
@@ -59,12 +65,13 @@ def _check(conn, client, sender, site_id: int, run_id, *, now: str, logger) -> N
         # date is unreliable by design, so item.updated_at_hint is never
         # passed as a timestamp - only a sweep can ever fill a real value.
         chapter = Chapter(chapter_num=item.chapter_num, url=item.url, published_at=None)
-        candidate = apply_detection(conn, mapping, chapter, detected_via=DETECTED_VIA, now=now, logger=logger)
-        if candidate is not None:
-            candidates.append(candidate)
+        detection = apply_detection(conn, mapping, chapter, detected_via=DETECTED_VIA, now=now, logger=logger)
+        recorded += detection.recorded
+        if detection.candidate is not None:
+            candidates.append(detection.candidate)
 
     outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     close_run(
         conn, run_id, status="partial" if outcome.failed else "ok", items_checked=len(items),
-        updates_found=len(candidates), notifications_sent=outcome.sent,
+        updates_found=recorded, notifications_sent=outcome.sent,
     )

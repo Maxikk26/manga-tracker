@@ -1,12 +1,17 @@
 """The shared detection rule (CD Parte B v1.3) - tested directly against a
 real DB. The rule takes an already-observed chapter (a source-client concern)
-and returns a plain Candidate or None, so no client/sender double is needed."""
+and returns a plain Detection, so no client/sender double is needed."""
 
 import logging
 
 import pytest
 
-from manga_tracker.discovery.detection import Candidate, Mapping, apply_detection
+from manga_tracker.discovery.detection import (
+    NOTHING_DETECTED,
+    Candidate,
+    Mapping,
+    apply_detection,
+)
 from manga_tracker.sources.contracts import Chapter
 from manga_tracker.storage.db import connect
 
@@ -46,9 +51,9 @@ def test_terminal_bookmark_writes_no_history_and_no_update(status):
     mapping = seed_mapping(conn, status=status, latest=100)
     chapter = Chapter(chapter_num=101, url="x", published_at=NOW)
 
-    candidate = apply_detection(conn, mapping, chapter, detected_via="feed", now=NOW, logger=LOGGER)
+    detection = apply_detection(conn, mapping, chapter, detected_via="feed", now=NOW, logger=LOGGER)
 
-    assert candidate is None
+    assert detection == NOTHING_DETECTED  # nothing recorded, so nothing for updates_found to count
     assert _history_count(conn, mapping.id) == 0
     row = conn.execute(
         "SELECT latest_chapter_num, last_checked_at FROM manga_sites WHERE id = ?", (mapping.id,)
@@ -62,9 +67,9 @@ def test_lower_observed_number_never_moves_stored_value_backward(caplog):
     chapter = Chapter(chapter_num=90, url="x", published_at=None)
 
     with caplog.at_level(logging.WARNING):
-        candidate = apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
+        detection = apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
 
-    assert candidate is None and "renumbered/deleted" in caplog.text
+    assert detection == NOTHING_DETECTED and "renumbered/deleted" in caplog.text
     stored = conn.execute("SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (mapping.id,)).fetchone()[0]
     assert stored == 100
 
@@ -75,9 +80,12 @@ def test_active_bookmark_returns_candidate_but_leaves_latest_untouched(status):
     mapping = seed_mapping(conn, status=status, latest=100)
     chapter = Chapter(chapter_num=101, url="https://x/101", published_at="2026-07-28T01:00:00Z")
 
-    candidate = apply_detection(conn, mapping, chapter, detected_via="feed", now=NOW, logger=LOGGER)
+    detection = apply_detection(conn, mapping, chapter, detected_via="feed", now=NOW, logger=LOGGER)
 
-    assert candidate == Candidate(mapping.id, "One Piece", 101, "https://x/101", "2026-07-28T01:00:00Z", None)
+    assert detection.candidate == Candidate(
+        mapping.id, "One Piece", 101, "https://x/101", "2026-07-28T01:00:00Z", None
+    )
+    assert detection.recorded is True  # an active detection counts in updates_found too, not just silent ones
     assert _history_count(conn, mapping.id) == 1  # written regardless of the (not yet made) notify decision
     stored = conn.execute("SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (mapping.id,)).fetchone()[0]
     assert stored == 100  # notify-before-update: untouched until the digest succeeds
@@ -99,13 +107,25 @@ def test_reprocessing_the_same_chapter_is_idempotent():
 
 
 def test_on_hold_updates_silently_without_notifying():
+    """Silent, and *recorded* - the two are separate answers.
+
+    `recorded is True` with `candidate is None` is the whole reason the rule
+    returns a Detection instead of a bare candidate. CD defines
+    `job_runs.updates_found` as "capitulos nuevos detectados (activos +
+    silenciosos)", and while the rule could only answer with a candidate, every
+    caller counting candidates reported zero for this case. It is not a corner:
+    141 of the 229 tracked mangas are on_hold, so it is most of what the feed
+    finds.
+    """
     conn = connect(":memory:")
     mapping = seed_mapping(conn, status="on_hold", latest=100)
     chapter = Chapter(chapter_num=101, url="https://x/101", published_at="2026-07-28T01:00:00Z")
 
-    candidate = apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
+    detection = apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
 
-    assert candidate is None
+    assert detection.candidate is None  # never notified
+    assert detection.recorded is True   # but it happened, and it counts
+    assert _history_count(conn, mapping.id) == 1
     row = conn.execute(
         "SELECT latest_chapter_num, latest_chapter_url FROM manga_sites WHERE id = ?", (mapping.id,)
     ).fetchone()

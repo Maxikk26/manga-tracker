@@ -58,6 +58,33 @@ def test_feed_item_not_in_reading_list_is_ignored_with_no_error():
     assert row == ("ok", 0)
 
 
+def test_a_silent_on_hold_match_still_counts_in_updates_found():
+    """The production symptom, as a test: on 2026-08-05 the feed detected two
+    chapters on on_hold titles and `job_runs` reported `updates_found = 0`.
+
+    CD defines the column as "capitulos nuevos detectados (activos +
+    silenciosos)", and the count was `len(candidates)` - which an on_hold match
+    never joins, because it is never notified. Reading that zero back, the run
+    looked like it had found nothing at all while `chapter_history` said
+    otherwise. `notifications_sent` stays 0 here: silent means silent, and only
+    the counting was wrong.
+    """
+    conn = connect(":memory:")
+    site_id, ms_id = _seed(conn, status="on_hold", latest=100, slug="op")
+    item = FeedItem("op", "One Piece", 101, "https://x/101", None, "3 hours ago")
+
+    feed_check(conn, FakeClient([item]), FakeSender(), site_id=site_id, now=NOW, logger=LOGGER)
+
+    row = conn.execute(
+        "SELECT status, updates_found, notifications_sent FROM job_runs WHERE job_name = 'feed_check'"
+    ).fetchone()
+    assert row == ("ok", 1, 0)
+    history = conn.execute(
+        "SELECT COUNT(*) FROM chapter_history WHERE manga_site_id = ?", (ms_id,)
+    ).fetchone()[0]
+    assert history == 1  # the column now agrees with the table it was contradicting
+
+
 def test_matching_active_item_produces_a_candidate():
     conn = connect(":memory:")
     site_id, ms_id = _seed(conn, latest=100, slug="op")

@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.7 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-bot-telegram.md` (v1.5).
+Versión 1.8 — 2026-08-08. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-bot-telegram.md` (v1.5).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.8: una fila nueva en la tabla de guardianes, y es de una clase que no estaba representada — el guardián no fue un test sino un **arreglo local correcto**, que al tapar el síntoma en un mecanismo quitó la presión de arreglar la regla compartida y dejó el mismo defecto vivo en los otros dos.
 
 Cambios en v1.7: la deuda de resúmenes baja de tres documentos a dos — `manganato-fuente-actual.md` la pagó en su v1.4 — y queda registrado cómo, porque es el caso que la convención no cubría: el resumen viejo **se absorbe**, no se deja al lado.
 
@@ -69,6 +71,7 @@ Historial de este proyecto, todos con la suite en verde:
 | "100 líneas → 3 partes" en el test de partición | el 3 estaba medido a mano contra el copy inglés; el español acorta las líneas y saltó sin que el split estuviera roto |
 | Test de zona horaria del scheduler con `America/Caracas` | pasaba con el fix **sin efecto**, porque el `tzlocal` de la máquina de desarrollo ya era esa zona. Un test de configuración tiene que usar un valor que el ambiente no pueda suministrar por accidente |
 | Test de "el barrido de on-hold nunca notifica", con un mapeo `on_hold` | la regla de detección compartida devuelve `None` para `on_hold`, así que un barrido que empezara a mandar digest **no tenía nada que mandar en ese test** y seguía verde. Solo un mapeo activo pausado produce un candidato, y hubo que meter uno en el mismo test. Encontrado inyectando la llamada a `send_and_advance` y viendo el test pasar |
+| El arreglo local de `updates_found` en `onhold_sweep` | **el guardián no era un test, era un arreglo correcto.** Ese barrido no podía contar sus detecciones silenciosas —la regla compartida devolvía `Candidate \| None`, y `None` significaba a la vez "terminal", "sin novedad" y "actualizado en silencio"— así que releía `latest_chapter_num` para deducir qué había hecho la regla. Funcionaba. Y precisamente por funcionar quitó la presión de arreglar la regla, dejando el mismo defecto vivo y sin tapar en `feed_check` y `active_sweep`, que reportaron `updates_found = 0` durante meses mientras `chapter_history` decía lo contrario. Lo delató producción, no la suite: ningún test afirmaba `updates_found` para una detección silenciosa, así que los tres mecanismos estaban verdes. La lección es sobre dónde se arregla: un síntoma que aparece en un llamador de código compartido casi nunca se arregla en el llamador |
 
 La regla que generaliza: **un guardián cubre la clase de error que sabe mirar, y nada más.**
 
