@@ -112,6 +112,12 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     pending_dead: list[tuple[int, str, str]] = []
     items_checked = 0
     skipped = 0
+    # Not len(candidates): CD defines updates_found as "activos + silenciosos",
+    # and a silent detection produces no candidate. This sweep's population is
+    # reading/want_to_read, so a silent one only happens when a bookmark moves to
+    # on_hold between the query and the request - rare, and precisely the case
+    # where an unexplained zero would send someone hunting for a bug.
+    recorded = 0
     population = _population(conn)
     times = slug_update_times(client, logger) if population else None
     for ms_id, manga_id, title, status, source_key, latest, last_read, stored_at in population:
@@ -163,9 +169,10 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
         conn.commit()
 
         mapping = Mapping(ms_id, manga_id, title, status, latest, last_read)
-        candidate = apply_detection(conn, mapping, chapters[0], detected_via=DETECTED_VIA, now=now, logger=logger)
-        if candidate is not None:
-            candidates.append(candidate)
+        detection = apply_detection(conn, mapping, chapters[0], detected_via=DETECTED_VIA, now=now, logger=logger)
+        recorded += detection.recorded
+        if detection.candidate is not None:
+            candidates.append(detection.candidate)
 
     if times is not None:
         logger.info(
@@ -176,7 +183,7 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     dead_failed = _report_dead_slugs(conn, pending_dead, sender, now=now, logger=logger)
     close_run(
         conn, run_id, status="partial" if (outcome.failed or dead_failed) else "ok",
-        items_checked=items_checked, updates_found=len(candidates),
+        items_checked=items_checked, updates_found=recorded,
         # The dead-slug notice counts: it is a message that went out, and
         # under-reporting it would make job_runs a worse diagnostic than it is.
         notifications_sent=outcome.sent + (1 if pending_dead and not dead_failed else 0),

@@ -144,24 +144,22 @@ def _sweep(conn, client, run_id, *, now: str, logger) -> None:
         conn.commit()
 
         mapping = Mapping(ms_id, manga_id, title, status, latest, last_read)
-        candidate = apply_detection(conn, mapping, chapters[0], detected_via=DETECTED_VIA, now=now, logger=logger)
-        # The return value is deliberately dropped rather than sent. For the
-        # on-hold majority it is always None, and for a paused `reading` mapping
-        # that answered again it is a candidate whose notification belongs to
-        # the daily sweep: nothing advanced `latest_chapter_num` here, so
-        # notify-before-update means tomorrow's sweep re-detects it and sends
-        # the digest. That is the correct division - this sweep answers "is the
-        # slug alive?", the daily one owns the reader's alerts.
+        detection = apply_detection(conn, mapping, chapters[0], detected_via=DETECTED_VIA, now=now, logger=logger)
+        # Any candidate is deliberately dropped rather than sent. For the on-hold
+        # majority there is never one, and for a paused `reading` mapping that
+        # answered again it is a candidate whose notification belongs to the
+        # daily sweep: nothing advanced `latest_chapter_num` here, so
+        # notify-before-update means tomorrow's sweep re-detects it and sends the
+        # digest. That is the correct division - this sweep answers "is the slug
+        # alive?", the daily one owns the reader's alerts.
         #
-        # Which leaves updates_found with nothing to count from the return
-        # value, since None is this population's normal *success*. Reading the
-        # row back asks the shared rule what it did instead of restating its
-        # comparison here, so the two cannot drift.
-        advanced = conn.execute(
-            "SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (ms_id,)
-        ).fetchone()[0] != latest
-        if candidate is not None or advanced:
-            updates_found += 1
+        # `recorded` is what updates_found wants, and it now comes from the rule
+        # itself. This used to re-read latest_chapter_num to infer whether the
+        # rule had moved it, because a bare `Candidate | None` could not say
+        # "recorded but silent" - the right answer to the wrong question, and one
+        # extra query per requested mapping. The other two mechanisms had the
+        # same problem and no workaround at all.
+        updates_found += detection.recorded
 
     if times is not None:
         logger.info(
