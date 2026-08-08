@@ -1,8 +1,10 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.3 — 2026-08-04. Documento operativo. Depende de `one-pager-v1a.md` (v1.11) y `spec-seed-manual.md` (v2.4).
+Versión 1.4 — 2026-08-08. Documento operativo. Depende de `one-pager-v1a.md` (v1.11), `spec-seed-manual.md` (v2.4) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
+
+Cambios en v1.4: entra `FEED_CHECK_MINUTES` (**nueve** variables en total), el intervalo del feed pasa de 60 a 30 minutos, y se advierte que en un servidor ya configurado esta variable **no** hace falta agregarla al `.env` — el default del código ya trae el valor nuevo. Es la única de las nueve donde no escribirla es lo correcto.
 
 Cambios en v1.3: entra el `onhold_sweep`, así que hay una variable más (`ONHOLD_SWEEP_HOUR`, **ocho** en total) y una línea más en el horario que este runbook promete. Se explica que los tres jobs del domingo comparten hora a propósito y se encolan en vez de solaparse.
 
@@ -40,9 +42,15 @@ HEARTBEAT_HOUR=22
 ONHOLD_SWEEP_HOUR=22
 ```
 
+`FEED_CHECK_MINUTES` es la novena y **no se escribe acá**. Ver más abajo por qué es la excepción.
+
 Sin comillas y sin espacios alrededor del `=`. `.env` está en `.gitignore`; `.env.example` se versiona a propósito.
 
 **Las tres horas iguales no son un descuido.** `HEARTBEAT_HOUR` y `ONHOLD_SWEEP_HOUR` toman por defecto el valor de `ACTIVE_SWEEP_HOUR`, así que los tres jobs del domingo caen en el mismo minuto. Con un solo worker eso es una **cola**, no un solapamiento: se ejecutan uno tras otro y jamás pegan requests en paralelo, que es la política del proyecto. Escríbelas igual de todas formas: dejar una fuera y confiar en el default funciona, pero entonces el `.env` deja de contar la historia completa. Cámbialas solo si quieres separarlos.
+
+**`FEED_CHECK_MINUTES` es la excepción: no la escribas en el `.env`.** Default 30, y esa es la regla completa — el intervalo debe quedar **por debajo** de la ventana del feed, medida en 41 minutos. Ponerle 60 no es "revisar con menos frecuencia": es perder publicaciones por construcción, porque el capítulo entra y sale de la página 1 entre dos corridas. Estuvo en 60 hasta el 2026-08-08 y costó cinco días con el feed sin aportar nada (`medicion-ventana-feed.md` v1.2).
+
+Y aquí es donde muerde la advertencia del `.env` que ya existe, pero al revés: como el valor nuevo vive en el default del código, un servidor que **no** tenga la variable escrita la toma sola con un `up -d`. Escribirla es lo que la congelaría. Solo tócala si necesitas otro valor, y nunca por encima de 41.
 
 **`ACTIVE_SWEEP_HOUR` está acoplado al horario de la fuente, no es gusto.** El barrido pregunta a la fuente qué títulos se movieron antes de pedir capítulos, y la fuente refresca esos datos una vez al día a las 01:30 UTC. Las 22:00 locales son 02:00 UTC, media hora después. Ponerlo a las 03:00 locales significa leer un índice de 5.5 horas y perder las publicaciones de esa ventana hasta el día siguiente: la garantía de ~24h pasa a ~29.5h. Si cambias esta hora, revisa la otra.
 

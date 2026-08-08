@@ -156,6 +156,7 @@ def _scheduler_timezone(timezone_name: str) -> str:
 
 
 def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name: str,
+                     feed_check_minutes: int = 30,
                      active_sweep_hour: int = 3, heartbeat_hour: int = 3,
                      onhold_sweep_hour: int = 3) -> BlockingScheduler:
     """max_workers=1 is set explicitly - APScheduler 3.x's ThreadPoolExecutor
@@ -181,7 +182,12 @@ def build_scheduler(*, db_path: str, site_id: int, client, sender, timezone_name
     )
     scheduler.add_job(
         _make_job(feed_check, FEED_CHECK, db_path, client, sender, {"site_id": site_id}),
-        trigger=IntervalTrigger(hours=1, timezone=tz), id=FEED_CHECK, max_instances=1,
+        # Minutes, not hours: the interval has to stay under the source's feed
+        # window (41 min measured) or items age off page 1 before any run sees
+        # them. FEED_GRACE_SECONDS stays 300 - it is a misfire allowance, and a
+        # feed run more than 5 minutes late is still correctly dropped rather
+        # than piled onto the next one.
+        trigger=IntervalTrigger(minutes=feed_check_minutes, timezone=tz), id=FEED_CHECK, max_instances=1,
         misfire_grace_time=FEED_GRACE_SECONDS,
     )
     scheduler.add_job(

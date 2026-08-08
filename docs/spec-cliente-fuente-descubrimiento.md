@@ -1,6 +1,8 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.6 — 2026-08-04. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11), `spec-modelo-de-datos.md` (v1.7) y `manganato-fuente-actual.md` (v1.4).
+Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11), `spec-modelo-de-datos.md` (v1.7), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+
+Cambios vs 1.6: **el intervalo del feed baja de 1 hora a 30 minutos** (`FEED_CHECK_MINUTES`, default 30). Lo fuerza producción, no revisión: entre el 4 y el 8 de agosto el feed no aportó ninguna detección sobre títulos activos y todas las notificaciones salieron del barrido de las 22:00. El intervalo de 1 hora **excedía la ventana de 41 minutos** que lo originó, así que perdía publicaciones de forma sistemática; con el volumen de la lista caído a ~1 capítulo diario, esa pérdida pasó de ser un tercio a ser todo. Detalle, evidencia y el retiro del piso de 1 hora en `medicion-ventana-feed.md` v1.2. Se agrega también el pin a ese documento, que faltaba pese a que fija un parámetro de esta spec.
 
 Cambios vs 1.5: el **Mecanismo 3 se construye**, y con él se cierran cuatro cosas que la v1.5 dejaba ambiguas o desactualizadas, todas en su sección y en la de slugs muertos:
 
@@ -139,9 +141,11 @@ Consecuencia aceptada: si el digest se envía pero el proceso muere antes de act
 
 ## Mecanismo 1: chequeo por feed (`feed_check`)
 
-**Frecuencia**: cada hora (parámetro configurable). Valor fijado por la medición de la ventana del feed del 2026-07-28: la página 1 cubrió 41 minutos de historia en hora pico, muy por debajo del piso de 1 hora, así que el intervalo queda en ese piso.
+**Frecuencia**: cada 30 minutos (`FEED_CHECK_MINUTES`, default 30). La regla que fija este valor es una sola: **el intervalo debe quedar por debajo de la ventana del feed**, medida en 41 minutos en hora pico el 2026-07-28. Un intervalo mayor que la ventana pierde publicaciones por construcción, porque el capítulo nace y sale de la página 1 entre dos corridas.
 
-**Papel real de este mecanismo tras la medición**: el feed NO garantiza detección. Con una ventana de ~41 minutos y corridas horarias captura aproximadamente dos tercios de las publicaciones en hora pico, y más fuera de ella. Es una capa de latencia baja que vale su costo (1 request), pero la garantía de no perder capítulos la da exclusivamente el barrido de activos.
+La v1.6 de esta spec decía "cada hora", y eso violaba la regla anterior: 60 > 41. Se sostuvo cinco meses porque el costo se había cuantificado ("captura dos tercios") y aceptado, sin notar que el tercio perdido es sistemático. Producción lo cobró entre el 4 y el 8 de agosto de 2026 — cinco días sin una sola detección por feed. Evidencia completa y retiro del piso de 1 hora en `medicion-ventana-feed.md` v1.2.
+
+**Papel real de este mecanismo**: el feed NO garantiza detección, y bajar el intervalo no lo convierte en garantía. Sigue siendo una capa de latencia baja que vale su costo (1 request por corrida, aislado: el delay entre requests consecutivos no aplica); la garantía de no perder capítulos la da exclusivamente el barrido de activos. Lo que cambia con 30 minutos es que el feed deja de perder publicaciones por diseño y vuelve a aportar durante el día, que es su único propósito.
 
 **Procedimiento**:
 

@@ -17,6 +17,7 @@ class TelegramConfig:
 class AppConfig:
     db_path: str
     log_level: str
+    feed_check_minutes: int  # interval between feed runs; must stay under the source's feed window
     active_sweep_hour: int  # design open question 2: local hour, default 3 (early morning)
     heartbeat_hour: int  # weekly heartbeat (Sunday) - defaults to active_sweep_hour, independently configurable
     onhold_sweep_hour: int  # weekly on-hold sweep (Sunday) - same default and the same independence
@@ -40,6 +41,29 @@ def load_config() -> AppConfig:
     return AppConfig(
         db_path=os.environ.get("DB_PATH", "data/manga-tracker.db"),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        # 30 minutes, not the 60 this started at. The feed window was measured at
+        # 41 minutes in peak hour (medicion-ventana-feed.md), and an interval
+        # longer than the window means items age out of page 1 unseen: hourly runs
+        # structurally miss about a third of publications. The measurement's own
+        # formula is window/2 = 20 minutes; it was rounded up to 60 by a floor
+        # that document asserts and never argues. 30 sits between the two and,
+        # unlike 60, stays under the measured window - which is the property that
+        # actually decides whether anything is missed.
+        #
+        # Forced by production rather than by review: over 2026-08-04..08 every
+        # single notification came from the 22:00 sweep and the feed contributed
+        # nothing for five days, because publications on the reading list fell to
+        # ~1/day and an hourly poll gets roughly one 68% chance at it.
+        #
+        # Cost is 24 extra requests a day, one isolated request per run - the
+        # inter-request delay never applies, since a feed run makes exactly one
+        # call. Raising the *sweep* frequency, the lever the measurement doc
+        # recommends instead, no longer works: the sweep's prefilter asks the
+        # source which titles moved, and the source refreshes those update times
+        # only once a day at 01:30 UTC - the same fact that pins the sweep to
+        # 22:00 above. An intra-day sweep would read an answer hours stale and
+        # skip nearly everything.
+        feed_check_minutes=int(os.environ.get("FEED_CHECK_MINUTES", "30")),
         active_sweep_hour=active_sweep_hour,
         # HEARTBEAT_HOUR: defaults to active_sweep_hour ("same hour as the
         # daily sweep") but stays independently configurable. It therefore moved
