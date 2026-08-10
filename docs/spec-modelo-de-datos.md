@@ -1,6 +1,8 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.7 — 2026-07-28. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.8 — 2026-08-10. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+
+Cambios vs 1.7: **el esquema pasa a estar versionado** con `PRAGMA user_version`, y se agregan a `job_runs` las columnas `items_requested` e `items_skipped`. Lo fuerza un hallazgo, no un plan: `ensure_schema` ejecuta `schema.sql`, que es todo `CREATE ... IF NOT EXISTS`, así que **una columna agregada ahí no aparece jamás en una base que ya existe**. Verificado empíricamente. Y la forma del fallo es la peligrosa: toda la suite construye sus bases desde cero, donde el script aplica completo, así que el cambio se ve verde en los tests y falta en producción. La sección "Versionado del esquema" al final describe el mecanismo y su regla.
 
 Cambios vs 1.6: se cierra el caso del reset de `last_chapter_read` a nulo en el trigger de `reading_history`, que la v1.6 no cubría y que habría abortado el UPDATE por la restricción NOT NULL de `chapter_history.chapter_num`.
 Cambios vs 1.5: corrección del pin de dependencia (apuntaba al one-pager v1.1, que es anterior al renombre de barridos y al glosario).
@@ -186,6 +188,8 @@ Adición respecto al plan original de 5 tablas, justificada así: el heartbeat s
 | items_checked | INTEGER | sí | null | Mangas consultados (barridos) o items del feed procesados. |
 | updates_found | INTEGER | sí | null | Capítulos nuevos detectados en la corrida. |
 | notifications_sent | INTEGER | sí | null | Cuántas líneas de digest generó (0 = corrida silenciosa). |
+| items_requested | INTEGER | sí | null | De los examinados, cuántos costaron un request de verdad. **Solo los dos barridos**; null en `feed_check`, que no tiene pre-filtro. |
+| items_skipped | INTEGER | sí | null | Cuántos saltó el pre-filtro por reportarlos la fuente sin cambios. Null cuando el pre-filtro no corrió: "no aplica" y "no saltó ninguno" son hechos distintos. |
 | error_summary | TEXT | sí | null | Texto libre corto si status ≠ ok. Detalle largo va a logs, no aquí. |
 | Índices | | | | Índice sobre (`job_name`, `started_at`) — la consulta del heartbeat es "última corrida ok de cada job". |
 
@@ -269,3 +273,26 @@ Los dos puntos que este documento dejó abiertos para la spec 3 ya fueron resuel
 2. **Slugs muertos.** Resuelto con la columna `consecutive_failures` de esta versión: solo los errores "no encontrado" incrementan; el éxito resetea; a los 5 fallos se emite un aviso único y el mapeo se salta en el barrido diario, quedando el barrido semanal como reintento de baja frecuencia.
 
 Si specs posteriores descubren cualquier otra necesidad de persistencia no contemplada, aplica el mismo mecanismo: se versiona este documento.
+
+## Versionado del esquema (`PRAGMA user_version`)
+
+**El problema que resuelve.** `ensure_schema` ejecuta `schema.sql` en cada conexión, y ese archivo es todo `CREATE ... IF NOT EXISTS`. Eso crea una base nueva completa y correcta, y sobre una base que ya tiene las tablas **no hace absolutamente nada** — incluida una columna nueva de una tabla existente. O sea: agregar una columna a `schema.sql` y desplegar deja la base de producción sin esa columna, y el primer `INSERT` que la nombre falla.
+
+**Por qué no se veía.** Toda la suite construye su base desde cero, donde `schema.sql` aplica íntegro. Un cambio así pasa los tests en verde y falta en el único lugar donde importa. Comprobado, no supuesto: se creó una base, se agregó una columna al esquema, se reconectó, y la columna no aparece.
+
+**El mecanismo.**
+
+| Pieza | Regla |
+|---|---|
+| `SCHEMA_VERSION` | Número de esquema actual, en `db.py`. Sube con cada migración. |
+| `PRAGMA user_version` | Lo que cada base reporta. Una base anterior a este mecanismo reporta 0. |
+| `MIGRATIONS` | `{número: función}`. Se aplican en orden, y `user_version` se escribe y commitea **después de cada una**, para que una interrupción deje el número describiendo lo que corrió y no lo que se pretendía. |
+
+**La decisión que hace que esto funcione**: `ensure_schema` mira si la base estaba vacía **antes** de ejecutar el script. Si nació en esa llamada, `schema.sql` ya la dejó al día y se la estampa con `SCHEMA_VERSION` sin migrar nada. Si ya existía, se le aplican las migraciones, que es el único camino capaz de alterar una tabla que SQLite ya creó.
+
+**Reglas al agregar una migración:**
+
+1. Nunca renumerar una existente: el número está grabado en el `user_version` de cada base desplegada.
+2. La migración se escribe **idempotente** (consultar `PRAGMA table_info` antes de un `ALTER`). Hay una sola base de producción y no tiene copia; una migración que reviente a mitad dejaría el número por detrás del esquema real.
+3. El test parte de una base **en archivo**, nunca de `:memory:`. En memoria el defecto es invisible por construcción, que es exactamente cómo se coló.
+4. Respaldar antes de desplegar. Es copiar un archivo.

@@ -1,8 +1,10 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.8 — 2026-08-08. Documento operativo. Depende de `one-pager-v1a.md` (v1.12) y `spec-bot-telegram.md` (v1.6).
+Versión 1.9 — 2026-08-10. Documento operativo. Depende de `one-pager-v1a.md` (v1.12) y `spec-bot-telegram.md` (v1.6).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+Cambios en v1.9: **ya hay migraciones**, así que la sección del esquema deja de decir que no las hay. Se escribe la trampa que las hizo necesarias: una columna nueva en una tabla existente no aparece nunca, y los tests no lo delatan porque construyen sus bases desde cero.
 
 Cambios en v1.8: una fila nueva en la tabla de guardianes, y es de una clase que no estaba representada — el guardián no fue un test sino un **arreglo local correcto**, que al tapar el síntoma en un mecanismo quitó la presión de arreglar la regla compartida y dejó el mismo defecto vivo en los otros dos.
 
@@ -72,6 +74,8 @@ Historial de este proyecto, todos con la suite en verde:
 | Test de zona horaria del scheduler con `America/Caracas` | pasaba con el fix **sin efecto**, porque el `tzlocal` de la máquina de desarrollo ya era esa zona. Un test de configuración tiene que usar un valor que el ambiente no pueda suministrar por accidente |
 | Test de "el barrido de on-hold nunca notifica", con un mapeo `on_hold` | la regla de detección compartida devuelve `None` para `on_hold`, así que un barrido que empezara a mandar digest **no tenía nada que mandar en ese test** y seguía verde. Solo un mapeo activo pausado produce un candidato, y hubo que meter uno en el mismo test. Encontrado inyectando la llamada a `send_and_advance` y viendo el test pasar |
 | El arreglo local de `updates_found` en `onhold_sweep` | **el guardián no era un test, era un arreglo correcto.** Ese barrido no podía contar sus detecciones silenciosas —la regla compartida devolvía `Candidate \| None`, y `None` significaba a la vez "terminal", "sin novedad" y "actualizado en silencio"— así que releía `latest_chapter_num` para deducir qué había hecho la regla. Funcionaba. Y precisamente por funcionar quitó la presión de arreglar la regla, dejando el mismo defecto vivo y sin tapar en `feed_check` y `active_sweep`, que reportaron `updates_found = 0` durante meses mientras `chapter_history` decía lo contrario. Lo delató producción, no la suite: ningún test afirmaba `updates_found` para una detección silenciosa, así que los tres mecanismos estaban verdes. La lección es sobre dónde se arregla: un síntoma que aparece en un llamador de código compartido casi nunca se arregla en el llamador |
+
+| Toda la suite corriendo contra `:memory:` | **ciega a la única base que existe de verdad.** `schema.sql` es todo `CREATE ... IF NOT EXISTS`, y una base en memoria nace vacía en cada test, así que el script siempre aplica íntegro y toda columna nueva aparece. Sobre la base de producción, que ya tiene las tablas, no hace nada: la columna no se crea jamás. Un cambio de esquema podía salir verde en 353 tests y romper el primer `INSERT` en el servidor. No lo encontró ningún test — lo encontró preguntarse cómo se aplicaría el cambio, y confirmarlo creando una base, agregando una columna y reconectando. Cerrado con `PRAGMA user_version` y con tests que parten de una base **en archivo** |
 
 La regla que generaliza: **un guardián cubre la clase de error que sabe mirar, y nada más.**
 
@@ -195,10 +199,23 @@ Los cuatro jobs se pueden forzar así (`feed_check`, `active_sweep`, `onhold_swe
 
 ### Si el cambio toca el esquema
 
-No hay migraciones en V1a: `schema.sql` usa `IF NOT EXISTS` y se ejecuta en cada conexión, así que **agregar** una tabla o un índice es transparente. Pero:
+Desde el 2026-08-10 **sí hay migraciones**, con `PRAGMA user_version`. El mecanismo y sus reglas están en `spec-modelo-de-datos.md` §"Versionado del esquema"; acá va lo operativo.
 
-- **Cambiar una restricción CHECK con la base poblada obliga a migrar.** Por eso los valores de `job_name` y `detected_via` incluyeron `onhold_sweep` y `seed_backfill` desde el primer esquema, antes de que existiera código que los escribiera. Se cobró: el `onhold_sweep` entró con la base ya poblada y **no hizo falta migración ninguna**.
-- Respalda antes: `cp ~/manga-tracker-data/manga-tracker.db ~/backups/pre-cambio.db`.
+**Agregar una tabla o un índice sigue siendo transparente**: `schema.sql` usa `IF NOT EXISTS` y se ejecuta en cada conexión. Lo que **no** es transparente, y era la trampa:
+
+- **Una columna nueva en una tabla que ya existe no aparece nunca.** `IF NOT EXISTS` ve que la tabla está y no hace nada. Necesita una migración, siempre.
+- **Y no lo vas a notar en los tests.** La suite construye cada base desde cero, donde el script aplica completo. El cambio sale verde y falta en producción, que es la única base que ya existía.
+- **Cambiar una restricción CHECK con la base poblada obliga a migrar.** Por eso los valores de `job_name` y `detected_via` incluyeron `onhold_sweep` y `seed_backfill` desde el primer esquema, antes de que existiera código que los escribiera. Se cobró: el `onhold_sweep` entró con la base ya poblada y no hizo falta migración ninguna.
+
+Al agregar una migración: número nuevo en `MIGRATIONS`, subir `SCHEMA_VERSION`, escribirla idempotente, y el test **desde una base en archivo con datos**, nunca `:memory:`.
+
+Respalda antes de desplegar, siempre: `cp ~/manga-tracker-data/manga-tracker.db ~/manga-tracker-data/pre-cambio.db`.
+
+Después de desplegar, confirma que la base quedó en la versión que esperas:
+
+```
+docker compose run --rm -T --entrypoint python manga-tracker -c "import sqlite3;print(sqlite3.connect('data/manga-tracker.db').execute('PRAGMA user_version').fetchone()[0])"
+```
 
 ## Operación cotidiana
 

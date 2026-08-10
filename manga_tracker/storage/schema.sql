@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS job_runs (
     items_checked INTEGER,
     updates_found INTEGER,
     notifications_sent INTEGER,
+    -- The prefilter split, for the two sweeps only. items_checked counts what a
+    -- run EXAMINED (before the skip decision); these two say how that split, so
+    -- a sweep that examined 141 and requested 3 can be told from one that
+    -- requested all 141. NULL for feed_check, which has no prefilter: "does not
+    -- apply" and "requested none" are different facts and zero would conflate them.
+    items_requested INTEGER,
+    items_skipped INTEGER,
     error_summary TEXT
 );
 -- Fires only on UPDATE, never INSERT, so bulk seed/Kitsu import generate zero

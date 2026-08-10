@@ -338,6 +338,49 @@ def test_items_checked_counts_the_whole_population_not_the_requested_subset():
     assert row == (3, "ok")
 
 
+def test_the_prefilter_split_is_recorded_in_job_runs_not_only_in_the_log():
+    """Which of the examined mappings were actually requested.
+
+    `items_checked` counts the whole population by design, so on its own it
+    cannot distinguish a sweep that requested all three from one that requested
+    one and skipped two. That answer existed only in a container log line, and
+    `last_checked_at` cannot supply it either: a skipped mapping is never
+    sealed, so it looks stale rather than skipped.
+    """
+    conn = connect(":memory:")
+    _seed(conn, slug="a", latest=50, latest_at=STORED)
+    _seed(conn, slug="b", latest=50, latest_at=STORED, title="B")
+    _seed(conn, slug="c", latest=50, latest_at=STORED, title="C")
+    client = FakeClient({"b": [Chapter(51, "u", None)]},
+                        update_times={"a": "2026-07-19T00:00:00Z",
+                                      "b": "2026-07-21T00:00:00Z",
+                                      "c": "2026-07-19T00:00:00Z"})
+
+    active_sweep(conn, client, FakeSender(), now=NOW, logger=LOGGER)
+
+    row = conn.execute(
+        "SELECT items_checked, items_requested, items_skipped FROM job_runs WHERE job_name = 'active_sweep'"
+    ).fetchone()
+    assert row == (3, 1, 2)
+    assert row[1] + row[2] == row[0]  # the split has to account for the whole population
+
+
+def test_a_sweep_without_the_prefilter_records_no_split_rather_than_zeros():
+    """When the update index cannot be read the sweep requests everything, and
+    there is no split to report. NULL says that; a zero would claim the prefilter
+    ran and skipped nothing, which is a different and false statement."""
+    conn = connect(":memory:")
+    _seed(conn, slug="a", latest=50, latest_at=STORED)
+    client = FakeClient({"a": [Chapter(51, "u", None)]}, update_times=None)
+
+    active_sweep(conn, client, FakeSender(), now=NOW, logger=LOGGER)
+
+    row = conn.execute(
+        "SELECT items_checked, items_requested, items_skipped FROM job_runs WHERE job_name = 'active_sweep'"
+    ).fetchone()
+    assert row == (1, None, None)
+
+
 def test_a_failing_update_index_sweeps_everything_rather_than_nothing():
     """The pre-filter is an optimisation; the sweep is the latency guarantee.
 
