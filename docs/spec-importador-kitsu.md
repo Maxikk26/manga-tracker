@@ -1,6 +1,6 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.6 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.6), de `spec-seed-manual.md` (v2.4) y de `manganato-fuente-actual.md` (v1.4).
+Versión 1.6 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.7), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.7), de `spec-seed-manual.md` (v2.4) y de `manganato-fuente-actual.md` (v1.4).
 
 Cambios vs 1.5: pin actualizado a la v1.4 de `manganato-fuente-actual.md`, y **la fila de corrección que apuntaba a ese documento queda cerrada**: la afirmación que corregía ya no existe allá, y la fuente resultó dar más metadata de la que ese documento decía, no menos. Ninguna decisión de este spec cambia.
 
