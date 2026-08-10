@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12), `spec-modelo-de-datos.md` (v1.7), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12), `spec-modelo-de-datos.md` (v1.8), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
 
 Cambios vs 1.6: **el intervalo del feed baja de 1 hora a 30 minutos** (`FEED_CHECK_MINUTES`, default 30). Lo fuerza producción, no revisión: entre el 4 y el 8 de agosto el feed no aportó ninguna detección sobre títulos activos y todas las notificaciones salieron del barrido de las 22:00. El intervalo de 1 hora **excedía la ventana de 41 minutos** que lo originó, así que perdía publicaciones de forma sistemática; con el volumen de la lista caído a ~1 capítulo diario, esa pérdida pasó de ser un tercio a ser todo. Detalle, evidencia y el retiro del piso de 1 hora en `medicion-ventana-feed.md` v1.2. Se agrega también el pin a ese documento, que faltaba pese a que fija un parámetro de esta spec.
 
@@ -248,6 +248,7 @@ Todo mecanismo abre una fila al arrancar y la cierra al terminar:
 | `started_at` / `finished_at` | Inicio y fin reales de la corrida. **`finished_at` se toma en el momento de cerrar, no del timestamp con que la corrida arrancó.** Una corrida propaga un solo `now` a todo lo que escribe —`detected_at`, `last_checked_at`— y eso es correcto: una corrida, un instante de observación. Pero `finished_at` significa *cuándo terminó*, y reusar el de apertura hacía que toda corrida reportara duración cero. Se detectó en vivo: un barrido de 166 segundos reales registró inicio y fin en el mismo segundo. Importa porque el caso para el que existe esta tabla es un barrido degradándose en timeouts —hasta ~35 minutos con 16 mapeos a 30s de timeout más reintentos— y eso es invisible si la duración siempre es cero. |
 | `status` | `ok` si todo salió bien; `partial` si hubo fallos individuales (items con error, o digest fallido) pero la corrida completó; `error` si la corrida abortó (excepción no controlada, feed inaccesible por completo). **`onhold_sweep` nunca cierra `partial`**: `partial` es el status de una corrida que completó y cuyo envío falló, y esta corrida no tiene envío que pueda fallar. Solo `ok` o `error`. |
 | `items_checked` | Items reales del feed procesados, o mangas consultados en el barrido. |
+| `items_requested` / `items_skipped` | Solo los barridos: de los examinados, cuántos costaron request y cuántos saltó el pre-filtro. Nulos en `feed_check`, que no tiene pre-filtro, y nulos también cuando el índice de la fuente no se pudo leer y el barrido pidió todo.  |
 | `updates_found` | Capítulos nuevos detectados (activos + silenciosos). |
 | `notifications_sent` | Líneas incluidas en el digest enviado con éxito, más el aviso de slug muerto si salió. Cero si hubo silencio o si el envío falló, y **siempre cero en `onhold_sweep`**, que no tiene nada que enviar. |
 | `error_summary` | Tipo y mensaje corto de lo que falló. El detalle largo va al log. |

@@ -29,7 +29,7 @@ def open_run(conn, job_name: str, now: str) -> int:
 
 
 def close_run(conn, run_id, *, status, items_checked, updates_found, notifications_sent,
-              now=None, error_summary=None):
+              now=None, error_summary=None, items_requested=None, items_skipped=None):
     """`now` defaults to the real closing instant, and callers should let it.
 
     A run threads one `now` through everything it writes, which is right for
@@ -44,10 +44,15 @@ def close_run(conn, run_id, *, status, items_checked, updates_found, notificatio
     deterministic.
     """
     finished_at = now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # items_requested/items_skipped default to None and stay None for feed_check,
+    # which has no prefilter. That is a different fact from zero: "does not apply"
+    # against "examined them all and asked for none", and a zero there would read
+    # as a sweep that skipped everything.
     conn.execute(
         "UPDATE job_runs SET finished_at = ?, status = ?, items_checked = ?, updates_found = ?, "
-        "notifications_sent = ?, error_summary = ? WHERE id = ?",
-        (finished_at, status, items_checked, updates_found, notifications_sent, error_summary, run_id),
+        "notifications_sent = ?, error_summary = ?, items_requested = ?, items_skipped = ? WHERE id = ?",
+        (finished_at, status, items_checked, updates_found, notifications_sent, error_summary,
+         items_requested, items_skipped, run_id),
     )
     conn.commit()
 

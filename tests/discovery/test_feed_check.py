@@ -58,6 +58,23 @@ def test_feed_item_not_in_reading_list_is_ignored_with_no_error():
     assert row == ("ok", 0)
 
 
+def test_the_feed_records_no_prefilter_split_because_it_has_none():
+    """NULL, not zero. The feed makes one request for the whole page and filters
+    nothing beforehand, so "requested 0 of 1" would be a false statement about a
+    mechanism that has no prefilter at all. The two sweeps are the only jobs that
+    can answer this question."""
+    conn = connect(":memory:")
+    site_id, _ = _seed(conn, latest=100, slug="op")
+    item = FeedItem("op", "One Piece", 101, "https://x/101", None, "3 hours ago")
+
+    feed_check(conn, FakeClient([item]), FakeSender(), site_id=site_id, now=NOW, logger=LOGGER)
+
+    row = conn.execute(
+        "SELECT items_checked, items_requested, items_skipped FROM job_runs WHERE job_name = 'feed_check'"
+    ).fetchone()
+    assert row == (1, None, None)
+
+
 def test_a_silent_on_hold_match_still_counts_in_updates_found():
     """The production symptom, as a test: on 2026-08-05 the feed detected two
     chapters on on_hold titles and `job_runs` reported `updates_found = 0`.

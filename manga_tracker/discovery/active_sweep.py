@@ -184,6 +184,14 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     close_run(
         conn, run_id, status="partial" if (outcome.failed or dead_failed) else "ok",
         items_checked=items_checked, updates_found=recorded,
+        # The same split the log line above reports, now in the table. It lived
+        # only in the container log, which meant "did the prefilter skip these or
+        # did the sweep never look?" could not be answered from job_runs at all -
+        # and last_checked_at cannot answer it either, since a skipped mapping is
+        # never sealed. When the prefilter did not run, both stay None rather
+        # than claiming a split that did not happen.
+        items_requested=(items_checked - skipped) if times is not None else None,
+        items_skipped=skipped if times is not None else None,
         # The dead-slug notice counts: it is a message that went out, and
         # under-reporting it would make job_runs a worse diagnostic than it is.
         notifications_sent=outcome.sent + (1 if pending_dead and not dead_failed else 0),

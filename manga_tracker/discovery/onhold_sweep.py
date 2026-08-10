@@ -170,4 +170,10 @@ def _sweep(conn, client, run_id, *, now: str, logger) -> None:
     # that completed with a failed send, and this run has no send to fail. Item
     # failures do not make the daily sweep partial either, so the two agree.
     close_run(conn, run_id, status="ok", items_checked=items_checked,
-              updates_found=updates_found, notifications_sent=0)
+              updates_found=updates_found, notifications_sent=0,
+              # Same split as the daily sweep, and it matters more here: this is
+              # the population the prefilter saves the most on - 141 mappings
+              # against a handful actually requested - and this sweep sends
+              # nothing, so job_runs is the only place its work is ever visible.
+              items_requested=(items_checked - skipped) if times is not None else None,
+              items_skipped=skipped if times is not None else None)
