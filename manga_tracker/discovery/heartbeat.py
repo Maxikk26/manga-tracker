@@ -20,6 +20,8 @@ JOB_NAME = "heartbeat"
 # failure this message exists to expose. BOT v1.2 leaves adding its numbers as an
 # option ("pueden sumarse"), never as a substitute for these two.
 DETECTION_JOBS = ("feed_check", "active_sweep")
+# Reported alongside them, never counted among them. See ONHOLD_SWEEP_JOB below.
+ONHOLD_SWEEP_JOB = "onhold_sweep"
 DEGRADED_WINDOW_DAYS = 7
 
 
@@ -58,14 +60,39 @@ def _degraded_run_count(conn, now: str) -> int:
     return row[0]
 
 
+def _last_onhold_sweep(conn) -> tuple[str | None, int, int]:
+    """The last successful on-hold sweep, as (started_at, examined, silent updates).
+
+    Its own query rather than a branch inside `_last_successful_run_at`, and the
+    separation is the point: that function answers "is detection alive?", and
+    this sweep cannot answer it. It notifies nothing, so a green run of it says
+    only that the slug-liveness check happened.
+
+    Read from the last `ok` run rather than summed over the week because the
+    sweep is weekly: one run *is* the week, and a sum would silently double
+    after any manual `run-job onhold_sweep`.
+    """
+    row = conn.execute(
+        "SELECT started_at, IFNULL(items_checked, 0), IFNULL(updates_found, 0) FROM job_runs "
+        "WHERE job_name = ? AND status = 'ok' AND finished_at IS NOT NULL "
+        "ORDER BY started_at DESC LIMIT 1",
+        (ONHOLD_SWEEP_JOB,),
+    ).fetchone()
+    return (None, 0, 0) if row is None else (row[0], row[1], row[2])
+
+
 def heartbeat(conn, client, sender, *, now: str, logger) -> None:
     """Fired weekly or via `run-job heartbeat`. `client`/`logger` unused -
     matches every other job's signature so the wrapper needs no special case."""
     tracked, behind = _tracked_and_behind_counts(conn)
+    onhold_at, onhold_swept, onhold_updates = _last_onhold_sweep(conn)
     report = HeartbeatReport(
         last_successful_run_at=_last_successful_run_at(conn),
         tracked_count=tracked,
         behind_count=behind,
         degraded_run_count=_degraded_run_count(conn, now),
+        onhold_sweep_at=onhold_at,
+        onhold_swept_count=onhold_swept,
+        onhold_updates_count=onhold_updates,
     )
     sender.send_heartbeat(report, now=now)

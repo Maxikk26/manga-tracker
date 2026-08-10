@@ -61,9 +61,94 @@ def test_heartbeat_renders_last_run_tracked_behind_and_flags_a_partial_run():
     heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
 
     text = api.calls[0]["text"]
-    assert "25 jul" in text  # last successful detection run, rendered in local time
+    # Asserted WITH its label, and the label is the whole point. This used to be
+    # a bare `"25 jul" in text` described as "the last successful detection run":
+    # that string is in the *header*, which renders `now` (26 jul 03:00Z = 25 jul
+    # local), so the assertion passed no matter what the detection line said. The
+    # run itself is 25 jul 03:00Z, which is 24 jul 23:00 in Caracas - UTC in the
+    # database, local at presentation.
+    assert "Última detección exitosa: 24 jul" in text
     assert "Vigilados: 2 títulos, 1 atrasado" in text  # "Finished" (completed) is excluded from tracked
     assert "Corridas degradadas esta semana: 1" in text  # the partial run is flagged, not hidden
+
+
+def test_heartbeat_reports_the_onhold_sweep_without_ever_counting_it_as_detection():
+    """The on-hold sweep's numbers appear, and change nothing else.
+
+    Both halves matter and they fail differently. The sweep is otherwise
+    invisible - it sends no digest, no notice, no heartbeat of its own - so a
+    job_runs row nobody reads is the only trace it leaves; that is what the new
+    line fixes. But it must never feed "última detección exitosa", because it
+    notifies nothing: a green on-hold sweep sitting on top of six days of dead
+    feed and sweep runs would read as a healthy system, which is the exact
+    "cron comentado" failure the heartbeat exists to expose.
+
+    So this test dates the on-hold run AFTER the last real detection on purpose.
+    If it ever leaked into DETECTION_JOBS, the header would say 27 jul.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=3, latest_chapter_num=9)
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('active_sweep', ?, ?, 'ok', 2, 1, 1)",
+        ("2026-07-25T03:00:00Z", "2026-07-25T03:02:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('onhold_sweep', ?, ?, 'ok', 141, 6, 0)",
+        ("2026-07-27T02:00:00Z", "2026-07-27T02:28:00Z"),
+    )
+    conn.commit()
+
+    api = FakeApi()
+    heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
+
+    text = api.calls[0]["text"]
+    assert "Barrido de pausados: 26 jul" in text  # 02:00Z on the 27th is the 26th in Caracas
+    assert "141 revisados" in text and "6 silenciosas" in text
+    # The invariant: the later on-hold run must NOT become the last detection.
+    # 25 jul 03:00Z renders as 24 jul local, so this asserts the label too - a
+    # bare date would match the header instead and prove nothing.
+    assert "Última detección exitosa: 24 jul" in text
+    assert "27 jul" not in text
+
+
+def test_heartbeat_says_the_onhold_sweep_never_ran_rather_than_showing_zeros():
+    """A server whose first Sunday has not arrived is normal, not broken.
+
+    Zeros would be a lie of a different kind - "it ran and found nothing" reads
+    very differently from "it has not run" when you are deciding whether a
+    paused title is being retried at all.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=2)
+
+    api = FakeApi()
+    heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
+
+    assert "Barrido de pausados: nunca" in api.calls[0]["text"]
+
+
+def test_the_onhold_line_agrees_in_number_for_a_single_item():
+    """"1 revisado, 1 silenciosa", never "1 revisados". BOT makes Spanish number
+    agreement binding, and a bare plural reads as a defect to the one person who
+    receives this."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=2)
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('onhold_sweep', ?, ?, 'ok', 1, 1, 0)",
+        ("2026-07-19T02:00:00Z", "2026-07-19T02:01:00Z"),
+    )
+    conn.commit()
+
+    api = FakeApi()
+    heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
+
+    assert "1 revisado, 1 silenciosa" in api.calls[0]["text"]
 
 
 def test_heartbeat_renders_without_crashing_when_no_run_has_ever_succeeded():

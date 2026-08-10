@@ -1,8 +1,10 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.5 — 2026-08-04. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
+Versión 1.6 — 2026-08-10. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
 
 Cambios vs 1.4: **la desviación registrada del Mensaje 3 queda resuelta**. `onhold_sweep` existe, y su población incluye todo mapeo pausado por el contador, así que el reintento semanal que el aviso se negaba a prometer ahora ocurre de verdad y el mensaje lo dice. La redacción condicionada hizo su trabajo: se corrigió sola al entrar el barrido, sin que nadie tuviera que acordarse del texto. Se registra también el hueco que este mensaje **no** cubre: el aviso lo emite únicamente el barrido diario, cuya población son los activos, así que un título `on_hold` cuyo slug muere no genera aviso alguno.
+
+Cambios vs 1.5: el heartbeat **suma los números del `onhold_sweep`**, ejerciendo la opción que la v1.2 dejó abierta ("pueden sumarse"). Motivo: ese barrido no envía nada —ni digest, ni aviso, ni heartbeat propio—, así que su única huella es una fila de `job_runs` que nadie lee; en la práctica era invisible. Se agrega una línea al final con cuándo corrió, cuántos mapeos revisó y cuántas actualizaciones silenciosas aplicó, y **"nunca"** cuando todavía no corrió, que no es lo mismo que ceros. Sigue siendo una adición y **no** un sustituto: no alimenta "última detección exitosa" ni el conteo de corridas degradadas, porque una corrida verde suya no prueba que los mecanismos que sí notifican estén vivos.
 
 Cambios vs 1.3: el Mensaje 3 se construye. Dos decisiones que la v1.3 no cubría, ambas en su sección: el aviso **no promete** el reintento semanal mientras `onhold_sweep` no exista (desviación registrada, redacción condicionada para que se corrija sola), y el contador de fallos **no avanza hasta que el aviso salió** — el cruce del umbral ocurre exactamente una vez por slug muerto, así que avanzar primero haría que un envío fallido destruyera el único aviso que ese mapeo va a generar. Se fija también que `notifications_sent` cuenta este aviso.
 
@@ -30,7 +32,7 @@ Cambios vs 1.0: adopción del renombre de barridos (`daily_sweep`→`active_swee
 El bot **no consulta la base de datos** ni conoce la fuente. El descubrimiento le entrega, ya resuelto:
 
 - Para el digest: la lista de novedades, cada una con título del manga, número del capítulo nuevo, mi progreso, cuántos capítulos acumulé, y las URLs candidatas (la del capítulo nuevo, y la del primer no leído si se pudo resolver).
-- Para el heartbeat: mangas barridos, actualizaciones silenciosas aplicadas, y timestamp de la última corrida exitosa de detección.
+- Para el heartbeat: última corrida exitosa de detección, títulos vigilados y atrasados, corridas degradadas de la semana, y los números del último barrido de pausados (cuándo, cuántos revisó, cuántas silenciosas). Esta línea describía el contenido de la v1.1, atado al barrido; quedó desactualizada al desacoplarse el heartbeat en la v1.2 y se corrige acá.
 - Para el aviso de slug muerto: título del manga y su slug.
 
 El bot decide únicamente **cómo se ve el texto** y se encarga del envío.
@@ -96,7 +98,11 @@ La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlaza
 
 **Cuándo**: domingo de madrugada, a hora configurable (por defecto la misma del barrido de activos). **Tiene su propio horario y no depende de ningún barrido.** Es señal de vida: su ausencia un lunes significa que algo murió.
 
-**Contenido**: confirmación con fecha y hora local, cuándo fue la última corrida de detección exitosa, cuántos títulos se vigilan, cuántos están atrasados, y cuántas corridas cerraron degradadas (`partial` o `error`) en la última semana. Si hubo corridas degradadas el heartbeat lo indica; no se envía un mensaje de error aparte.
+**Contenido**: confirmación con fecha y hora local, cuándo fue la última corrida de detección exitosa, cuántos títulos se vigilan, cuántos están atrasados, cuántas corridas cerraron degradadas (`partial` o `error`) en la última semana, y **una línea final con el barrido de pausados**: cuándo corrió, cuántos mapeos revisó y cuántas actualizaciones silenciosas aplicó. Si hubo corridas degradadas el heartbeat lo indica; no se envía un mensaje de error aparte.
+
+**La línea del barrido de pausados es una adición, nunca un sustituto.** Sus números no alimentan "última detección exitosa" ni el conteo de degradadas, y el motivo es de correccion: ese barrido no notifica nada, así que una corrida verde suya no prueba que los mecanismos que sí notifican estén vivos. Contarla ahí dejaría un heartbeat de aspecto sano sentado encima de seis días de feed y barrido muertos, que es exactamente el fallo que este mensaje existe para exponer. Se incluye porque sin ella ese barrido es invisible: no manda nada, así que su única huella es una fila de `job_runs`.
+
+Cuando todavía no ha corrido, la línea dice **"nunca"** y no ceros. En un servidor cuyo primer domingo no llegó eso es normal, y "corrió y no encontró nada" se lee muy distinto de "no ha corrido" cuando lo que estás decidiendo es si un título pausado se está reintentando.
 
 **Ejemplo ilustrativo**:
 
@@ -105,6 +111,7 @@ La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlaza
 > Última detección exitosa: 29 jul, 19:09
 > Vigilados: 16 títulos, 15 atrasados
 > Corridas degradadas esta semana: 0
+> Barrido de pausados: 26 jul, 22:00, 141 revisados, 6 silenciosas
 
 Hasta la v1.2 este ejemplo encabezaba "Weekly heartbeat", en inglés, con las demás líneas en español. Era un resto, no una decisión; normalizado en la v1.3.
 

@@ -95,6 +95,18 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
         else "ninguna todavía"
     )
     behind = _plural(report.behind_count, "atrasado", "atrasados")
+    # Last line, and phrased so it cannot be mistaken for detection. The sweep
+    # sends nothing, so a job_runs row is its only trace and this is the only
+    # place a reader ever sees it. "nunca" is a real answer on a server whose
+    # first Sunday has not arrived - not an error, so it does not shout.
+    if report.onhold_sweep_at is None:
+        onhold_line = "Barrido de pausados: nunca"
+    else:
+        onhold_line = (
+            f"Barrido de pausados: {_format_local(report.onhold_sweep_at, timezone_name)}, "
+            f"{_plural(report.onhold_swept_count, 'revisado', 'revisados')}, "
+            f"{_plural(report.onhold_updates_count, 'silenciosa', 'silenciosas')}"
+        )
     return (
         # BOT's illustration heads this "Weekly heartbeat" while every line under
         # it is Spanish - a leftover in an otherwise Spanish example. Normalised
@@ -103,7 +115,8 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
         f"\U0001F493 Heartbeat semanal — {_format_local(now, timezone_name)}\n\n"
         f"Última detección exitosa: {last_run}\n"
         f"Vigilados: {_plural(report.tracked_count, 'título', 'títulos')}, {behind}\n"
-        f"Corridas degradadas esta semana: {report.degraded_run_count} (partial/error)"
+        f"Corridas degradadas esta semana: {report.degraded_run_count} (partial/error)\n"
+        f"{onhold_line}"
     )
 
 

@@ -43,6 +43,15 @@ class HeartbeatReport:
     tracked_count: int
     behind_count: int
     degraded_run_count: int  # feed_check/active_sweep runs closed partial or error, past 7 days
+    # The weekly on-hold sweep, added because it is otherwise INVISIBLE: it sends
+    # nothing at all, so the only trace it ever leaves is a job_runs row nobody
+    # reads. BOT v1.2 offers these as an addition ("pueden sumarse"), never as a
+    # substitute for the two fields above - a successful on-hold sweep is no
+    # evidence that the mechanisms which notify are alive, so it must not feed
+    # `last_successful_run_at` or `degraded_run_count`.
+    onhold_sweep_at: str | None  # when the last ok run started; None if it never ran
+    onhold_swept_count: int  # mappings that run examined
+    onhold_updates_count: int  # silent updates it applied
 
 
 class DigestSender(Protocol):
