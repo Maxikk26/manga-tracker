@@ -1,6 +1,6 @@
 # Decisión de arquitectura: dónde vive el panel de V1b
 
-Versión 1.0 — 2026-08-04. Documento de decisión. Depende de `one-pager-v1a.md` (v1.11) y `spec-modelo-de-datos.md` (v1.7).
+Versión 1.0 — 2026-08-04. Documento de decisión. Depende de `one-pager-v1a.md` (v1.12) y `spec-modelo-de-datos.md` (v1.7).
 
 No es una spec del panel: es la decisión de **dónde y con qué** se monta, tomada antes de escribir esa spec para que no la arrastre. El alcance funcional de V1b sigue en el one-pager y su spec no está abierta todavía.
 

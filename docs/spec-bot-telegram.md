@@ -1,6 +1,6 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.5 — 2026-08-04. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.11) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
+Versión 1.5 — 2026-08-04. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
 
 Cambios vs 1.4: **la desviación registrada del Mensaje 3 queda resuelta**. `onhold_sweep` existe, y su población incluye todo mapeo pausado por el contador, así que el reintento semanal que el aviso se negaba a prometer ahora ocurre de verdad y el mensaje lo dice. La redacción condicionada hizo su trabajo: se corrigió sola al entrar el barrido, sin que nadie tuviera que acordarse del texto. Se registra también el hueco que este mensaje **no** cubre: el aviso lo emite únicamente el barrido diario, cuya población son los activos, así que un título `on_hold` cuyo slug muere no genera aviso alguno.
 
