@@ -82,8 +82,12 @@ Y si versionas un documento, **revisa los pines de todo lo que lo referencia**. 
 Verificación rápida del grafo completo:
 
 ```
-rg -n -o "^Versión [0-9.]+|\`[a-z-]+\.md\` \(v[0-9.]+\)" docs/*.md
+rg -n -o "^Versión [0-9.]+|\`[a-z0-9-]+\.md\` \(v[0-9.]+\)" docs/*.md
 ```
+
+**La clase de carácter lleva `0-9`, y no es cosmético.** Con `[a-z-]+` el comando no ve ningún nombre de archivo con dígito: los **siete** pines a `one-pager-v1a.md` y los de `decision-arquitectura-v1b.md` salían invisibles, o sea que el documento raíz del paquete era justo el que no se podía auditar. El comando de verificación tenía el mismo punto ciego que la tabla de guardianes describe: cubría la clase de error que sabía mirar.
+
+Y correrlo no es opcional. El 2026-08-08 se subió `spec-cliente-fuente-descubrimiento.md` a v1.7 sin correrlo, y cuatro documentos quedaron pineando v1.6 — un defecto por documento, encontrado tres días después.
 
 ### Paso 6: un commit por unidad de trabajo
 
