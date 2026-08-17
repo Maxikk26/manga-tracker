@@ -1,6 +1,11 @@
 services:
   manga-tracker:
     build: .
+    # Same reason as container_name below: without this, Compose names the
+    # built image `<project>-<service>` — manga-tracker-manga-tracker. One
+    # service, one image; name it once. After deploying this change, the old
+    # image name lingers untagged: `docker image rm manga-tracker-manga-tracker`.
+    image: manga-tracker
     # Without this, Compose derives `<project>-<service>-<N>` and the container
     # is called manga-tracker-manga-tracker-1. The suffix exists to keep
     # replicas apart, and this service is one instance by definition: a single
