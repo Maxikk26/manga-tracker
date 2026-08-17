@@ -1,8 +1,27 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.9 — 2026-08-10. Documento operativo. Depende de `one-pager-v1a.md` (v1.12) y `spec-bot-telegram.md` (v1.6).
+Versión 1.10 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.13) y `spec-bot-telegram.md` (v1.6).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
+
+## Resumen
+
+| Qué | Regla / decisión | Dónde |
+|---|---|---|
+| **Ciclo de un cambio** | 8 pasos: suite antes de tocar nada → código y tests juntos → suite → **romper el guardián a propósito** → docs → commit por unidad → push → redesplegar | §El ciclo de un cambio |
+| **Romper el guardián** | La práctica que más defectos encontró aquí: la tabla acumula **13** guardianes que estaban verdes sin cubrir nada. Cuesta minutos por cambio | §Paso 4 |
+| **Pines** | Versionar un documento obliga a revisar los pines de todo lo que lo referencia; hay comando `rg` de auditoría. No correrlo dejó 4 defectos el 2026-08-08 | §Paso 5 |
+| **Resumen inicial** | Todo documento de `docs/` abre con `## Resumen` en tabla; el que no la tiene la gana al versionarse. Deuda actual: **7** documentos | §Todo documento de `docs/`… |
+| **Rama** | Unidad de **entrega**, no de autoría: un spec que se implementa enseguida viaja con su implementación | §La rama es una unidad de entrega |
+| **PR** | Cuerpo desde `.github/pull_request_template.md`, ~20 líneas, declara el guardián roto y si el despliegue necesita `build` | §Paso 7 |
+| **Redesplegar** | Mergear primero, `pull` después; `up -d` es el **único** verbo — `restart` no recrea el contenedor (costó una noche de depuración) | §Redesplegar |
+| **Esquema** | Una columna nueva en una tabla existente necesita migración **siempre** (`PRAGMA user_version`); respaldo de la base antes de desplegar | §Si el cambio toca el esquema |
+| **Operación** | `feed_check` cada 30 minutos; `started_at` en UTC contra horas de cron locales (UTC-4); silencio en Telegram no es fallo — un heartbeat ausente un lunes sí | §Operación cotidiana |
+| **Slug muerto** | Aviso único por Telegram al 5º fallo consecutivo; reintento automático cada domingo vía `onhold_sweep` | §Un manga dejó de responder |
+
+Lo que este documento **no** cubre: el despliegue desde cero y las variables de entorno (`runbook-deploy.md`), y qué hace el sistema (las specs).
+
+Cambios en v1.10: el runbook paga su propia deuda y abre con el `## Resumen` que su convención exige. Se cierra el pendiente de sumar los números del `onhold_sweep` al heartbeat — hecho en `spec-bot-telegram.md` v1.6 y desplegado, así que la lista lo mueve a cerrados. Se actualiza la lista de deuda de resúmenes: la pagaron `one-pager-v1a.md` (v1.13) y este documento, y `decision-arquitectura-v1b.md` nació con la suya; quedan siete. Y la operación cotidiana decía que `feed_check` corre cada hora — es cada 30 minutos desde el 2026-08-08 (`spec-cliente-fuente-descubrimiento.md` v1.7) y este documento no se había enterado.
 
 Cambios en v1.9: **ya hay migraciones**, así que la sección del esquema deja de decir que no las hay. Se escribe la trampa que las hizo necesarias: una columna nueva en una tabla existente no aparece nunca, y los tests no lo delatan porque construyen sus bases desde cero.
 
@@ -114,7 +133,7 @@ No confundir con **"Decisiones discutibles"**, que es otra sección y tiene otro
 
 El motivo es de fricción, no de estética: un spec de 200 líneas que hay que leer entero para aprobarlo **no se aprueba, se posterga**. El resumen es lo que lo vuelve revisable en dos minutos.
 
-Deuda conocida al 2026-08-04: la convención se venía aplicando de memoria y por eso está en tres formas distintas. `spec-bot-telegram.md` y `spec-importador-kitsu.md` traen "Decisiones discutibles"; `spec-modelo-de-datos.md` trae su resumen **al final** y solo para trazabilidad. Tienen hoy la sección `## Resumen` completa el importador y `manganato-fuente-actual.md`, que la pagó en su v1.4 **absorbiendo el TL;DR en vez de dejarlo al lado**: dos resúmenes en un documento son dos verdades que se desincronizan, y en ese caso la copia vieja era una de las que sostenía una afirmación falsa. Al versionar cualquiera de los que faltan, se le agrega.
+Deuda al 2026-08-17: tienen la sección `## Resumen` inicial completa `spec-importador-kitsu.md`, `manganato-fuente-actual.md` —que la pagó en su v1.4 **absorbiendo el TL;DR en vez de dejarlo al lado**: dos resúmenes en un documento son dos verdades que se desincronizan, y en ese caso la copia vieja era una de las que sostenía una afirmación falsa—, `decision-arquitectura-v1b.md` (nació con ella), `one-pager-v1a.md` (la pagó en su v1.13) y este runbook (v1.10). La deben todavía **siete**: `spec-bot-telegram.md`, `spec-modelo-de-datos.md` —su resumen está **al final** y solo para trazabilidad, que no cumple: la convención exige abrir con él—, `spec-cliente-fuente-descubrimiento.md`, `spec-seed-manual.md`, `runbook-deploy.md`, `medicion-ventana-feed.md` y `referencia-repo-viejo.md`, cuyo "Resumen de rescates" también cierra el documento en vez de abrirlo. Al versionar cualquiera de los que faltan, se le agrega.
 
 ### La rama es una unidad de entrega, no de autoría
 
@@ -227,7 +246,7 @@ El heartbeat llega los domingos. Entre semana, si quieres confirmar:
 sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5"
 ```
 
-`feed_check` corre cada hora, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
+`feed_check` corre cada 30 minutos, así que debe haber una fila reciente. `finished_at` menos `started_at` te da la duración real — un barrido normal son minutos; si se acerca a la media hora, la fuente está dando timeouts.
 
 **`started_at` está en UTC y las horas del cron son locales**, así que no los compares de frente. Con `LOCAL_TIMEZONE=America/Caracas` (UTC-4), el barrido de las 22:00 aparece como `02:00Z` del día siguiente, y el heartbeat y el barrido de on-hold del domingo también. Si ves el barrido cayendo a las `22:00Z` exactas, el scheduler perdió la zona horaria y está corriendo en UTC — eso fue un defecto real, arreglado pasándole `LOCAL_TIMEZONE` a cada trigger y no solo al scheduler.
 
@@ -285,7 +304,6 @@ Dato del último chequeo: los dominios hermanos `natomanga.com` y `mangakakalot.
 ## Lo que queda pendiente
 
 - Pipeline de CI: después de V1a/V1b. Tiene más sentido automatizar este runbook cuando ya lo hayas ejecutado a mano unas veces.
-- Sumar los números del `onhold_sweep` al heartbeat: opcional según `spec-bot-telegram.md`, no hecho. Lo que **no** cambia es que ese barrido no cuenta como "última detección exitosa": no notifica nada, así que una corrida suya no prueba que los mecanismos que sí notifican estén vivos.
 - El aviso de slug muerto no cubre los `on_hold`: solo lo emite el barrido diario. Declarado en `spec-cliente-fuente-descubrimiento.md` v1.6, no es un pendiente de implementación sino una decisión — la alternativa era repetir el aviso cada domingo.
 
-Cerrados: `onhold_sweep` y el aviso de slug muerto (fase 2, completa) y el import de Kitsu (corrió; el criterio 4 de V1a está cumplido).
+Cerrados: `onhold_sweep` y el aviso de slug muerto (fase 2, completa); el import de Kitsu (corrió; el criterio 4 de V1a está cumplido); y los números del `onhold_sweep` en el heartbeat (`spec-bot-telegram.md` v1.6: una línea al final con cuándo corrió, mapeos revisados y actualizaciones silenciosas). Lo que **no** cambió al cerrarse esto último: ese barrido sigue sin contar como "última detección exitosa" — no notifica nada, así que una corrida suya no prueba que los mecanismos que sí notifican estén vivos.
