@@ -1,6 +1,6 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.8 — 2026-08-10. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.12). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.8 — 2026-08-10. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.13). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
 
 Cambios vs 1.7: **el esquema pasa a estar versionado** con `PRAGMA user_version`, y se agregan a `job_runs` las columnas `items_requested` e `items_skipped`. Lo fuerza un hallazgo, no un plan: `ensure_schema` ejecuta `schema.sql`, que es todo `CREATE ... IF NOT EXISTS`, así que **una columna agregada ahí no aparece jamás en una base que ya existe**. Verificado empíricamente. Y la forma del fallo es la peligrosa: toda la suite construye sus bases desde cero, donde el script aplica completo, así que el cambio se ve verde en los tests y falta en producción. La sección "Versionado del esquema" al final describe el mecanismo y su regla.
 
