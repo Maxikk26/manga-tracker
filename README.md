@@ -17,7 +17,7 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 | Fase 2 — aviso de slug muerto + `onhold_sweep` | ✅ completa. El aviso lleva desplegado desde el arranque, y el barrido semanal corrió su primer ciclo completo sin intervención el domingo 2026-08-09 (141 mapeos, 6 actualizaciones silenciosas, 0 mensajes). Su población la dejó el import: 72 bookmarks en `on_hold` donde había cero |
 | Fase 3 — import de Kitsu | ✅ corrió contra la base real |
 
-Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. Lo que sigue son 1-2 semanas de uso real antes de abrir la spec de V1b, no features nuevas.
+Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. La semana de uso real corrió del 08-10 al 08-17 y ese día abrió **la spec de V1b** (`spec-panel-v1b.md`): el panel web, en cuatro fases, con la edición del progreso de lectura como corazón.
 
 ## Cómo funciona (resumen)
 
@@ -81,6 +81,7 @@ Documentos de apoyo:
 - **`medicion-ventana-feed.md`** — el experimento que fijó el intervalo del feed y degradó su rol a oportunista.
 - **`referencia-repo-viejo.md`** — rescate del intento anterior en Go (2025) y, sobre todo, la lista de antipatrones que lo mataron.
 - **`decision-arquitectura-v1b.md`** — dónde vive el panel de V1b y con qué se monta: mismo repositorio, React + Vite, API en Python. No es la spec del panel.
+- **`spec-panel-v1b.md`** — la spec del panel: FastAPI sin autenticación, los endpoints, las tres pantallas y las cuatro fases de entrega, con la edición del progreso de lectura como corazón.
 
 El paquete está completo: no falta ninguna spec por escribir.
 
@@ -90,13 +91,14 @@ Cada documento declara en su encabezado de qué versiones depende. Este mapa dic
 
 | Si versionas… | Debes revisar y actualizar el pin de… |
 |---|---|
-| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot, **runbook de despliegue, runbook de mantenimiento** |
-| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual, fuente actual, **importador Kitsu** |
+| `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot, **runbook de despliegue, runbook de mantenimiento, spec del panel** |
+| `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual, fuente actual, **importador Kitsu, spec del panel** |
 | `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana, **importador Kitsu** |
 | `spec-bot-telegram.md` | **runbook de mantenimiento** |
 | `spec-seed-manual.md` | **runbook de despliegue, importador Kitsu** |
 | `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana, **importador Kitsu** |
 | `one-pager-v1a.md` (de nuevo) | **decisión de arquitectura de V1b** |
+| `decision-arquitectura-v1b.md` | **spec del panel** |
 
 Las filas en negrita se agregaron el 2026-08-02: **el mapa mismo estaba desactualizado**. Le faltaban los dos runbooks, que pinean el one-pager desde que se escribieron, y dos documentos no tenían fila propia pese a ser pineados por otros. Un mapa incompleto es peor que no tenerlo, porque da la falsa seguridad de haber revisado.
 

@@ -1,10 +1,12 @@
 # Decisión de arquitectura: dónde vive el panel de V1b
 
-Versión 1.1 — 2026-08-17. Documento de decisión. Depende de `one-pager-v1a.md` (v1.13) y `spec-modelo-de-datos.md` (v1.8).
+Versión 1.2 — 2026-08-17. Documento de decisión. Depende de `one-pager-v1a.md` (v1.14) y `spec-modelo-de-datos.md` (v1.8).
+
+Cambios vs 1.1: **los tres pendientes abiertos se cierran** — `spec-panel-v1b.md` v1.0 existe y decide el framework (FastAPI) y la autenticación (ninguna mientras nada exponga el puerto fuera de la LAN). Se registra también la topología que esa spec fijó por decisión del dueño: el panel corre en **contenedor propio de la misma imagen**, para que un panel caído no tumbe la detección — el "sin segundo contenedor" de este documento rechazaba un runtime Node para SSR, no un segundo proceso Python, y la fila del Resumen ahora lo dice. Este documento queda como lo que siempre fue: el dónde y con qué; el qué vive en esa spec.
 
 Cambios vs 1.0: se corrige la fecha de cumplimiento de los cuatro criterios de V1a en "Pendientes abiertos" — decía 2026-08-04, que es la fecha de este documento, pero el criterio 2 (el ciclo dominical completo corrido solo) se verificó contra `job_runs` recién el **2026-08-10**, que es la fecha que registra `one-pager-v1a.md` desde su v1.12. No es cosmético: esa fecha arranca el plazo de 1-2 semanas de uso real antes de abrir la spec de V1b. Pin de `one-pager-v1a.md` actualizado a v1.13.
 
-No es una spec del panel: es la decisión de **dónde y con qué** se monta, tomada antes de escribir esa spec para que no la arrastre. El alcance funcional de V1b sigue en el one-pager y su spec no está abierta todavía.
+No es una spec del panel: es la decisión de **dónde y con qué** se monta, tomada antes de escribir esa spec para que no la arrastre. El alcance funcional de V1b vive en `spec-panel-v1b.md`, abierta el 2026-08-17.
 
 ## Resumen
 
@@ -13,7 +15,7 @@ No es una spec del panel: es la decisión de **dónde y con qué** se monta, tom
 | **Repositorio** | El **mismo**, no uno aparte | La base es un archivo en una máquina; separar rompe el grafo de pines que gobierna el esquema |
 | **Frontend** | **React + Vite**, no Next.js | Vite compila a estáticos: cero Node en producción, sigue siendo un contenedor |
 | **Backend del panel** | Python, API JSON, en este repo | Ya existe la frontera `storage/`; el panel es otra capa de presentación |
-| **Qué sirve los estáticos** | La misma API de Python | Un solo `docker compose up -d`, sin segundo contenedor ni CORS |
+| **Qué sirve los estáticos** | La misma API de Python | Un solo `docker compose up -d` y sin CORS; el panel corre como segundo contenedor **de la misma imagen** (decisión del dueño en la spec del panel) — lo que este documento rechazó fue un runtime Node, no un segundo proceso Python |
 | **Frontera nueva** | `web` puede importar `storage`; **nunca** `sources.manganato` ni `notifier.telegram` | El panel muestra y edita; no detecta ni notifica |
 | **Costo asumido** | Node como dependencia **de build**, no de runtime | Es el precio de React, y se paga una vez por build |
 
@@ -67,6 +69,4 @@ El `Dockerfile` gana una etapa de build con Node que produce `dist/` y lo copia 
 
 ## Pendientes abiertos
 
-- La spec funcional de V1b no está escrita. El one-pager pide 1-2 semanas de uso real tras cerrar los cuatro criterios de V1a, cumplidos el 2026-08-10 — el criterio 2, el ciclo dominical completo corrido solo, se verificó contra `job_runs` ese día.
-- El framework Python de la API (FastAPI o Flask) no está decidido; es decisión de la spec de V1b, no de este documento.
-- Autenticación: sin decidir. Monousuario en LAN, así que probablemente ninguna, pero eso se declara explícitamente ahí y no se asume aquí.
+Ninguno. Los tres que este documento cargaba los cerró `spec-panel-v1b.md` v1.0 el 2026-08-17: la spec funcional existe (abierta tras la semana de uso real que pedía el one-pager, cumplida ese mismo día), el framework es FastAPI, y la autenticación es ninguna — declarada como decisión, condicionada a que nada exponga el puerto fuera de la LAN.
