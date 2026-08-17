@@ -10,10 +10,15 @@ dependencies = [
     "curl-cffi>=0.15",
     "beautifulsoup4>=4.12",
     "APScheduler>=3.10,<4",
+    # The V1b panel (spec-panel-v1b.md): FastAPI serves the JSON API and the
+    # frontend statics, uvicorn runs it as its own process/container.
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+# httpx: what fastapi.testclient.TestClient speaks; test-only, never runtime.
+dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -53,6 +53,17 @@ def test_the_feed_interval_defaults_to_thirty_minutes_and_stays_configurable(mon
     assert load_config().feed_check_minutes == 5
 
 
+def test_the_panel_port_defaults_to_8000_and_stays_configurable(monkeypatch):
+    """The tenth variable (spec-panel-v1b.md): like FEED_CHECK_MINUTES, an
+    already-configured server never writes it. The override is asserted
+    against a value that is not the default, so a hardcoded port cannot pass."""
+    monkeypatch.delenv("PANEL_PORT", raising=False)
+    assert load_config().panel_port == 8000
+
+    monkeypatch.setenv("PANEL_PORT", "9111")
+    assert load_config().panel_port == 9111
+
+
 def test_the_onhold_sweep_hour_stays_independently_configurable(monkeypatch):
     """The whole reason the variable exists: the shared default queues the sweep
     behind the daily one, and moving it off that hour must not require touching

@@ -155,6 +155,28 @@ def test_run_hands_the_scheduler_every_configured_hour(tmp_path, monkeypatch):
     assert captured["timezone_name"] == "Asia/Tokyo"
 
 
+def test_panel_hands_uvicorn_the_app_for_the_configured_db_and_port(tmp_path, monkeypatch):
+    """`panel` is wiring, and wiring is what this suite checks at the wiring
+    point: the app is built for DB_PATH, and uvicorn gets PANEL_PORT and the
+    LAN bind - a configured port that reached nothing is this repo's
+    recurring defect (see the scheduler-hours test above)."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "panel.db"))
+    monkeypatch.setenv("PANEL_PORT", "9111")
+
+    captured = {}
+    monkeypatch.setattr(cli, "create_app", lambda db_path: {"db_path": db_path})
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda app, *, host, port: captured.update(app=app, host=host, port=port)
+    )
+
+    assert cli.main(["panel"]) == 0
+    assert captured["app"] == {"db_path": str(tmp_path / "panel.db")}
+    assert captured["host"] == "0.0.0.0"
+    assert captured["port"] == 9111
+
+
 # --- import-kitsu -------------------------------------------------------------
 #
 # The doubles below can express failure on purpose. A catalogue that always

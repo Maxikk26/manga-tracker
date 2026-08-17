@@ -1,20 +1,35 @@
-"""Parameterized query helpers for the seed loader's and the Kitsu importer's
-writes — no slug or user value is ever interpolated into SQL.
+"""Parameterized query helpers for the seed loader's, the Kitsu importer's
+and the web panel's reads and writes — no slug or user value is ever
+interpolated into SQL.
 
-Two write families live here and they are deliberately separate. The seed
+Three families live here and they are deliberately separate. The seed
 family (`write_seed_backfill`) owns `origin='seed'`, `progress_is_approx=0`
-and commits for itself. The Kitsu family below writes
-`origin='kitsu_import'`, `progress_is_approx=1`, refuses to touch a bookmark
-it does not own, and **never commits**: the importer wraps one whole entry in
-a single transaction so a match rejected by verification leaves zero rows
-(design D5).
+and commits for itself. The Kitsu family writes `origin='kitsu_import'`,
+`progress_is_approx=1`, refuses to touch a bookmark it does not own, and
+**never commits**: the importer wraps one whole entry in a single transaction
+so a match rejected by verification leaves zero rows (design D5). The panel
+family (spec-panel-v1b.md fase 1) reads the bookmark list and applies one
+edit per transaction, correcting the trigger-captured row to
+`origin='panel'`; it commits for itself, one edit being one transaction.
 """
 
 import json
 import sqlite3
 
+from manga_tracker.storage.db import transaction
+
 IMPORT_ORIGIN = "kitsu_import"
 IMPORT_DETECTED_VIA = "seed_backfill"
+PANEL_ORIGIN = "panel"
+
+# The bookmark status enum exactly as the schema CHECK declares it. The panel
+# validates a request against this tuple before any SQL runs, so an invalid
+# status is a 422 to the caller, never an IntegrityError from the database.
+BOOKMARK_STATUSES = ("reading", "want_to_read", "completed", "on_hold", "dropped")
+
+# "The PATCH did not carry this field". None cannot play that role because it
+# is a real value for last_chapter_read, so absence gets its own marker.
+UNSET = object()
 
 # What write_kitsu_bookmark did, so the caller can report it.
 BOOKMARK_INSERTED = "inserted"
@@ -254,3 +269,120 @@ def write_seed_backfill(conn, existing, title, site_id, slug, url, chapters, sta
             (status, last_chapter_read, now, existing_bm[0]),
         )
     conn.commit()
+
+
+# --- panel family (spec-panel-v1b.md fase 1) -----------------------------------
+
+_PANEL_BOOKMARK_SELECT = (
+    "SELECT b.id, b.manga_id, m.title, b.status, b.last_chapter_read, b.progress_is_approx, "
+    "ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at "
+    "FROM bookmarks b JOIN mangas m ON m.id = b.manga_id "
+    # LEFT, not INNER: a manga can exist without a source mapping (a pending
+    # Kitsu entry whose url was never pasted), and its bookmark must still
+    # appear in the list — with the source-side columns as NULL.
+    "LEFT JOIN manga_sites ms ON ms.manga_id = b.manga_id "
+)
+
+
+def _panel_bookmark_row(row) -> dict:
+    (bookmark_id, manga_id, title, status, last_chapter_read, progress_is_approx,
+     latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at) = row
+    # NULL on either side means "behind is unknowable", not zero: a bookmark
+    # with no recorded progress is not magically caught up.
+    behind = (
+        max(latest_chapter_num - last_chapter_read, 0)
+        if latest_chapter_num is not None and last_chapter_read is not None
+        else None
+    )
+    return {
+        "id": bookmark_id,
+        "manga_id": manga_id,
+        "title": title,
+        "status": status,
+        "last_chapter_read": last_chapter_read,
+        "progress_is_approx": bool(progress_is_approx),
+        "latest_chapter_num": latest_chapter_num,
+        "latest_chapter_url": latest_chapter_url,
+        "latest_chapter_at": latest_chapter_at,
+        "behind": behind,
+        "last_read_at": last_read_at,
+    }
+
+
+def list_panel_bookmarks(conn: sqlite3.Connection, status: str | None = None) -> list[dict]:
+    """Every bookmark joined with its manga title and source-side chapter state,
+    ordered by title so the list is stable across requests."""
+    sql, params = _PANEL_BOOKMARK_SELECT, ()
+    if status is not None:
+        sql += "WHERE b.status = ? "
+        params = (status,)
+    return [_panel_bookmark_row(row) for row in conn.execute(sql + "ORDER BY m.title, b.id", params)]
+
+
+def get_panel_bookmark(conn: sqlite3.Connection, bookmark_id: int) -> dict | None:
+    row = conn.execute(_PANEL_BOOKMARK_SELECT + "WHERE b.id = ?", (bookmark_id,)).fetchone()
+    return _panel_bookmark_row(row) if row else None
+
+
+def update_panel_bookmark(
+    conn: sqlite3.Connection, bookmark_id: int, *, last_chapter_read=UNSET, status=UNSET, now: str
+) -> bool:
+    """Apply one panel edit: progress and/or status. Returns False when the
+    bookmark does not exist. Commits — one edit is one transaction.
+
+    An edited progress is exact by definition, so `progress_is_approx` drops to
+    0 and `last_read_at` is sealed with the edit's timestamp. Downward edits
+    are legal and recorded as-is: the trigger keeps `previous_chapter_num` and
+    the consumer treats a negative delta as a correction, not reading.
+
+    The UPDATE fires `reading_history_capture_progress`, which hardcodes
+    `origin='manual'` (direct SQLite edits must keep registering that), so the
+    captured row is corrected to 'panel' here, inside the same transaction.
+    The spec says `last_insert_rowid()` names that row, but it does not:
+    SQLite reverts the value when a trigger program ends (verified against
+    3.49), so trusting it would rewrite whatever unrelated row the connection
+    inserted last — or nothing. Instead the correction targets ids above the
+    pre-UPDATE ceiling, which inside this write transaction can only be the
+    trigger's own INSERT. And only when the trigger actually fired: it skips
+    an unchanged value, a NULL, and a status-only edit, and correcting on
+    those would hit a row some earlier edit legitimately captured.
+    """
+    with transaction(conn):
+        row = conn.execute(
+            "SELECT manga_id, last_chapter_read FROM bookmarks WHERE id = ?", (bookmark_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        manga_id, current_progress = row
+
+        assignments, params = ["updated_at = ?"], [now]
+        if last_chapter_read is not UNSET:
+            assignments += ["last_chapter_read = ?", "progress_is_approx = 0", "last_read_at = ?"]
+            params += [last_chapter_read, now]
+        if status is not UNSET:
+            assignments.append("status = ?")
+            params.append(status)
+
+        # Mirrors the trigger's WHEN clause exactly: NEW IS NOT OLD AND NEW IS
+        # NOT NULL. Any mismatch corrupts: correcting when the trigger stayed
+        # silent rewrites an unrelated captured row's origin.
+        trigger_fired = (
+            last_chapter_read is not UNSET
+            and last_chapter_read is not None
+            and last_chapter_read != current_progress
+        )
+        ceiling = (
+            conn.execute("SELECT COALESCE(MAX(id), 0) FROM reading_history").fetchone()[0]
+            if trigger_fired
+            else None
+        )
+        # Column names come from the literal lists above, never caller input.
+        conn.execute(
+            f"UPDATE bookmarks SET {', '.join(assignments)} WHERE id = ?", (*params, bookmark_id)
+        )
+        if trigger_fired:
+            conn.execute(
+                "UPDATE reading_history SET origin = ? WHERE id > ? AND manga_id = ?",
+                (PANEL_ORIGIN, ceiling, manga_id),
+            )
+    return True

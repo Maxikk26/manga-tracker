@@ -13,6 +13,8 @@ is only true while no other module names the class."""
 import argparse
 from collections import Counter
 
+import uvicorn
+
 from manga_tracker.catalogue.contracts import CatalogueTransient, CatalogueUnexpected
 from manga_tracker.catalogue.kitsu import KitsuCatalogue
 from manga_tracker.catalogue.transport import UrllibJsonTransport
@@ -32,6 +34,7 @@ from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
 from manga_tracker.storage.db import connect, ensure_site
+from manga_tracker.web.app import create_app
 
 
 def _cmd_seed(args: argparse.Namespace, config: AppConfig) -> int:
@@ -190,6 +193,15 @@ def _cmd_run_job(args: argparse.Namespace, config: AppConfig) -> int:
     return 0
 
 
+def _cmd_panel(args: argparse.Namespace, config: AppConfig) -> int:
+    """Serve the web panel (docs/spec-panel-v1b.md): its own process — in
+    production its own container — so a hung panel cannot take detection down.
+    0.0.0.0 because compose publishes the port to the home LAN, and the
+    declared no-auth decision is bound to exactly that scope."""
+    uvicorn.run(create_app(config.db_path), host="0.0.0.0", port=config.panel_port)
+    return 0
+
+
 def _cmd_test_telegram(args: argparse.Namespace, config: AppConfig) -> int:
     """Manual verification utility (BOT "Utilidad de prueba manual"): sends one
     message to the configured chat. Used at deploy time and after rotating the
@@ -238,6 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="Start the scheduler (blocks until interrupted)")
     run.set_defaults(handler=_cmd_run)
+
+    panel = subparsers.add_parser(
+        "panel", help="Serve the web panel: JSON API under /api plus the frontend statics (spec-panel-v1b.md)"
+    )
+    panel.set_defaults(handler=_cmd_panel)
 
     run_job = subparsers.add_parser("run-job", help="Run one job body once, outside the scheduler")
     run_job.add_argument("job", choices=[FEED_CHECK_JOB, ACTIVE_SWEEP_JOB, ONHOLD_SWEEP_JOB, HEARTBEAT_JOB])

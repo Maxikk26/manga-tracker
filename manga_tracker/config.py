@@ -22,6 +22,7 @@ class AppConfig:
     heartbeat_hour: int  # weekly heartbeat (Sunday) - defaults to active_sweep_hour, independently configurable
     onhold_sweep_hour: int  # weekly on-hold sweep (Sunday) - same default and the same independence
     timezone_name: str  # BOT "hora local (America/Caracas)... configurable si me mudo"
+    panel_port: int  # where the panel listens (spec-panel-v1b.md); published to the LAN only
     telegram: TelegramConfig | None  # present only if both vars were set
 
 
@@ -89,6 +90,9 @@ def load_config() -> AppConfig:
         # that file is under a blanket .env* read/write restriction in this
         # sandbox; see apply-progress.
         timezone_name=os.environ.get("LOCAL_TIMEZONE", "America/Caracas"),
+        # PANEL_PORT: the panel's listen port (spec-panel-v1b.md). Like
+        # FEED_CHECK_MINUTES, an already-configured server never writes it.
+        panel_port=int(os.environ.get("PANEL_PORT", "8000")),
         telegram=telegram,
     )
 
