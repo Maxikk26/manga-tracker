@@ -43,3 +43,33 @@ services:
     # startup and runs one sweep immediately when the last successful one is
     # older than a day, so a restart no longer needs a human to remember.
     # `run-job active_sweep` remains available for forcing one on demand.
+
+  # V1b panel (spec-panel-v1b.md): SAME image, own container, by owner
+  # decision — a crashed or hung panel must never take detection down with
+  # it. No `build:` here on purpose: the service above builds and tags the
+  # image; declaring build twice would race two builds of the same tag.
+  # Both processes open the same SQLite file; busy_timeout is set in
+  # storage, and WAL is the declared lever if real SQLITE_BUSY shows up.
+  manga-tracker-panel:
+    image: manga-tracker
+    container_name: manga-tracker-panel
+    restart: unless-stopped
+    command: ["panel"]
+    env_file:
+      - .env
+    environment:
+      DB_PATH: data/manga-tracker.db
+    ports:
+      # One knob: PANEL_PORT feeds both the bind inside the container (the
+      # CLI reads it from the environment) and the host mapping, so setting
+      # it once in .env moves both ends together. Unset, both sides are 8000.
+      - "${PANEL_PORT:-8000}:${PANEL_PORT:-8000}"
+    volumes:
+      - ${DATA_DIR:-../manga-tracker-data}:/app/data
+    depends_on:
+      - manga-tracker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
