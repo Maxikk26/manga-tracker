@@ -16,7 +16,7 @@ Real commands — do not invent others:
 
 ```
 uv run pytest -q                 the suite; 330 tests as of 2026-08-04
-docker compose build             required when manga_tracker/, pyproject.toml or the Dockerfile change
+docker compose build             required when manga_tracker/, frontend/, pyproject.toml or the Dockerfile change
 docker compose up -d             the ONLY redeploy verb; `restart` does not recreate and silently keeps the old image
 ```
 

@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.5 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
+Versión 1.6 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4), `spec-cliente-fuente-descubrimiento.md` (v1.7) y `spec-panel-v1b.md` (v1.0).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
@@ -9,16 +9,18 @@ Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tra
 | Qué | Regla / decisión | Dónde |
 |---|---|---|
 | **Qué necesitas antes** | Token del bot (BotFather), chat id (`getUpdates`), tu CSV escrito a mano (**no se reconstruye**), Docker corriendo | §Antes de empezar |
-| **`.env`** | **8 variables escritas** + `FEED_CHECK_MINUTES`, la novena, que **no** se escribe: default 30 y nunca por encima de 41 (la ventana medida). Las tres horas del domingo iguales a propósito: se encolan, no se solapan | §1 |
+| **`.env`** | **8 variables escritas** + 2 que **no** se escriben: `FEED_CHECK_MINUTES` (novena, default 30 y nunca por encima de 41, la ventana medida) y `PANEL_PORT` (décima, default 8000). Las tres horas del domingo iguales a propósito: se encolan, no se solapan | §1 |
 | **Datos** | La base y el seed van **fuera** del repo (`~/manga-tracker-data/`); en Linux, `chown 10001:10001` o el primer arranque muere | §2 |
 | **Seed** | El archivo se llama `seed.csv` (nunca `seed-plantilla.csv`, que Git commitea); validar con `--dry-run` antes de cargar; ~3 minutos para 16 títulos por los delays de 5-15s | §3, §5 |
 | **Arranque** | 6 pasos en orden: `test-telegram` → `--dry-run` → seed → `run-job active_sweep` → `run-job heartbeat` → `up -d`. **El seed va antes del `up -d`** o el barrido de arranque se gasta contra cero títulos | §5 |
-| **Build** | ~4 minutos la primera vez; verificar tzdata, usuario `appuser` y que `pytest` **no** viaje. Inspección con `--entrypoint` y el nombre del **servicio**, nunca un tag | §4 |
-| **Qué esperar** | **Silencio**, y es lo normal: `feed_check` cada 30 minutos, `active_sweep` a las 22:00 locales, domingo tres jobs encolados. Lee `items_checked`, no solo `status` | §6 |
+| **Build** | ~4 minutos la primera vez; verificar tzdata, usuario `appuser` y que `pytest` **no** viaje. Desde V1b hay una etapa de Node que compila el frontend — Node tampoco viaja. Inspección con `--entrypoint` y el nombre del **servicio**, nunca un tag | §4 |
+| **Qué esperar** | **Silencio en Telegram**, y es lo normal: `feed_check` cada 30 minutos, `active_sweep` a las 22:00 locales, domingo tres jobs encolados. Lee `items_checked`, no solo `status`. El panel responde en `http://<servidor>:8000` desde el arranque | §6 |
 | **Respaldo** | `cp` de un archivo, más el `seed.csv` aparte. Sin dump ni credenciales — la contrapartida de SQLite | §7 |
 | **Si algo falla** | Tabla de 11 síntomas del primer arranque, en orden de probabilidad | §Fallos del primer arranque |
 
 Lo que este documento **no** cubre: subir un cambio y operar lo ya desplegado (`runbook-mantenimiento.md`), ni qué hace el sistema (las specs).
+
+Cambios en v1.6: **entra el panel de V1b (fase 1)**. Segundo contenedor `manga-tracker-panel` de la misma imagen — decisión del dueño: si el panel se cae, el scheduler no —, `PANEL_PORT` como décima variable (default 8000, y como `FEED_CHECK_MINUTES`, no se escribe salvo que necesites otro puerto), y el build gana una etapa de Node que compila el frontend y nunca viaja a la imagen de runtime. El `up -d` de siempre levanta los dos contenedores.
 
 Cambios en v1.5: se corrigen las dos menciones que decían que `feed_check` corre **cada hora** — el horario prometido del §6 y la verificación de vida — cuando la propia v1.4 había bajado el intervalo a 30 minutos: el cambio entró al `.env` y a su advertencia, pero no al horario que este mismo documento promete dos secciones más abajo. Y el documento gana el `## Resumen` inicial que exige la convención del `runbook-mantenimiento.md`, con lo que sale de su lista de deuda.
 
@@ -69,6 +71,8 @@ Sin comillas y sin espacios alrededor del `=`. `.env` está en `.gitignore`; `.e
 **`FEED_CHECK_MINUTES` es la excepción: no la escribas en el `.env`.** Default 30, y esa es la regla completa — el intervalo debe quedar **por debajo** de la ventana del feed, medida en 41 minutos. Ponerle 60 no es "revisar con menos frecuencia": es perder publicaciones por construcción, porque el capítulo entra y sale de la página 1 entre dos corridas. Estuvo en 60 hasta el 2026-08-08 y costó cinco días con el feed sin aportar nada (`medicion-ventana-feed.md` v1.2).
 
 Y aquí es donde muerde la advertencia del `.env` que ya existe, pero al revés: como el valor nuevo vive en el default del código, un servidor que **no** tenga la variable escrita la toma sola con un `up -d`. Escribirla es lo que la congelaría. Solo tócala si necesitas otro valor, y nunca por encima de 41.
+
+**`PANEL_PORT` es la décima y sigue la misma regla: no la escribas.** Default 8000, y el `docker-compose.yml` usa el mismo valor para el bind interno y el mapeo al host, así que escribirla una vez en el `.env` mueve los dos extremos juntos. Solo tócala si el 8000 choca con otro servicio del servidor.
 
 **`ACTIVE_SWEEP_HOUR` está acoplado al horario de la fuente, no es gusto.** El barrido pregunta a la fuente qué títulos se movieron antes de pedir capítulos, y la fuente refresca esos datos una vez al día a las 01:30 UTC. Las 22:00 locales son 02:00 UTC, media hora después. Ponerlo a las 03:00 locales significa leer un índice de 5.5 horas y perder las publicaciones de esa ventana hasta el día siguiente: la garantía de ~24h pasa a ~29.5h. Si cambias esta hora, revisa la otra.
 
@@ -216,6 +220,8 @@ domingo 22:00    heartbeat      señal de vida
 domingo 22:00    onhold_sweep   on-hold + slugs pausados. No manda NADA
 al arrancar      catch-up       si el último barrido quedó viejo, corre uno ya
 ```
+
+**El panel no aparece en ese horario porque no es un job**: es el segundo contenedor (`manga-tracker-panel`), sirviendo en `http://<servidor>:8000` desde el arranque. Abrirlo y ver tu lista es su verificación completa; no escribe en `job_runs`, y su caída no toca la detección — para eso vive en contenedor aparte.
 
 Los dos del domingo se **encolan** detrás del barrido diario, no corren a su lado: un solo worker, cero concurrencia. En `job_runs` los verás con `started_at` escalonado, y eso es correcto.
 
