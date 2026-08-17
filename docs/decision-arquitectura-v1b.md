@@ -1,6 +1,8 @@
 # Decisión de arquitectura: dónde vive el panel de V1b
 
-Versión 1.0 — 2026-08-04. Documento de decisión. Depende de `one-pager-v1a.md` (v1.12) y `spec-modelo-de-datos.md` (v1.8).
+Versión 1.1 — 2026-08-17. Documento de decisión. Depende de `one-pager-v1a.md` (v1.13) y `spec-modelo-de-datos.md` (v1.8).
+
+Cambios vs 1.0: se corrige la fecha de cumplimiento de los cuatro criterios de V1a en "Pendientes abiertos" — decía 2026-08-04, que es la fecha de este documento, pero el criterio 2 (el ciclo dominical completo corrido solo) se verificó contra `job_runs` recién el **2026-08-10**, que es la fecha que registra `one-pager-v1a.md` desde su v1.12. No es cosmético: esa fecha arranca el plazo de 1-2 semanas de uso real antes de abrir la spec de V1b. Pin de `one-pager-v1a.md` actualizado a v1.13.
 
 No es una spec del panel: es la decisión de **dónde y con qué** se monta, tomada antes de escribir esa spec para que no la arrastre. El alcance funcional de V1b sigue en el one-pager y su spec no está abierta todavía.
 
@@ -65,6 +67,6 @@ El `Dockerfile` gana una etapa de build con Node que produce `dist/` y lo copia 
 
 ## Pendientes abiertos
 
-- La spec funcional de V1b no está escrita. El one-pager pide 1-2 semanas de uso real tras cerrar los cuatro criterios de V1a, cumplidos el 2026-08-04.
+- La spec funcional de V1b no está escrita. El one-pager pide 1-2 semanas de uso real tras cerrar los cuatro criterios de V1a, cumplidos el 2026-08-10 — el criterio 2, el ciclo dominical completo corrido solo, se verificó contra `job_runs` ese día.
 - El framework Python de la API (FastAPI o Flask) no está decidido; es decisión de la spec de V1b, no de este documento.
 - Autenticación: sin decidir. Monousuario en LAN, así que probablemente ninguna, pero eso se declara explícitamente ahí y no se asume aquí.

@@ -1,8 +1,26 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.4 — 2026-08-08. Documento operativo. Depende de `one-pager-v1a.md` (v1.12), `spec-seed-manual.md` (v2.4) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
+Versión 1.5 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.13), `spec-seed-manual.md` (v2.4) y `spec-cliente-fuente-descubrimiento.md` (v1.7).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
+
+## Resumen
+
+| Qué | Regla / decisión | Dónde |
+|---|---|---|
+| **Qué necesitas antes** | Token del bot (BotFather), chat id (`getUpdates`), tu CSV escrito a mano (**no se reconstruye**), Docker corriendo | §Antes de empezar |
+| **`.env`** | **8 variables escritas** + `FEED_CHECK_MINUTES`, la novena, que **no** se escribe: default 30 y nunca por encima de 41 (la ventana medida). Las tres horas del domingo iguales a propósito: se encolan, no se solapan | §1 |
+| **Datos** | La base y el seed van **fuera** del repo (`~/manga-tracker-data/`); en Linux, `chown 10001:10001` o el primer arranque muere | §2 |
+| **Seed** | El archivo se llama `seed.csv` (nunca `seed-plantilla.csv`, que Git commitea); validar con `--dry-run` antes de cargar; ~3 minutos para 16 títulos por los delays de 5-15s | §3, §5 |
+| **Arranque** | 6 pasos en orden: `test-telegram` → `--dry-run` → seed → `run-job active_sweep` → `run-job heartbeat` → `up -d`. **El seed va antes del `up -d`** o el barrido de arranque se gasta contra cero títulos | §5 |
+| **Build** | ~4 minutos la primera vez; verificar tzdata, usuario `appuser` y que `pytest` **no** viaje. Inspección con `--entrypoint` y el nombre del **servicio**, nunca un tag | §4 |
+| **Qué esperar** | **Silencio**, y es lo normal: `feed_check` cada 30 minutos, `active_sweep` a las 22:00 locales, domingo tres jobs encolados. Lee `items_checked`, no solo `status` | §6 |
+| **Respaldo** | `cp` de un archivo, más el `seed.csv` aparte. Sin dump ni credenciales — la contrapartida de SQLite | §7 |
+| **Si algo falla** | Tabla de 11 síntomas del primer arranque, en orden de probabilidad | §Fallos del primer arranque |
+
+Lo que este documento **no** cubre: subir un cambio y operar lo ya desplegado (`runbook-mantenimiento.md`), ni qué hace el sistema (las specs).
+
+Cambios en v1.5: se corrigen las dos menciones que decían que `feed_check` corre **cada hora** — el horario prometido del §6 y la verificación de vida — cuando la propia v1.4 había bajado el intervalo a 30 minutos: el cambio entró al `.env` y a su advertencia, pero no al horario que este mismo documento promete dos secciones más abajo. Y el documento gana el `## Resumen` inicial que exige la convención del `runbook-mantenimiento.md`, con lo que sale de su lista de deuda.
 
 Cambios en v1.4: entra `FEED_CHECK_MINUTES` (**nueve** variables en total), el intervalo del feed pasa de 60 a 30 minutos, y se advierte que en un servidor ya configurado esta variable **no** hace falta agregarla al `.env` — el default del código ya trae el valor nuevo. Es la única de las nueve donde no escribirla es lo correcto.
 
@@ -192,7 +210,7 @@ Si el paso 3 "tarda", eso es correcto: los delays de 5-15 segundos son la polít
 Si el seed acaba de fijar el último capítulo de cada título, no hay nada nuevo que detectar, así que no te llega nada hasta que la fuente publique. El primer aviso real puede tardar horas o días.
 
 ```
-cada hora        feed_check     1 request. Oportunista, no garantiza nada
+cada 30 min      feed_check     1 request. Oportunista, no garantiza nada
 22:00 local      active_sweep   pregunta a la fuente qué se movió y pide solo eso
 domingo 22:00    heartbeat      señal de vida
 domingo 22:00    onhold_sweep   on-hold + slugs pausados. No manda NADA
@@ -216,7 +234,7 @@ Si el servidor no tiene `sqlite3` instalado, el mismo query sale por el contened
 docker compose run --rm --entrypoint python manga-tracker -c "import sqlite3;[print(r) for r in sqlite3.connect('data/manga-tracker.db').execute('select job_name,status,items_checked,updates_found,started_at,finished_at from job_runs order by id desc limit 5')]"
 ```
 
-`feed_check` corre cada hora, así que debe aparecer una fila nueva dentro de la hora. Si no aparece, ahí sí hay algo que investigar.
+`feed_check` corre cada 30 minutos, así que debe aparecer una fila nueva dentro de la media hora. Si no aparece, ahí sí hay algo que investigar.
 
 **Lee `items_checked`, no solo `status`.** Un barrido con `items_checked = 0` cierra en `ok` y no significa nada: no revisó ningún título. Y `finished_at` menos `started_at` te da la duración real — dieciséis títulos son unos tres minutos, así que un barrido con duración cero revisó cero.
 

@@ -14,10 +14,10 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 |---|---|
 | Fase 0 — diseño | ✅ el paquete de `docs/` está completo |
 | Fase corazón — esquema, seed, cliente, detección, digest, Docker | ✅ desplegada; primera notificación real el 30 de julio |
-| Fase 2 — aviso de slug muerto + `onhold_sweep` | ✅ completa. El aviso lleva desplegado desde el arranque; el barrido semanal entra en el próximo redespliegue y ya tiene población: el import dejó 72 bookmarks en `on_hold` donde había cero |
+| Fase 2 — aviso de slug muerto + `onhold_sweep` | ✅ completa. El aviso lleva desplegado desde el arranque, y el barrido semanal corrió su primer ciclo completo sin intervención el domingo 2026-08-09 (141 mapeos, 6 actualizaciones silenciosas, 0 mensajes). Su población la dejó el import: 72 bookmarks en `on_hold` donde había cero |
 | Fase 3 — import de Kitsu | ✅ corrió contra la base real |
 
-Criterio de terminado de V1a: los cuatro puntos del one-pager. Los cuatro están cubiertos; el 2 se marca en el redespliegue que suba el `onhold_sweep` al mini-PC, que es lo único que falta y no es código.
+Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. Lo que sigue son 1-2 semanas de uso real antes de abrir la spec de V1b, no features nuevas.
 
 ## Cómo funciona (resumen)
 
@@ -30,7 +30,7 @@ Detección en tres velocidades, todas secuenciales y sin concurrencia:
 
 | Mecanismo | Frecuencia | Población | Rol |
 |---|---|---|---|
-| `feed_check` | Cada hora | Lo que aparezca en el feed del sitio | Oportunista: baja la latencia cuando alcanza. No garantiza nada (la ventana del feed son ~41 min, medidos). |
+| `feed_check` | Cada 30 min (`FEED_CHECK_MINUTES`) | Lo que aparezca en el feed del sitio | Oportunista: baja la latencia cuando alcanza. No garantiza nada (la ventana del feed son ~41 min, medidos). |
 | `active_sweep` | Diario | Mis lecturas activas (89 tras el import), menos las pausadas por slug muerto | **Mecanismo principal.** Garantiza latencia máxima ~24 h. Pregunta primero a la fuente qué títulos se movieron. |
 | `onhold_sweep` | Semanal (domingo) | On-hold (72), **más** todo mapeo pausado por slug muerto | Actualiza en silencio; **nunca envía nada**. Es la única vía de reintento de un slug pausado. |
 
