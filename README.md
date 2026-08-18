@@ -74,6 +74,7 @@ Runbooks operativos:
 
 - **`runbook-deploy.md`** — qué setear al montar un servidor nuevo, la secuencia de arranque en orden, y la tabla de fallos del primer despliegue.
 - **`runbook-mantenimiento.md`** — el ciclo de un cambio hasta producción, cómo verificar que el sistema vive, y qué hacer cuando un slug deja de responder.
+- **`runbook-desarrollo-local.md`** — cómo probar en tu máquina contra una copia de la base, sin tocar producción y sin que salga un solo mensaje a Telegram.
 
 Documentos de apoyo:
 
