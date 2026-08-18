@@ -9,7 +9,13 @@ npm install        install dependencies (once, and after lockfile changes)
 npm run dev        dev server with hot reload, proxies /api
 npm run build      typecheck (tsc --noEmit) + production build into dist/
 npm run preview    serve the production build locally
+npm test           run the component tests once (Vitest + Testing Library)
+npm run test:watch run the tests in watch mode
 ```
+
+## Tests
+
+Vitest with jsdom and React Testing Library; setup in `src/test/setup.ts` (jest-dom matchers), shared fixtures in `src/test/fixtures.ts`. Tests live next to their components (`*.test.tsx`) and are covered by `tsc --noEmit` (same tsconfig). They pin the wire contract the API actually speaks: `progress_is_approx` is a JSON boolean, `last_chapter_read`/`behind` are nullable, and a blank inline-edit blur must not PATCH 0. Tests are not part of `npm run build`; run them separately.
 
 ## Dev proxy
 

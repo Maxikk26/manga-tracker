@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Dev proxy: `npm run dev` forwards /api to a locally running panel API,
@@ -11,5 +11,13 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8000",
     },
+  },
+  test: {
+    environment: "jsdom",
+    // globals gives Testing Library the afterEach hook it needs for
+    // automatic DOM cleanup between tests; test files still import
+    // describe/it/expect explicitly.
+    globals: true,
+    setupFiles: ["src/test/setup.ts"],
   },
 });

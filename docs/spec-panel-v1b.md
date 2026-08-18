@@ -23,6 +23,7 @@ Define el alcance funcional del panel: qué pantallas, qué endpoints, en qué o
 - **Puerto**: `PANEL_PORT`, default `8000`, publicado en `docker-compose.yml` hacia la LAN. Décima variable de entorno; como `FEED_CHECK_MINUTES`, en un servidor ya configurado no hace falta escribirla.
 - **Sin autenticación**: el panel escucha en la LAN de casa y nada lo publica fuera. El día que un túnel lo exponga, la autenticación entra **antes** que el túnel — pendiente declarado, no deuda oculta.
 - **Estáticos**: la API monta `frontend/dist/` en `/`; los endpoints viven bajo `/api/`. Sin CORS porque no hay segundo origen.
+- **Testing de UI** (decisión del dueño, 2026-08-17: "siempre hacer testing"): **Vitest + React Testing Library desde la fase 1** — tests de componente que fijan el contrato de cable (booleanos, nulls, el blur vacío), la clase exacta de defecto que la verificación SDD encontró dos veces. Un **smoke E2E con Playwright entra en la fase 2**: levantar el sistema real, editar un progreso desde el navegador y verificar la fila en la base. Cada guardián nuevo se rompe a propósito antes de confiar en él, como manda el runbook.
 - **Timestamps**: la API entrega UTC tal como está en la base y el frontend convierte a `America/Caracas` al mostrar — con una excepción dura: las **agregaciones por día calendario** (heatmap) aplican la zona **antes** de agrupar, en el backend, o una lectura de las 23:00 cae en el día equivocado. Es la regla de `spec-modelo-de-datos.md` y aquí es donde por fin muerde.
 
 ## La frontera, extendida
@@ -93,7 +94,7 @@ Cada fase es **una entrega** (rama, PR, deploy) con su criterio verificable. Nad
 | Fase | Contenido | Criterio de terminado |
 |---|---|---|
 | **1 — corazón** | FastAPI + uvicorn en su propio contenedor (`manga-tracker-panel` en el compose, scheduler intacto), `GET/PATCH bookmarks`, frontend con la pantalla de lista, etapa Node en el Dockerfile, regla direccional probada con violación inyectada | Una edición real de progreso hecha desde el navegador del teléfono/laptop aparece en `reading_history` con `origin='panel'`, y el digest siguiente usa el valor nuevo |
-| **2 — historial** | Los dos endpoints de lectura y las vistas de heatmap y por-manga | El heatmap muestra las lecturas reales acumuladas desde la fase 1, agrupadas en día local correcto (verificado con una lectura nocturna) |
+| **2 — historial** | Los dos endpoints de lectura y las vistas de heatmap y por-manga, más el smoke E2E con Playwright y el test de regresión pendiente (editar progreso de un manga en estado terminal) | El heatmap muestra las lecturas reales acumuladas desde la fase 1, agrupadas en día local correcto (verificado con una lectura nocturna) |
 | **3 — alta** | `POST /api/mangas` vía `catalogue` + formulario | Un manga agregado desde el panel queda con mapeo válido y entra al barrido diario siguiente sin intervención |
 | **4 — extras** | Migración 2 + `import-scores` + `cache-covers` + portadas y scores en la lista | Scores del export visibles; portadas cacheadas sirviéndose del disco; `user_version=2` en producción con respaldo previo |
 

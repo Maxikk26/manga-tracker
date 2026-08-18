@@ -20,7 +20,12 @@ export function InlineNumberEdit({ value, prefix, disabled, onCommit }: Props) {
   const cancelledRef = useRef(false);
 
   useEffect(() => {
-    if (editing) inputRef.current?.select();
+    if (editing) {
+      // focus before select: without it the editor never holds focus, so the
+      // blur-commit path can never fire. Found by the component tests.
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
   }, [editing]);
 
   function startEditing() {
