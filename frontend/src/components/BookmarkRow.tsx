@@ -17,7 +17,7 @@ export function BookmarkRow({
   onChangeStatus,
 }: Props) {
   const approxMarker =
-    bookmark.progress_is_approx === 1 ? (
+    bookmark.progress_is_approx ? (
       <span
         className="approx-marker"
         title="Progreso aproximado: viene del import de Kitsu, no de una lectura confirmada"
@@ -30,7 +30,7 @@ export function BookmarkRow({
     <tr className={saving ? "row-saving" : undefined}>
       <td className="col-title">
         <span className="title-text">{bookmark.title}</span>
-        {bookmark.behind > 0 && (
+        {bookmark.behind !== null && bookmark.behind > 0 && (
           <span className="behind-badge">
             {bookmark.behind === 1
               ? "Vas atrasado 1 capítulo"

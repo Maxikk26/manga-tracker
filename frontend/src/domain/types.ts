@@ -13,12 +13,12 @@ export interface Bookmark {
   manga_id: number;
   title: string;
   status: BookmarkStatus;
-  last_chapter_read: number;
-  progress_is_approx: 0 | 1;
+  last_chapter_read: number | null;
+  progress_is_approx: boolean;
   latest_chapter_num: number | null;
   latest_chapter_url: string | null;
   latest_chapter_at: string | null;
-  behind: number;
+  behind: number | null;
   last_read_at: string | null;
 }
 

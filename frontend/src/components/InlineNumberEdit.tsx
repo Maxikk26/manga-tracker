@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface Props {
-  value: number;
+  /** null = never read; the schema allows it and the seed/import produce it. */
+  value: number | null;
   /** Rendered next to the number in display mode (e.g. the "~" marker). */
   prefix?: ReactNode;
   disabled: boolean;
@@ -25,13 +26,14 @@ export function InlineNumberEdit({ value, prefix, disabled, onCommit }: Props) {
   function startEditing() {
     if (disabled) return;
     cancelledRef.current = false;
-    setDraft(String(value));
+    setDraft(value === null ? "" : String(value));
     setEditing(true);
   }
 
   function commit() {
     setEditing(false);
     if (cancelledRef.current) return;
+    if (draft.trim() === "") return; // Number("") is 0 — a blank blur must not PATCH 0.
     const parsed = Number(draft);
     if (!Number.isFinite(parsed) || parsed < 0) return;
     if (parsed === value) return;
@@ -48,7 +50,7 @@ export function InlineNumberEdit({ value, prefix, disabled, onCommit }: Props) {
         title="Haz clic para editar"
       >
         {prefix}
-        {value}
+        {value ?? "—"}
       </button>
     );
   }
