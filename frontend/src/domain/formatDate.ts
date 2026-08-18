@@ -18,7 +18,7 @@ function parseUtc(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-const formatter = new Intl.DateTimeFormat("es-VE", {
+const dateTimeFormatter = new Intl.DateTimeFormat("es-VE", {
   day: "2-digit",
   month: "short",
   year: "numeric",
@@ -26,8 +26,26 @@ const formatter = new Intl.DateTimeFormat("es-VE", {
   minute: "2-digit",
 });
 
+const dateFormatter = new Intl.DateTimeFormat("es-VE", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
 export function formatLocalDateTime(value: string | null): string {
   if (!value) return "—";
   const date = parseUtc(value);
-  return date ? formatter.format(date) : "—";
+  return date ? dateTimeFormatter.format(date) : "—";
+}
+
+/**
+ * Calendar day only, for columns where the clock time is noise.
+ *
+ * The timezone conversion still happens before the day is read, so a 23:00
+ * UTC read does not land on the previous local day.
+ */
+export function formatLocalDate(value: string | null): string {
+  if (!value) return "—";
+  const date = parseUtc(value);
+  return date ? dateFormatter.format(date) : "—";
 }

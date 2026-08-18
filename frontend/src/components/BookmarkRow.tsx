@@ -1,6 +1,6 @@
 import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "../domain/types";
 import { STATUS_LABELS } from "../domain/statusLabels";
-import { formatLocalDateTime } from "../domain/formatDate";
+import { formatLocalDate, formatLocalDateTime } from "../domain/formatDate";
 import { InlineNumberEdit } from "./InlineNumberEdit";
 
 interface Props {
@@ -83,7 +83,7 @@ export function BookmarkRow({
         )}
       </td>
       <td className="col-read-at muted">
-        {formatLocalDateTime(bookmark.last_read_at)}
+        {formatLocalDate(bookmark.last_read_at)}
       </td>
     </tr>
   );
