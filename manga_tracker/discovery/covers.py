@@ -25,9 +25,9 @@ because each one cost a real request.
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
 
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
+from manga_tracker.storage.cover_cache import cache_path, find_cached
 from manga_tracker.storage.db import connect
 from manga_tracker.storage.repositories import list_cover_candidates, set_manga_cover
 
@@ -36,33 +36,6 @@ logger = logging.getLogger(__name__)
 #: Terminal bookmarks consume no requests, ever. A cover for something dropped
 #: or completed buys nothing, and that rule is not negotiable per manga.
 DEFAULT_STATUSES = ("reading", "want_to_read", "on_hold")
-
-#: Lives inside the persisted data volume, beside the database, so a cover
-#: survives a container rebuild exactly like the rows that reference it.
-CACHE_DIRNAME = "covers"
-
-_ALLOWED_SUFFIXES = {".webp", ".jpg", ".jpeg", ".png", ".gif"}
-
-
-def cache_path(cache_dir: Path, manga_id: int, cover_url: str) -> Path:
-    """Cache file for one manga, named by id rather than by title.
-
-    The id is stable and filesystem-safe; titles contain slashes, quotes and
-    colons. The extension comes from the URL only after being checked against a
-    fixed set, so a hostile or malformed URL cannot choose the name.
-    """
-    suffix = Path(urlparse(cover_url).path).suffix.lower()
-    if suffix not in _ALLOWED_SUFFIXES:
-        suffix = ".jpg"
-    return cache_dir / f"{manga_id}{suffix}"
-
-
-def find_cached(cache_dir: Path, manga_id: int) -> Path | None:
-    for suffix in sorted(_ALLOWED_SUFFIXES):
-        candidate = cache_dir / f"{manga_id}{suffix}"
-        if candidate.exists():
-            return candidate
-    return None
 
 
 @dataclass

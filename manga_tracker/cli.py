@@ -22,12 +22,7 @@ from manga_tracker.catalogue.kitsu import KitsuCatalogue
 from manga_tracker.catalogue.transport import UrllibJsonTransport
 from manga_tracker.config import AppConfig, load_config, require_telegram
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
-from manga_tracker.discovery.covers import (
-    CACHE_DIRNAME,
-    DEFAULT_STATUSES,
-    backfill_covers,
-    find_cached,
-)
+from manga_tracker.discovery.covers import DEFAULT_STATUSES, backfill_covers
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
 from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
@@ -41,6 +36,7 @@ from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
+from manga_tracker.storage.cover_cache import cache_dir_for, find_cached
 from manga_tracker.storage.db import connect, ensure_site
 from manga_tracker.storage.repositories import BOOKMARK_STATUSES, list_cover_candidates
 from manga_tracker.web.app import create_app
@@ -177,7 +173,7 @@ def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
     population is to see it before spending a single request on it.
     """
     statuses = tuple(args.statuses) if args.statuses else DEFAULT_STATUSES
-    cache_dir = Path(config.db_path).resolve().parent / CACHE_DIRNAME
+    cache_dir = cache_dir_for(config.db_path)
 
     conn = connect(config.db_path)
     try:

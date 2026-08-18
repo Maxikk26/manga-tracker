@@ -16,10 +16,12 @@ from enum import Enum
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from manga_tracker.storage.cover_cache import cache_dir_for, find_cached, media_type_for
 from manga_tracker.storage.db import connect
 from manga_tracker.storage.repositories import (
     BOOKMARK_STATUSES,
@@ -84,6 +86,7 @@ def create_app(db_path: str, frontend_dist: Path | None = None) -> FastAPI:
     """Build the panel app against one database path. `frontend_dist` exists
     for tests; production always means the checked-in build location."""
     dist = FRONTEND_DIST if frontend_dist is None else frontend_dist
+    cache_dir = cache_dir_for(db_path)
     app = FastAPI(title="manga-tracker panel")
 
     @app.get("/api/bookmarks")
@@ -111,6 +114,36 @@ def create_app(db_path: str, frontend_dist: Path | None = None) -> FastAPI:
             return get_panel_bookmark(conn, bookmark_id)
         finally:
             conn.close()
+
+    @app.get("/api/covers/{manga_id}")
+    def get_cover(manga_id: int) -> FileResponse:
+        """Serve a cached cover image.
+
+        The panel serves these itself instead of pointing an <img src> at the
+        stored `cover_url`, and that is not a preference: the source's image
+        hosts answer 403 to a request that does not carry their own Referer, so
+        a hotlinked cover renders broken. Serving locally also means opening the
+        panel costs a third party nothing, and a cover survives the remote
+        rotating or deleting the file.
+
+        404 when the image was never cached. That is an ordinary state, not an
+        error — a manga can be listed long before `cache-covers` reaches it —
+        so the frontend is expected to have a fallback rather than to assume
+        this always answers.
+        """
+        path = find_cached(cache_dir, manga_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"No cached cover for manga {manga_id}")
+        # A cover changes only when someone re-caches it deliberately, and the
+        # grid asks for every visible one on each load. A day of freshness
+        # costs nothing and takes ~18 requests per visit down to zero;
+        # FileResponse still sends etag/last-modified, so a changed file is
+        # picked up on the next revalidation rather than being pinned forever.
+        return FileResponse(
+            path,
+            media_type=media_type_for(path),
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     if dist.is_dir():
         app.mount("/", _SPAStaticFiles(directory=dist, html=True), name="frontend")

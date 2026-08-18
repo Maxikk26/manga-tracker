@@ -10,11 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from manga_tracker.discovery.covers import (
-    backfill_covers,
-    cache_path,
-    find_cached,
-)
+from manga_tracker.discovery.covers import backfill_covers
+from manga_tracker.storage.cover_cache import cache_path, find_cached
 from manga_tracker.sources.contracts import NotFound, Response, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.storage.db import connect
