@@ -53,13 +53,25 @@ REFERER = "https://www.manganato.gg/manga/one-piece"
 
 
 class FakeCurlResponse:
-    """Stand-in for what curl_cffi's `get` returns: the three attributes
-    `transport.py` reads, and nothing else."""
+    """Stand-in for what curl_cffi's `get` returns: the four attributes
+    `transport.py` reads, and nothing else.
 
-    def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+    `content` defaults to the UTF-8 encoding of `text` rather than to empty, so
+    a fake never claims a body the real object would have carried — the cover
+    cache reads bytes, and a silently empty one would look like a 0-byte image.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+        content: bytes | None = None,
+    ):
         self.status_code = status_code
         self.text = text
         self.headers = headers if headers is not None else {}
+        self.content = content if content is not None else text.encode("utf-8")
 
 
 def _scripted_curl_get(*outcomes):

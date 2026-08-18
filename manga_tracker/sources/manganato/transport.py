@@ -44,5 +44,7 @@ class CurlCffiTransport:
             if attempt == 1 and raw.status_code in TRANSIENT_STATUS_CODES:
                 self._sleeper(RETRY_WAIT_SECONDS)
                 continue
-            return Response(status=raw.status_code, text=raw.text, headers=dict(raw.headers))
+            return Response(
+                status=raw.status_code, text=raw.text, headers=dict(raw.headers), content=raw.content
+            )
         raise AssertionError("unreachable")  # pragma: no cover

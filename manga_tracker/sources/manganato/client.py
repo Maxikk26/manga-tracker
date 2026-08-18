@@ -76,6 +76,32 @@ class ManganatoClient:
             raise NotFound(f"manga details 404 for slug {slug!r}")
         return parse_manga_details(response.text)
 
+    def fetch_cover(self, cover_url: str) -> bytes:
+        """Download a cover image.
+
+        Source knowledge, and that is the whole reason this lives here: the
+        image hosts manganato points at (img-r2.2xstorage.com,
+        storage.waitst.com) answer 403 to a request that does not carry a
+        manganato `Referer`, and 200 to one that does — measured, not assumed.
+        A panel pointing an <img src> straight at those URLs therefore shows a
+        broken image for every cover, which is exactly the kind of failure that
+        ships silently.
+
+        The header is sent unconditionally. Hosts that do not check it, such as
+        the Kitsu CDN the importer stored covers from, ignore it.
+        """
+        response = self._transport.get(
+            cover_url, headers={"Referer": f"{BASE_URL}/"}, timeout=DEFAULT_TIMEOUT
+        )
+        if response.status == 404:
+            raise NotFound(f"cover 404 at {cover_url!r}")
+        if response.status != 200 or not response.content:
+            raise Unexpected(
+                f"cover request to {cover_url!r} returned status {response.status} "
+                f"with {len(response.content)} byte(s)"
+            )
+        return response.content
+
     def fetch_chapters(self, slug: str, *, limit: int = 50) -> list[Chapter]:
         """CD Operacion 2: GET the JSON chapters endpoint with an organic
         Referer (the manga's own ficha page). No pagination — one request at
