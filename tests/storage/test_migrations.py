@@ -132,3 +132,103 @@ def test_the_new_columns_are_absent_from_the_stripped_fixture(column):
     migrate a database that needed no migration."""
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
     assert f"    {column} INTEGER,\n" in sql
+
+
+# --- migration 2: bookmarks.status_changed_at ----------------------------------
+
+MIGRATION_2_LINE = "    status_changed_at TEXT,\n"
+
+
+def _build_pre_migration_2_database(path) -> None:
+    """A database that already ran migration 1 but predates migration 2.
+
+    This is the shape production is in right now: user_version 1, bookmarks
+    without status_changed_at, and 229 rows that must survive.
+    """
+    sql = SCHEMA_PATH.read_text(encoding="utf-8").replace(MIGRATION_2_LINE, "")
+    assert "status_changed_at" not in sql, "the strip did not take"
+
+    conn = sqlite3.connect(path)
+    conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute(
+        "INSERT INTO mangas (id, title, created_at, updated_at) VALUES (1, 'Berserk', ?, ?)",
+        (SEED_AT, SEED_AT),
+    )
+    conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, origin, created_at, "
+        "updated_at) VALUES (1, 'on_hold', 364.0, 'kitsu_import', ?, ?)",
+        (SEED_AT, SEED_AT),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_an_existing_database_gains_status_changed_at_and_keeps_its_bookmarks(tmp_path):
+    path = tmp_path / "v1.db"
+    _build_pre_migration_2_database(path)
+
+    with sqlite3.connect(path) as before:
+        assert "status_changed_at" not in _columns(before, "bookmarks"), "fixture is not pre-migration"
+
+    conn = connect(str(path))
+
+    assert "status_changed_at" in _columns(conn, "bookmarks")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    row = conn.execute(
+        "SELECT status, last_chapter_read, status_changed_at FROM bookmarks"
+    ).fetchone()
+    assert row == ("on_hold", 364.0, None)
+
+
+def test_the_migration_does_not_invent_a_pause_date(tmp_path):
+    """The whole point of the column, asserted rather than assumed.
+
+    updated_at is present and tempting, and copying it would make every one of
+    the 141 historical on_hold rows claim it was paused on the day of the Kitsu
+    import. Unknown has to stay unknown.
+    """
+    path = tmp_path / "v1.db"
+    _build_pre_migration_2_database(path)
+
+    conn = connect(str(path))
+
+    updated_at, status_changed_at = conn.execute(
+        "SELECT updated_at, status_changed_at FROM bookmarks"
+    ).fetchone()
+    assert updated_at == SEED_AT
+    assert status_changed_at is None
+
+
+def test_a_fresh_database_is_born_with_status_changed_at(tmp_path):
+    conn = connect(str(tmp_path / "new.db"))
+
+    assert "status_changed_at" in _columns(conn, "bookmarks")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_migrating_from_zero_applies_both_migrations_in_order(tmp_path):
+    """A database older than both. `range(user_version + 1, SCHEMA_VERSION + 1)`
+    has to walk them oldest first, not skip to the newest."""
+    sql = SCHEMA_PATH.read_text(encoding="utf-8").replace(MIGRATION_2_LINE, "")
+    for column in ADDED_COLUMNS:
+        sql = sql.replace(f"    {column} INTEGER,\n", "")
+
+    path = tmp_path / "ancient.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
+
+    migrated = connect(str(path))
+
+    assert set(ADDED_COLUMNS) <= _columns(migrated, "job_runs")
+    assert "status_changed_at" in _columns(migrated, "bookmarks")
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_status_changed_at_is_declared_on_its_own_line():
+    """Same fixture guard as the one above it: the strip is textual, so the
+    declaration it strips has to keep existing verbatim."""
+    assert MIGRATION_2_LINE in SCHEMA_PATH.read_text(encoding="utf-8")

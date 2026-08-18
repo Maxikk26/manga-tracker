@@ -275,7 +275,8 @@ def write_seed_backfill(conn, existing, title, site_id, slug, url, chapters, sta
 
 _PANEL_BOOKMARK_SELECT = (
     "SELECT b.id, b.manga_id, m.title, b.status, b.last_chapter_read, b.progress_is_approx, "
-    "ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at "
+    "ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at, "
+    "b.status_changed_at "
     "FROM bookmarks b JOIN mangas m ON m.id = b.manga_id "
     # LEFT, not INNER: a manga can exist without a source mapping (a pending
     # Kitsu entry whose url was never pasted), and its bookmark must still
@@ -286,7 +287,8 @@ _PANEL_BOOKMARK_SELECT = (
 
 def _panel_bookmark_row(row) -> dict:
     (bookmark_id, manga_id, title, status, last_chapter_read, progress_is_approx,
-     latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at) = row
+     latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at,
+     status_changed_at) = row
     # NULL on either side means "behind is unknowable", not zero: a bookmark
     # with no recorded progress is not magically caught up.
     behind = (
@@ -306,6 +308,7 @@ def _panel_bookmark_row(row) -> dict:
         "latest_chapter_at": latest_chapter_at,
         "behind": behind,
         "last_read_at": last_read_at,
+        "status_changed_at": status_changed_at,
     }
 
 
@@ -349,11 +352,12 @@ def update_panel_bookmark(
     """
     with transaction(conn):
         row = conn.execute(
-            "SELECT manga_id, last_chapter_read FROM bookmarks WHERE id = ?", (bookmark_id,)
+            "SELECT manga_id, last_chapter_read, status FROM bookmarks WHERE id = ?",
+            (bookmark_id,),
         ).fetchone()
         if row is None:
             return False
-        manga_id, current_progress = row
+        manga_id, current_progress, current_status = row
 
         assignments, params = ["updated_at = ?"], [now]
         if last_chapter_read is not UNSET:
@@ -362,6 +366,12 @@ def update_panel_bookmark(
         if status is not UNSET:
             assignments.append("status = ?")
             params.append(status)
+            # Only a real transition is a transition. Re-picking the current
+            # status in the dropdown must not reset the date, or "paused on"
+            # would silently become "last time the select was touched".
+            if status != current_status:
+                assignments.append("status_changed_at = ?")
+                params.append(now)
 
         # Mirrors the trigger's WHEN clause exactly: NEW IS NOT OLD AND NEW IS
         # NOT NULL. Any mismatch corrupts: correcting when the trigger stayed

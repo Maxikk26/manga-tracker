@@ -21,6 +21,7 @@ NOW = "2026-08-17T12:00:00Z"
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
     "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind", "last_read_at",
+    "status_changed_at",
 }
 
 
@@ -209,6 +210,54 @@ def test_patch_status_only_creates_no_event_and_rewrites_no_origin(client, db_pa
     assert body["status"] == "on_hold"
     assert body["last_chapter_read"] == 20.0  # untouched
     assert _history(conn, manga_id) == [(20.0, 10.0, "manual")]  # still exactly one, still manual
+
+
+def _status_changed_at(conn, bookmark_id):
+    return conn.execute(
+        "SELECT status_changed_at FROM bookmarks WHERE id = ?", (bookmark_id,)
+    ).fetchone()[0]
+
+
+def test_patch_status_stamps_status_changed_at(client, db_path):
+    """The column exists so "En pausa" can be ordered by when a manga was
+    actually paused. Nothing else in the schema can answer that question."""
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece")
+    assert _status_changed_at(conn, bookmark_id) is None  # seeded rows know nothing
+
+    body = client.patch(f"/api/bookmarks/{bookmark_id}", json={"status": "on_hold"}).json()
+
+    assert body["status"] == "on_hold"
+    stamped = _status_changed_at(conn, bookmark_id)
+    assert stamped is not None
+    assert stamped.endswith("Z"), "must match the fixed-width UTC format every writer emits"
+    assert body["status_changed_at"] == stamped  # and it reaches the wire
+
+
+def test_patch_resubmitting_the_same_status_does_not_move_the_date(client, db_path):
+    """Re-picking the current value in the dropdown is not a transition. If it
+    stamped anyway, "paused on" would decay into "last time the select was
+    touched" — and the ordering it exists to feed would be noise."""
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece", status="on_hold")
+    conn.execute(
+        "UPDATE bookmarks SET status_changed_at = ? WHERE id = ?", ("2026-08-01T00:00:00Z", bookmark_id)
+    )
+    conn.commit()
+
+    assert client.patch(f"/api/bookmarks/{bookmark_id}", json={"status": "on_hold"}).status_code == 200
+
+    assert _status_changed_at(conn, bookmark_id) == "2026-08-01T00:00:00Z"
+
+
+def test_patch_progress_alone_does_not_stamp_status_changed_at(client, db_path):
+    """Reading a chapter is not a status change."""
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece", last_chapter_read=10.0)
+
+    assert client.patch(f"/api/bookmarks/{bookmark_id}", json={"last_chapter_read": 11}).status_code == 200
+
+    assert _status_changed_at(conn, bookmark_id) is None
 
 
 def test_patch_with_the_unchanged_value_creates_no_event(client, db_path):
