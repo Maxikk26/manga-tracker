@@ -22,6 +22,9 @@ DIRECTIONAL_RULES = {
     # day it does, swapping Kitsu for AniList stops being a one-line change in
     # cli.py (design D8, IMP-13).
     "importer": {"catalogue.kitsu", "catalogue.transport", "sources.manganato"},
+    # The panel shows and edits; it never detects or notifies. web -> storage
+    # is the only arrow (decision-arquitectura-v1b.md, spec-panel-v1b.md).
+    "web": {"sources.manganato", "notifier.telegram"},
 }
 
 # third-party module -> the file(s) (relative to manga_tracker/) allowed to import it
@@ -230,6 +233,9 @@ def test_boundary_check_flags_an_injected_violation(tmp_path):
         # ... and the importer may know the contracts, never the concrete
         # behind them (IMP-13).
         "importer/probe.py": "import manga_tracker.catalogue.kitsu\n",
+        # ... and the panel shows and edits, never notifies (spec-panel-v1b.md:
+        # every new directional rule is proven by injecting a violation).
+        "web/probe.py": "from manga_tracker.notifier.telegram import TelegramSender\n",
         # Confinement: manganato's anti-bot transport stays in manganato ...
         "catalogue/probe2.py": "import curl_cffi\n",
         # ... and widening `urllib.request` to two homes must not open it to a
@@ -250,6 +256,7 @@ def test_boundary_check_flags_an_injected_violation(tmp_path):
     assert _directional_violations(root) == [
         "catalogue/probe.py imports forbidden module 'manga_tracker.storage'",
         "importer/probe.py imports forbidden module 'manga_tracker.catalogue.kitsu'",
+        "web/probe.py imports forbidden module 'manga_tracker.notifier.telegram'",
     ]
     assert _confinement_violations(root) == [
         "catalogue/probe2.py imports confined module 'curl_cffi', "

@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.13), `spec-modelo-de-datos.md` (v1.8), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.8), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
 
 Cambios vs 1.6: **el intervalo del feed baja de 1 hora a 30 minutos** (`FEED_CHECK_MINUTES`, default 30). Lo fuerza producción, no revisión: entre el 4 y el 8 de agosto el feed no aportó ninguna detección sobre títulos activos y todas las notificaciones salieron del barrido de las 22:00. El intervalo de 1 hora **excedía la ventana de 41 minutos** que lo originó, así que perdía publicaciones de forma sistemática; con el volumen de la lista caído a ~1 capítulo diario, esa pérdida pasó de ser un tercio a ser todo. Detalle, evidencia y el retiro del piso de 1 hora en `medicion-ventana-feed.md` v1.2. Se agrega también el pin a ese documento, que faltaba pese a que fija un parámetro de esta spec.
 

@@ -16,13 +16,13 @@ Real commands — do not invent others:
 
 ```
 uv run pytest -q                 the suite; 330 tests as of 2026-08-04
-docker compose build             required when manga_tracker/, pyproject.toml or the Dockerfile change
+docker compose build             required when manga_tracker/, frontend/, pyproject.toml or the Dockerfile change
 docker compose up -d             the ONLY redeploy verb; `restart` does not recreate and silently keeps the old image
 ```
 
 What exists: `manga_tracker/` with `sources/manganato/`, `storage/`, `seed/`, `discovery/`, `notifier/`, `catalogue/`, `importer/`, plus `scheduler.py` and `cli.py`. Python 3.12 under `uv` with a committed lockfile, SQLite in a Docker volume, curl-cffi, APScheduler in-process, one container.
 
-**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The database holds 229 mangas and 229 bookmarks (227 from the Kitsu import plus two added by hand on 08-05). What follows is 1-2 weeks of real use before the V1b spec opens, per that same document — not new features.
+**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The database holds 229 mangas and 229 bookmarks (227 from the Kitsu import plus two added by hand on 08-05). **The V1b spec opened on 2026-08-17** (`spec-panel-v1b.md`), after the week of real use that gated it: a web panel in four delivery phases, with reading-progress editing as the core. FastAPI, no auth, same container.
 
 Two things this section got wrong for a week, because nobody updated it: it claimed there was no application code and no test tooling, long after both existed. **A stale statement here is expensive** — it is read at the start of every session and believed. When behaviour changes, this file changes with it.
 

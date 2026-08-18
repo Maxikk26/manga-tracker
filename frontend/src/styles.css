@@ -1,0 +1,237 @@
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --text: #1f2328;
+  --muted: #6b7280;
+  --border: #e2e4e8;
+  --accent: #2563eb;
+  --accent-soft: #eff6ff;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --warn: #92400e;
+  --warn-soft: #fef3c7;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.app-header h1 {
+  font-size: 1.35rem;
+  font-weight: 650;
+  margin: 0 0 1rem;
+}
+
+/* --- Status tabs --- */
+
+.status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.tab:hover {
+  border-color: var(--accent);
+}
+
+.tab-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tab-count {
+  margin-left: 0.4rem;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Table --- */
+
+.bookmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bookmark-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.bookmark-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.bookmark-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.bookmark-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.row-saving {
+  opacity: 0.55;
+}
+
+.col-title {
+  width: 42%;
+}
+
+.title-text {
+  font-weight: 550;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* --- Behind badge --- */
+
+.behind-badge {
+  display: inline-block;
+  margin-left: 0.55rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* --- Inline progress edit --- */
+
+.progress-display {
+  border: 1px dashed transparent;
+  background: none;
+  font: inherit;
+  color: inherit;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-display:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.progress-display:disabled {
+  cursor: default;
+}
+
+.progress-input {
+  width: 5.5rem;
+  font: inherit;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  outline: none;
+}
+
+.approx-marker {
+  color: var(--muted);
+  margin-right: 0.15rem;
+  cursor: help;
+}
+
+/* --- Status select --- */
+
+.status-select {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+}
+
+/* --- Link --- */
+
+.read-link {
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.read-link:hover {
+  text-decoration: underline;
+}
+
+/* --- States and errors --- */
+
+.empty-state {
+  color: var(--muted);
+  padding: 2rem 0;
+  text-align: center;
+}
+
+.error-panel {
+  text-align: center;
+  padding: 2rem 0;
+  color: var(--danger);
+}
+
+.retry-button {
+  margin-top: 0.5rem;
+  font: inherit;
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.retry-button:hover {
+  background: var(--danger-soft);
+}
+
+.error-banner {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}

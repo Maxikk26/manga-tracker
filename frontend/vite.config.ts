@@ -1,0 +1,23 @@
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+
+// Dev proxy: `npm run dev` forwards /api to a locally running panel API,
+// so the frontend can be developed against the real backend without CORS.
+// In production there is no proxy: the Python API serves dist/ and /api
+// from the same origin.
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      "/api": "http://localhost:8000",
+    },
+  },
+  test: {
+    environment: "jsdom",
+    // globals gives Testing Library the afterEach hook it needs for
+    // automatic DOM cleanup between tests; test files still import
+    // describe/it/expect explicitly.
+    globals: true,
+    setupFiles: ["src/test/setup.ts"],
+  },
+});
