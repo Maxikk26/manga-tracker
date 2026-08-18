@@ -3,6 +3,7 @@ import { ApiError, fetchBookmarks, patchBookmark } from "../api/bookmarks";
 import type { Bookmark, BookmarkStatus } from "../domain/types";
 import { StatusTabs } from "../components/StatusTabs";
 import { BookmarkTable } from "../components/BookmarkTable";
+import { sortBookmarksForTab } from "../domain/sortBookmarks";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -86,7 +87,11 @@ export function BookmarkListContainer() {
   }, [bookmarks]);
 
   const visible = useMemo(
-    () => bookmarks.filter((bookmark) => bookmark.status === activeStatus),
+    () =>
+      sortBookmarksForTab(
+        bookmarks.filter((bookmark) => bookmark.status === activeStatus),
+        activeStatus,
+      ),
     [bookmarks, activeStatus],
   );
 
