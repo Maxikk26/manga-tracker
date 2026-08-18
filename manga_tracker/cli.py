@@ -11,6 +11,7 @@ linea en cli.py"; the constructor in `_cmd_import_kitsu` is that line, and it
 is only true while no other module names the class."""
 
 import argparse
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -371,7 +372,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def soften_console_encoding(*streams) -> None:
+    """Make an unprintable character lossy instead of fatal.
+
+    Every command here prints manga titles, and a title is third-party text: it
+    can carry anything Unicode allows. A Windows console defaults to cp1252, so
+    `print()` on a title containing e.g. 'Ū' (U+016A) raises UnicodeEncodeError
+    and takes the whole process with it.
+
+    That is not theoretical. `cache-covers` lists its population BEFORE making
+    any request, so one such title killed a 145-image run at the listing stage,
+    before a single cover was fetched — a job that costs 25 minutes died
+    printing a name. The same trap sits in front of `seed`, `import-kitsu` and
+    every report that echoes a title.
+
+    Only the error handler changes, never the encoding: the console keeps
+    rendering what it can, and what it cannot becomes a replacement character.
+    Losing a glyph in a progress line is a cosmetic price; losing the run is
+    not. Streams that cannot be reconfigured (already-wrapped or redirected
+    ones) are left alone rather than replaced.
+    """
+    for stream in streams:
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError, ValueError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> int:
+    soften_console_encoding(sys.stdout, sys.stderr)
     args = build_parser().parse_args(argv)
     config = load_config()
     configure_logging(config.log_level)
