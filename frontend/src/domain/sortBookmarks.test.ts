@@ -7,6 +7,7 @@ function bookmark(
   title: string,
   last_read_at: string | null,
   status: BookmarkStatus = "reading",
+  status_changed_at: string | null = null,
 ): Bookmark {
   return {
     id,
@@ -20,7 +21,12 @@ function bookmark(
     latest_chapter_at: null,
     behind: null,
     last_read_at,
+    status_changed_at,
   };
+}
+
+function paused(id: number, title: string, status_changed_at: string | null): Bookmark {
+  return bookmark(id, title, null, "on_hold", status_changed_at);
 }
 
 const titlesOf = (list: readonly Bookmark[]) => list.map((b) => b.title);
@@ -85,13 +91,60 @@ describe("sortBookmarksForTab: reading", () => {
   });
 });
 
-describe("sortBookmarksForTab: other tabs", () => {
+describe("sortBookmarksForTab: on_hold", () => {
+  it("puts the most recently paused first", () => {
+    const sorted = sortBookmarksForTab(
+      [
+        paused(1, "Pausada hace tiempo", "2026-08-01T10:00:00Z"),
+        paused(2, "Pausada ayer", "2026-08-17T10:00:00Z"),
+      ],
+      "on_hold",
+    );
+    expect(titlesOf(sorted)).toEqual(["Pausada ayer", "Pausada hace tiempo"]);
+  });
+
+  it("sinks the rows whose pause date is unknown", () => {
+    // Production state: all 141 historical on_hold rows carry NULL, because
+    // migration 2 refused to invent a date for them.
+    const sorted = sortBookmarksForTab(
+      [paused(1, "Historica", null), paused(2, "Pausada hoy", "2026-08-17T10:00:00Z")],
+      "on_hold",
+    );
+    expect(titlesOf(sorted)).toEqual(["Pausada hoy", "Historica"]);
+  });
+
+  it("falls back to title order while every pause date is unknown", () => {
+    const sorted = sortBookmarksForTab(
+      [paused(1, "Charlie", null), paused(2, "Alfa", null), paused(3, "Bravo", null)],
+      "on_hold",
+    );
+    expect(titlesOf(sorted)).toEqual(["Alfa", "Bravo", "Charlie"]);
+  });
+
+  it("ignores last_read_at, which answers a different question", () => {
+    // A paused manga can have been read recently and paused long ago. The tab
+    // must order by the pause, not by the reading.
+    const sorted = sortBookmarksForTab(
+      [
+        bookmark(1, "Leida ayer, pausada hace meses", "2026-08-17T10:00:00Z", "on_hold", "2026-06-01T10:00:00Z"),
+        bookmark(2, "Leida hace meses, pausada ayer", "2026-06-01T10:00:00Z", "on_hold", "2026-08-17T10:00:00Z"),
+      ],
+      "on_hold",
+    );
+    expect(titlesOf(sorted)).toEqual([
+      "Leida hace meses, pausada ayer",
+      "Leida ayer, pausada hace meses",
+    ]);
+  });
+});
+
+describe("sortBookmarksForTab: browsed tabs", () => {
   it("keeps the API's title ordering untouched", () => {
     const input = [
-      bookmark(1, "Alfa", "2026-08-01T10:00:00Z", "on_hold"),
-      bookmark(2, "Bravo", "2026-08-17T10:00:00Z", "on_hold"),
+      bookmark(1, "Alfa", "2026-08-01T10:00:00Z", "completed"),
+      bookmark(2, "Bravo", "2026-08-17T10:00:00Z", "completed"),
     ];
-    expect(titlesOf(sortBookmarksForTab(input, "on_hold"))).toEqual(["Alfa", "Bravo"]);
+    expect(titlesOf(sortBookmarksForTab(input, "completed"))).toEqual(["Alfa", "Bravo"]);
   });
 
   it("never returns the caller's array", () => {
