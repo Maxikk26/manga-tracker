@@ -161,3 +161,65 @@ describe("sortBookmarksForTab: browsed tabs", () => {
     expect(titlesOf(input)).toEqual(["Vieja", "Reciente"]);
   });
 });
+
+describe("sortBookmarksForTab: reading puts what you owe first", () => {
+  const withBehind = (
+    id: number,
+    title: string,
+    behind: number | null,
+    last_read_at: string | null = null,
+  ): Bookmark => ({ ...bookmark(id, title, last_read_at), behind });
+
+  it("sinks the caught-up ones below everything pending", () => {
+    // The tab answers "what do I still have to read". A manga with nothing
+    // pending is not on that list, however recently it was read.
+    const sorted = sortBookmarksForTab(
+      [
+        withBehind(1, "Al dia, leido hoy", 0, "2026-08-19T10:00:00Z"),
+        withBehind(2, "Pendiente, leido hace meses", 5, "2026-06-01T10:00:00Z"),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual(["Pendiente, leido hace meses", "Al dia, leido hoy"]);
+  });
+
+  it("keeps the date ordering inside each group", () => {
+    const sorted = sortBookmarksForTab(
+      [
+        withBehind(1, "Al dia viejo", 0, "2026-06-01T10:00:00Z"),
+        withBehind(2, "Pendiente viejo", 3, "2026-06-01T10:00:00Z"),
+        withBehind(3, "Al dia reciente", 0, "2026-08-18T10:00:00Z"),
+        withBehind(4, "Pendiente reciente", 3, "2026-08-18T10:00:00Z"),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual([
+      "Pendiente reciente",
+      "Pendiente viejo",
+      "Al dia reciente",
+      "Al dia viejo",
+    ]);
+  });
+
+  it("does not file an unknown behind away as caught up", () => {
+    // No mapping or nothing detected yet. "I cannot tell" is not "I am up to
+    // date", so it stays with the actionable ones.
+    const sorted = sortBookmarksForTab(
+      [withBehind(1, "Al dia", 0), withBehind(2, "Desconocido", null)],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual(["Desconocido", "Al dia"]);
+  });
+
+  it("leaves the paused tab ordered by its own date, not by what is pending", () => {
+    // Being behind is not what "En pausa" is asking about.
+    const sorted = sortBookmarksForTab(
+      [
+        bookmark(1, "Pausada ayer", null, "on_hold", "2026-08-18T10:00:00Z"),
+        bookmark(2, "Pausada en junio", null, "on_hold", "2026-06-01T10:00:00Z"),
+      ].map((b, i) => ({ ...b, behind: i === 0 ? 0 : 9 })),
+      "on_hold",
+    );
+    expect(titlesOf(sorted)).toEqual(["Pausada ayer", "Pausada en junio"]);
+  });
+});

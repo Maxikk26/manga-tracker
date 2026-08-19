@@ -291,8 +291,13 @@ def _panel_bookmark_row(row) -> dict:
      status_changed_at) = row
     # NULL on either side means "behind is unknowable", not zero: a bookmark
     # with no recorded progress is not magically caught up.
+    #
+    # Rounded to two decimals because chapter numbers are REAL — the source
+    # publishes 32.2 and 45.5 — and IEEE 754 subtraction turns 32.2 - 11.0 into
+    # 21.200000000000003, which reached the panel verbatim. Two decimals keep a
+    # genuine half chapter honest while the artifact disappears.
     behind = (
-        max(latest_chapter_num - last_chapter_read, 0)
+        round(max(latest_chapter_num - last_chapter_read, 0), 2)
         if latest_chapter_num is not None and last_chapter_read is not None
         else None
     )

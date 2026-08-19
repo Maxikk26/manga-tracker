@@ -443,3 +443,26 @@ def test_the_media_type_comes_from_our_table_not_from_the_host(
 
     assert response.status_code == 200
     assert response.headers["content-type"] == media_type
+
+
+def test_behind_never_carries_a_floating_point_tail(client, db_path):
+    """Chapter numbers are REAL — the source publishes 32.2 and 45.5 — so the
+    subtraction runs in IEEE 754 and 32.2 - 11.0 is 21.200000000000003. That
+    exact value reached the panel in production on 2026-08-19.
+    """
+    conn = connect(db_path)
+    _bookmark(conn, _site(conn), "Slightly Older Girlfriend",
+              last_chapter_read=11.0, latest_chapter_num=32.2)
+
+    behind = client.get("/api/bookmarks").json()[0]["behind"]
+
+    assert behind == 21.2
+    assert len(str(behind)) < 6, f"floating point tail leaked: {behind!r}"
+
+
+def test_a_genuine_half_chapter_survives_the_rounding(client, db_path):
+    """Rounding kills the artifact, not the data: half chapters are real."""
+    conn = connect(db_path)
+    _bookmark(conn, _site(conn), "Half", last_chapter_read=10.0, latest_chapter_num=21.5)
+
+    assert client.get("/api/bookmarks").json()[0]["behind"] == 11.5

@@ -86,6 +86,20 @@ describe("the behind pill", () => {
     expect(screen.queryByText(/atrasado/i)).not.toBeInTheDocument();
   });
 
+  it("never shows a floating point tail", () => {
+    // Real production value: chapter 32.2 minus 11 is 21.200000000000003 in
+    // IEEE 754, and it reached the panel verbatim.
+    renderCard(makeBookmark({ behind: 21.200000000000003 }));
+
+    expect(screen.getByText("+21")).toBeInTheDocument();
+    expect(screen.queryByText(/\.\d/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the exact value one hover away", () => {
+    renderCard(makeBookmark({ behind: 21.5 }));
+    expect(screen.getByTitle("21.5 sin leer")).toBeInTheDocument();
+  });
+
   it("is absent when behind is 0", () => {
     renderCard(makeBookmark({ behind: 0 }));
     expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();

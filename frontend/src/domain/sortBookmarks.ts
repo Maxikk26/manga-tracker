@@ -47,6 +47,18 @@ function byDateDesc(field: keyof Bookmark) {
   };
 }
 
+/**
+ * Nothing left to read.
+ *
+ * `behind === 0` and only that. A null `behind` means the source side is
+ * unknown — no mapping, or nothing detected yet — and "I cannot tell" is not
+ * "I am up to date", so an unknown stays with the actionable ones rather than
+ * being filed away as done.
+ */
+function isCaughtUp(bookmark: Bookmark): boolean {
+  return bookmark.behind === 0;
+}
+
 export function sortBookmarksForTab(
   bookmarks: readonly Bookmark[],
   status: BookmarkStatus,
@@ -55,5 +67,18 @@ export function sortBookmarksForTab(
   // Copied even when unsorted, so callers never receive the input array back
   // and cannot mutate it by accident.
   const copy = [...bookmarks];
-  return field ? copy.sort(byDateDesc(field)) : copy;
+  if (!field) return copy;
+
+  const byDate = byDateDesc(field);
+
+  if (status !== "reading") return copy.sort(byDate);
+
+  // "Leyendo" asks one question before any other: what do I still have to
+  // read. A manga you are caught up on is not an item on that list, so it
+  // sinks below every manga with chapters pending, whatever the dates say.
+  // Inside each group the date ordering still decides.
+  return copy.sort((a, b) => {
+    const caughtUp = Number(isCaughtUp(a)) - Number(isCaughtUp(b));
+    return caughtUp !== 0 ? caughtUp : byDate(a, b);
+  });
 }
