@@ -16,11 +16,19 @@ from enum import Enum
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from manga_tracker.intake.contracts import (
+    AlreadyTracked,
+    InvalidUrl,
+    MangaIntake,
+    NotFound,
+    Transient,
+    Unexpected,
+)
 from manga_tracker.storage.cover_cache import cache_dir_for, find_cached, media_type_for
 from manga_tracker.storage.db import connect
 from manga_tracker.storage.repositories import (
@@ -57,6 +65,79 @@ STATUS_LABELS = {
     "on_hold": "En pausa",
     "dropped": "Abandonado",
 }
+
+# The two statuses a bookmark cannot resume out of by itself — reactivation is
+# a PATCH, never a second add (spec.md "Existing terminal title is rejected;
+# reactivation is a PATCH"). Computed here, server-side, so a 409's `existing.
+# terminal` is a fact the frontend reads rather than a rule it re-derives.
+TERMINAL_STATUSES = frozenset({"completed", "dropped"})
+
+
+class MangaPreviewRequest(BaseModel):
+    """Body of POST /api/mangas/preview: just the pasted URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+
+
+class MangaAddRequest(BaseModel):
+    """Body of POST /api/mangas: the preview's echoed `url`/`title`/
+    `cover_url` (design D4 — the slug is re-derived server-side, never
+    trusted from the client) plus the owner's chosen status and initial
+    chapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    title: str
+    cover_url: str | None = None
+    status: BookmarkStatus
+    last_chapter_read: float = Field(default=0.0, ge=0)
+
+
+def _conflict_response(exc: AlreadyTracked) -> JSONResponse:
+    """The one body with a sibling key (design's Error Taxonomy): `detail` is
+    self-sufficient — it names the title, the Spanish state and, for a
+    terminal row, the reactivation instruction — and `existing` additionally
+    buys the modal a "Ver en «…»" button."""
+    label = STATUS_LABELS[exc.status]
+    terminal = exc.status in TERMINAL_STATUSES
+    detail = f"«{exc.title}» ya está en tu lista, con estado {label}."
+    if terminal:
+        detail += (
+            f" Para retomarlo, cámbiale el estado desde su pestaña «{label}»; "
+            "no hace falta agregarlo de nuevo."
+        )
+    return JSONResponse(
+        status_code=409,
+        content={"detail": detail, "existing": {"title": exc.title, "status": exc.status, "terminal": terminal}},
+    )
+
+
+def _source_error(exc: Exception) -> HTTPException:
+    """The rest of the Error Taxonomy: each failure class distinct, Spanish,
+    naming the next action (no `Retry-After`, no server-side retry — owner
+    decision 4 puts the retry in the owner's hands)."""
+    if isinstance(exc, InvalidUrl):
+        return HTTPException(
+            status_code=422,
+            detail="La URL no es de una ficha de la fuente. Pega el enlace que contiene /manga/…",
+        )
+    if isinstance(exc, NotFound):
+        return HTTPException(
+            status_code=404, detail="La fuente no tiene ningún manga con ese enlace. Revisa la URL."
+        )
+    if isinstance(exc, Transient):
+        return HTTPException(
+            status_code=503, detail="La fuente no respondió. Espera un momento y vuelve a intentar."
+        )
+    if isinstance(exc, Unexpected):
+        return HTTPException(
+            status_code=502,
+            detail="La fuente respondió algo inesperado; probablemente cambió. Revisa los logs.",
+        )
+    raise exc  # exhaustive by construction — a new intake failure class needs a case above first
 
 
 class BookmarkPatch(BaseModel):
@@ -101,9 +182,14 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def create_app(db_path: str, frontend_dist: Path | None = None) -> FastAPI:
-    """Build the panel app against one database path. `frontend_dist` exists
-    for tests; production always means the checked-in build location."""
+def create_app(db_path: str, intake: MangaIntake, frontend_dist: Path | None = None) -> FastAPI:
+    """Build the panel app against one database path.
+
+    `intake` is the only thing this module holds instead of a `SourceClient`
+    (design D1): the add flow's slug/ficha/chapters sequencing lives entirely
+    behind it, never in this file. `frontend_dist` exists for tests;
+    production always means the checked-in build location.
+    """
     dist = FRONTEND_DIST if frontend_dist is None else frontend_dist
     cache_dir = cache_dir_for(db_path)
     app = FastAPI(title="manga-tracker panel")
@@ -163,6 +249,54 @@ def create_app(db_path: str, frontend_dist: Path | None = None) -> FastAPI:
             media_type=media_type_for(path),
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    @app.post("/api/mangas/preview")
+    def preview_manga(body: MangaPreviewRequest):
+        """No write (spec.md "Preview validates without writing"). All
+        slug/ficha sequencing happens inside `intake`, never here (spec.md
+        "web never reaches the source, directly or by sequencing it itself")."""
+        conn = connect(db_path)
+        try:
+            preview = intake.preview(conn, body.url)
+        except AlreadyTracked as exc:
+            return _conflict_response(exc)
+        except (InvalidUrl, NotFound, Transient, Unexpected) as exc:
+            raise _source_error(exc)
+        finally:
+            conn.close()
+        return {
+            "slug": preview.slug,
+            "url": preview.url,
+            "title": preview.title,
+            "cover_url": preview.cover_url,
+            "publication_status_text": preview.publication_status_text,
+        }
+
+    @app.post("/api/mangas", status_code=201)
+    def add_manga(body: MangaAddRequest):
+        """Writes (spec.md "Confirm is atomic; any rejection leaves zero
+        rows"). `status`/`cover_url` are unwrapped to raw values here — the
+        only place in this call that touches pydantic — before crossing into
+        `intake`, which knows nothing about request bodies."""
+        conn = connect(db_path)
+        try:
+            result = intake.confirm(
+                conn,
+                url=body.url,
+                title=body.title,
+                cover_url=body.cover_url,
+                status=body.status.value,
+                last_chapter_read=body.last_chapter_read,
+                now=_utc_now(),
+            )
+        except AlreadyTracked as exc:
+            return _conflict_response(exc)
+        except (InvalidUrl, NotFound, Transient, Unexpected) as exc:
+            raise _source_error(exc)
+        else:
+            return get_panel_bookmark(conn, result.bookmark_id)
+        finally:
+            conn.close()
 
     if dist.is_dir():
         app.mount("/", _SPAStaticFiles(directory=dist, html=True), name="frontend")
