@@ -39,6 +39,25 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "di
 # field with it makes FastAPI answer 422 to any value outside the enum.
 BookmarkStatus = Enum("BookmarkStatus", {status: status for status in BOOKMARK_STATUSES}, type=str)
 
+# A Python mirror of the five Spanish status labels frontend/src/domain/
+# statusLabels.ts:7 already holds (design D2). Needed because a duplicate or
+# terminal add's `detail` string (spec.md "Duplicate active slug is rejected,
+# naming the owner") must name the state in Spanish for a reader who only has
+# `detail` — a curl caller, a log line — and that string is composed here,
+# not in `intake` (D2: no Spanish, no HTTP outside `web`). statusLabels.ts
+# says "nothing else translates statuses"; this mirror breaks that claim
+# rather than hiding it, so the drift is pinned executably by
+# tests/web/test_status_labels_parity.py, which parses the TS file as text
+# and asserts the two maps are equal. The set can only grow through a
+# bookmarks.status CHECK migration, so five entries is a hard ceiling.
+STATUS_LABELS = {
+    "reading": "Leyendo",
+    "want_to_read": "Por leer",
+    "completed": "Completado",
+    "on_hold": "En pausa",
+    "dropped": "Abandonado",
+}
+
 
 class BookmarkPatch(BaseModel):
     """Body of PATCH /api/bookmarks/{id}: progress and/or status, at least one.
