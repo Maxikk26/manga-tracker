@@ -79,3 +79,20 @@ def find_cached(cache_dir: Path, manga_id: int) -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def write_cover(cache_dir: Path, manga_id: int, cover_url: str, image: bytes) -> Path:
+    """Write one cover's bytes to disk atomically, returning the final path.
+
+    Moved out of `discovery/covers.py` (design D6): this module already owns
+    "where cover images live on disk", and a second copy of the write is a
+    second place to get the crash-safety wrong. Written whole under a `.part`
+    name then renamed — an interrupted write must not leave a truncated file
+    that `find_cached` would report as done forever.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    destination = cache_path(cache_dir, manga_id, cover_url)
+    temporary = destination.with_suffix(destination.suffix + ".part")
+    temporary.write_bytes(image)
+    temporary.replace(destination)
+    return destination
