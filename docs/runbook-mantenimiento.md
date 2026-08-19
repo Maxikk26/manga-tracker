@@ -21,7 +21,7 @@ Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
 Lo que este documento **no** cubre: el despliegue desde cero y las variables de entorno (`runbook-deploy.md`), y qué hace el sistema (las specs).
 
-Cambios en v1.11: la deuda de resúmenes baja de seis documentos a cinco — `spec-modelo-de-datos.md` la pagó en su v1.9, absorbiendo al hacerlo el caso que esta convención señalaba como incumplimiento: tenía un resumen, pero **al final** y solo para trazabilidad, y la convención exige abrir con él. El de trazabilidad se conserva, porque no es el mismo texto ni contesta lo mismo.
+Cambios en v1.11: se fija que **el nombre de la rama va en inglés** y se corrige el ejemplo que enseñaba lo contrario — este documento y `CLAUDE.md` daban `feat/importador-kitsu`, en español, mientras toda la práctica real del repo era inglesa; tres ramas salieron mal por copiarlo. Además, la deuda de resúmenes baja de seis documentos a cinco — `spec-modelo-de-datos.md` la pagó en su v1.9, absorbiendo al hacerlo el caso que esta convención señalaba como incumplimiento: tenía un resumen, pero **al final** y solo para trazabilidad, y la convención exige abrir con él. El de trazabilidad se conserva, porque no es el mismo texto ni contesta lo mismo.
 
 Cambios en v1.10: el runbook paga su propia deuda y abre con el `## Resumen` que su convención exige. Se cierra el pendiente de sumar los números del `onhold_sweep` al heartbeat — hecho en `spec-bot-telegram.md` v1.6 y desplegado, así que la lista lo mueve a cerrados. Se actualiza la lista de deuda de resúmenes: la pagaron `one-pager-v1a.md` (v1.13), `runbook-deploy.md` (v1.5) y este documento, y `decision-arquitectura-v1b.md` nació con la suya; quedan seis. Y la operación cotidiana decía que `feed_check` corre cada hora — es cada 30 minutos desde el 2026-08-08 (`spec-cliente-fuente-descubrimiento.md` v1.7) y este documento no se había enterado.
 
@@ -143,7 +143,9 @@ Deuda al 2026-08-18: tienen la sección `## Resumen` inicial completa `spec-impo
 
 **Un spec que se va a implementar enseguida va en la MISMA rama que su implementación.** Escribirlo, mergearlo, y abrir otra rama para el código son dos PRs y dos revisiones para un solo cambio. Peor: separa el contrato de lo que lo cumple justo cuando revisarlos juntos es lo único que dice si el código hace lo que el documento prometió.
 
-Regla práctica: **si ya sabes qué código viene detrás, es la misma rama.** Y el nombre de la rama describe la entrega completa (`feat/importador-kitsu`), no el primer paso (`docs/spec-importador`).
+Regla práctica: **si ya sabes qué código viene detrás, es la misma rama.**
+
+**El nombre de la rama va en inglés**, como todo lo que lee un desarrollador, y describe la entrega completa (`feat/kitsu-importer`), no el primer paso (`docs/importer-spec`). La práctica real del repo siempre fue esa —`feat/schema-migrations`, `fix/updates-found-counts-silent`, `chore/docker-image-name`, `test/close-heart-phase-gaps`—, pero este documento y `CLAUDE.md` daban como ejemplo `feat/importador-kitsu`, en español, y enseñaban por ejemplo lo contrario de la regla. El 2026-08-18 tres ramas salieron en español siguiendo ese ejemplo y hubo que renombrarlas con los PRs ya preparados. Un ejemplo equivocado cuesta más que una regla ausente: la regla ausente se pregunta, el ejemplo se copia.
 
 Lo que **sí** va solo, porque nada lo sigue:
 
