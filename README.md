@@ -19,6 +19,15 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 
 Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. La semana de uso real corrió del 08-10 al 08-17 y ese día abrió **la spec de V1b** (`spec-panel-v1b.md`): el panel web, en cuatro fases, con la edición del progreso de lectura como corazón.
 
+| Fase de V1b | Estado |
+|---|---|
+| Fase 1 — lista, editar progreso y estado | ✅ desplegada el 2026-08-18, en su propio contenedor, sirviendo en la LAN |
+| Fase 2 — historial y heatmap | ⬜ no empezada |
+| Fase 3 — alta y baja de mangas | ⬜ no empezada. La estrategia ya existe en el cliente: pegar la URL, `extract_slug` sin red, ficha, confirmar, y recién ahí escribir |
+| Fase 4 — portadas + `my_score` | 🟨 **las portadas se adelantaron**; `my_score` sigue pendiente |
+
+Las portadas se adelantaron porque el dueño no reconocía sus propios títulos en la lista: son 18 mangas del mismo género cuyos nombres colisionan (*Genius* aparece en tres, *Regressed* en dos). Con eso la lista dejó de ser una tabla y pasó a ser una **grilla de portadas**, donde el póster es el enlace al capítulo siguiente. Las imágenes se **cachean en disco** y las sirve el propio panel: guardar la URL no alcanza, porque los hosts de imágenes de la fuente responden 403 a una petición sin su propio `Referer` (medido el 2026-08-18).
+
 ## Cómo funciona (resumen)
 
 Híbrido catálogo + scraping ligero:
@@ -49,15 +58,55 @@ Solo existen dos números de capítulo por manga. Cualquier otro nombre está re
 
 ```
 manga-tracker/
+├── manga_tracker/         ← la aplicación (Python 3.12)
+│   ├── sources/manganato/    el cliente de la fuente: URLs, HTML, endpoint JSON, anti-bot
+│   ├── discovery/            los tres mecanismos de detección, el heartbeat, el caché de portadas
+│   ├── storage/              esquema, migraciones y consultas; el único que importa sqlite3
+│   ├── catalogue/            Kitsu, detrás de una interfaz que no lo nombra
+│   ├── importer/  seed/      las dos vías de carga inicial
+│   ├── notifier/             Telegram: solo emite, nunca escucha
+│   ├── web/                  el API del panel (FastAPI)
+│   ├── scheduler.py          APScheduler en proceso
+│   └── cli.py                la única raíz de composición
+├── frontend/              ← el panel (React 19 + Vite + TS), servido por el propio API
+├── tests/                 ← la suite; espeja la estructura de arriba
+├── docs/                  ← el paquete de especificaciones: la fuente de verdad
+├── scripts/               ← utilidades de operación (copiar la base de producción a local)
 ├── data/                  ← ignorada completa por git (data local)
-│   ├── seed.csv              mi lista real de lectura
-│   └── manga-tracker.db      la base; esta carpeta se monta como volumen en Docker
-├── docs/                  ← el paquete de especificaciones
+│   ├── seed.csv              mi lista real de lectura, escrita a mano
+│   ├── manga-tracker.db      la base
+│   └── covers/               las portadas cacheadas como archivos
+├── docker-compose.yml     ← dos servicios: el scheduler y el panel, cada uno en su contenedor
 ├── seed-plantilla.csv     ← plantilla versionada del seed (cabecera + ejemplos)
 └── README.md
 ```
 
+`data/` completa se monta como volumen en Docker, y ahí vive todo lo irrecuperable: la base cuyo `reading_history` no se puede reconstruir, el CSV escrito a mano, y las portadas ya descargadas.
+
 Nunca se versionan: el contenido de `data/`, el archivo de variables de entorno con el token y el chat de Telegram, ni los fixtures pesados descargados de la fuente.
+
+## Comandos
+
+```bash
+uv run pytest -q                  # la suite completa
+docker compose build              # obligatorio si cambian manga_tracker/, frontend/, pyproject.toml o el Dockerfile
+docker compose up -d              # el ÚNICO verbo de redespliegue: `restart` no recrea y deja la imagen vieja
+```
+
+La aplicación es un solo ejecutable con subcomandos:
+
+```bash
+python -m manga_tracker run              # el scheduler: los tres mecanismos de detección
+python -m manga_tracker panel            # el API del panel + los estáticos del frontend
+python -m manga_tracker seed             # carga inicial desde el CSV escrito a mano
+python -m manga_tracker import-kitsu     # carga inicial desde el export de Kitsu (archivo + API)
+python -m manga_tracker cache-covers     # descarga las portadas a disco; one-off, con --dry-run
+python -m manga_tracker run-job <job>    # corre un job una vez, fuera del scheduler
+```
+
+Las tres cargas one-off (`seed`, `import-kitsu`, `cache-covers`) aceptan `--dry-run`: reportan qué harían sin gastar una sola petición. `run-job` no lo tiene — ejecuta el job de verdad. Todo lo que pega contra la fuente respeta el delay de 5-15 s entre peticiones y corre secuencial, sin concurrencia, por diseño.
+
+En `frontend/`: `npm test`, `npm run dev` (proxy a `localhost:8000`) y `npm run build`.
 
 ## Documentación
 
@@ -122,11 +171,12 @@ El intento anterior de este proyecto murió sobre-ingenierado, con el cron —el
 - El archivo de la base de datos (data local; el respaldo es copiar el archivo del volumen).
 - El CSV del seed lleno (data personal). Solo se versiona la plantilla vacía.
 - El token del bot y el chat de Telegram (variables de entorno).
+- Las portadas cacheadas (`data/covers/`). Se regeneran con `cache-covers`, así que se pueden perder sin drama — a diferencia de todo lo demás en `data/`.
 
 ## Roadmap
 
 - **V1a — "El cron que sí funciona"**: seed manual, detección, digest de Telegram, Docker. Termina cuando llega la primera notificación real y correcta.
-- **V1b — Panel web**: los 6 estados tipo Kenmei, portadas, mi capítulo vs el último disponible, botón "abrir próximo", estadísticas de lectura (heatmap, volumen, géneros). La captura de esa data ya ocurre desde V1a.
+- **V1b — Panel web** *(en curso)*: los 6 estados tipo Kenmei, portadas, mi capítulo vs el último disponible, botón "abrir próximo", estadísticas de lectura (heatmap, volumen, géneros). La captura de esa data ya ocurre desde V1a. La fase 1 y las portadas ya están entregadas; ver la tabla de fases en §Estado.
 - **V1c — Extensión de Firefox**: trackear y marcar leído desde la propia página.
 - **V2 — Multi-fuente**: segunda fuente detrás de la misma interfaz de cliente.
 
