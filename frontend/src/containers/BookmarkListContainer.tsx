@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, fetchBookmarks, patchBookmark } from "../api/bookmarks";
 import type { Bookmark, BookmarkStatus } from "../domain/types";
 import { StatusTabs } from "../components/StatusTabs";
-import { BookmarkTable } from "../components/BookmarkTable";
+import { BookmarkGrid } from "../components/BookmarkGrid";
 import { sortBookmarksForTab } from "../domain/sortBookmarks";
 
 type LoadState = "loading" | "ready" | "error";
@@ -118,7 +118,7 @@ export function BookmarkListContainer() {
           {errorMessage}
         </p>
       )}
-      <BookmarkTable
+      <BookmarkGrid
         bookmarks={visible}
         savingIds={savingIds}
         onChangeProgress={handleChangeProgress}

@@ -1,6 +1,6 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.10 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.6).
+Versión 1.11 — 2026-08-18. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.6).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
@@ -11,7 +11,7 @@ Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 | **Ciclo de un cambio** | 8 pasos: suite antes de tocar nada → código y tests juntos → suite → **romper el guardián a propósito** → docs → commit por unidad → push → redesplegar | §El ciclo de un cambio |
 | **Romper el guardián** | La práctica que más defectos encontró aquí: la tabla acumula **13** guardianes que estaban verdes sin cubrir nada. Cuesta minutos por cambio | §Paso 4 |
 | **Pines** | Versionar un documento obliga a revisar los pines de todo lo que lo referencia; hay comando `rg` de auditoría. No correrlo dejó 4 defectos el 2026-08-08 | §Paso 5 |
-| **Resumen inicial** | Todo documento de `docs/` abre con `## Resumen` en tabla; el que no la tiene la gana al versionarse. Deuda actual: **6** documentos | §Todo documento de `docs/`… |
+| **Resumen inicial** | Todo documento de `docs/` abre con `## Resumen` en tabla; el que no la tiene la gana al versionarse. Deuda actual: **5** documentos | §Todo documento de `docs/`… |
 | **Rama** | Unidad de **entrega**, no de autoría: un spec que se implementa enseguida viaja con su implementación | §La rama es una unidad de entrega |
 | **PR** | Cuerpo desde `.github/pull_request_template.md`, ~20 líneas, declara el guardián roto y si el despliegue necesita `build` | §Paso 7 |
 | **Redesplegar** | Mergear primero, `pull` después; `up -d` es el **único** verbo — `restart` no recrea el contenedor (costó una noche de depuración) | §Redesplegar |
@@ -20,6 +20,8 @@ Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 | **Slug muerto** | Aviso único por Telegram al 5º fallo consecutivo; reintento automático cada domingo vía `onhold_sweep` | §Un manga dejó de responder |
 
 Lo que este documento **no** cubre: el despliegue desde cero y las variables de entorno (`runbook-deploy.md`), y qué hace el sistema (las specs).
+
+Cambios en v1.11: se fija que **el nombre de la rama va en inglés** y se corrige el ejemplo que enseñaba lo contrario — este documento y `CLAUDE.md` daban `feat/importador-kitsu`, en español, mientras toda la práctica real del repo era inglesa; tres ramas salieron mal por copiarlo. Además, la deuda de resúmenes baja de seis documentos a cinco — `spec-modelo-de-datos.md` la pagó en su v1.9, absorbiendo al hacerlo el caso que esta convención señalaba como incumplimiento: tenía un resumen, pero **al final** y solo para trazabilidad, y la convención exige abrir con él. El de trazabilidad se conserva, porque no es el mismo texto ni contesta lo mismo.
 
 Cambios en v1.10: el runbook paga su propia deuda y abre con el `## Resumen` que su convención exige. Se cierra el pendiente de sumar los números del `onhold_sweep` al heartbeat — hecho en `spec-bot-telegram.md` v1.6 y desplegado, así que la lista lo mueve a cerrados. Se actualiza la lista de deuda de resúmenes: la pagaron `one-pager-v1a.md` (v1.13), `runbook-deploy.md` (v1.5) y este documento, y `decision-arquitectura-v1b.md` nació con la suya; quedan seis. Y la operación cotidiana decía que `feed_check` corre cada hora — es cada 30 minutos desde el 2026-08-08 (`spec-cliente-fuente-descubrimiento.md` v1.7) y este documento no se había enterado.
 
@@ -133,13 +135,17 @@ No confundir con **"Decisiones discutibles"**, que es otra sección y tiene otro
 
 El motivo es de fricción, no de estética: un spec de 200 líneas que hay que leer entero para aprobarlo **no se aprueba, se posterga**. El resumen es lo que lo vuelve revisable en dos minutos.
 
-Deuda al 2026-08-17: tienen la sección `## Resumen` inicial completa `spec-importador-kitsu.md`, `manganato-fuente-actual.md` —que la pagó en su v1.4 **absorbiendo el TL;DR en vez de dejarlo al lado**: dos resúmenes en un documento son dos verdades que se desincronizan, y en ese caso la copia vieja era una de las que sostenía una afirmación falsa—, `decision-arquitectura-v1b.md` (nació con ella), `one-pager-v1a.md` (la pagó en su v1.13), `runbook-deploy.md` (la pagó en su v1.5) y este runbook (v1.10). La deben todavía **seis**: `spec-bot-telegram.md`, `spec-modelo-de-datos.md` —su resumen está **al final** y solo para trazabilidad, que no cumple: la convención exige abrir con él—, `spec-cliente-fuente-descubrimiento.md`, `spec-seed-manual.md`, `medicion-ventana-feed.md` y `referencia-repo-viejo.md`, cuyo "Resumen de rescates" también cierra el documento en vez de abrirlo. Al versionar cualquiera de los que faltan, se le agrega.
+Deuda al 2026-08-18: tienen la sección `## Resumen` inicial completa `spec-importador-kitsu.md`, `manganato-fuente-actual.md` —que la pagó en su v1.4 **absorbiendo el TL;DR en vez de dejarlo al lado**: dos resúmenes en un documento son dos verdades que se desincronizan, y en ese caso la copia vieja era una de las que sostenía una afirmación falsa—, `decision-arquitectura-v1b.md` (nació con ella), `one-pager-v1a.md` (la pagó en su v1.13), `runbook-deploy.md` (la pagó en su v1.5), `runbook-desarrollo-local.md` (nació con ella), `spec-panel-v1b.md` (nació con ella), este runbook (v1.10) y `spec-modelo-de-datos.md` (la pagó en su v1.9). La deben todavía **cinco**: `spec-bot-telegram.md`, `spec-cliente-fuente-descubrimiento.md`, `spec-seed-manual.md`, `medicion-ventana-feed.md` y `referencia-repo-viejo.md`, cuyo "Resumen de rescates" también cierra el documento en vez de abrirlo. Al versionar cualquiera de los que faltan, se le agrega.
+
+**El caso de `spec-modelo-de-datos.md` vale como precedente**, porque no era el mismo caso que el de `manganato-fuente-actual.md`: ese documento tenía un resumen al final, pero es de **trazabilidad** —la lista numerada de decisiones cerradas— y no contesta lo que la convención pide. Ahí no se absorbe: se escribe el resumen de apertura y el de trazabilidad se queda donde está, porque son dos textos distintos con dos propósitos distintos. Absorber aplica cuando lo de abajo dice lo mismo que lo de arriba.
 
 ### La rama es una unidad de entrega, no de autoría
 
 **Un spec que se va a implementar enseguida va en la MISMA rama que su implementación.** Escribirlo, mergearlo, y abrir otra rama para el código son dos PRs y dos revisiones para un solo cambio. Peor: separa el contrato de lo que lo cumple justo cuando revisarlos juntos es lo único que dice si el código hace lo que el documento prometió.
 
-Regla práctica: **si ya sabes qué código viene detrás, es la misma rama.** Y el nombre de la rama describe la entrega completa (`feat/importador-kitsu`), no el primer paso (`docs/spec-importador`).
+Regla práctica: **si ya sabes qué código viene detrás, es la misma rama.**
+
+**El nombre de la rama va en inglés**, como todo lo que lee un desarrollador, y describe la entrega completa (`feat/kitsu-importer`), no el primer paso (`docs/importer-spec`). La práctica real del repo siempre fue esa —`feat/schema-migrations`, `fix/updates-found-counts-silent`, `chore/docker-image-name`, `test/close-heart-phase-gaps`—, pero este documento y `CLAUDE.md` daban como ejemplo `feat/importador-kitsu`, en español, y enseñaban por ejemplo lo contrario de la regla. El 2026-08-18 tres ramas salieron en español siguiendo ese ejemplo y hubo que renombrarlas con los PRs ya preparados. Un ejemplo equivocado cuesta más que una regla ausente: la regla ausente se pregunta, el ejemplo se copia.
 
 Lo que **sí** va solo, porque nada lo sigue:
 
