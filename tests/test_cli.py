@@ -11,6 +11,8 @@ uses, and it is what proves the subcommand really hands the built objects to
 
 import csv
 
+import io
+
 import pytest
 
 from manga_tracker.catalogue.contracts import CatalogueEntry, CatalogueTransient
@@ -413,3 +415,38 @@ def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_w
     out = capsys.readouterr().out
     assert "'Ryuusa no Ori' (reading, read 5)" in out
     assert "COULD NOT write the pending list" in out
+
+
+# --- console encoding ----------------------------------------------------------
+
+
+def test_an_unprintable_title_does_not_kill_the_command():
+    """A title is third-party text and a Windows console is cp1252, so printing
+    one can raise UnicodeEncodeError and take the process with it.
+
+    Not theoretical: `cache-covers` lists its population BEFORE requesting
+    anything, and a title carrying 'Ū' (U+016A) killed a 145-image run at the
+    listing stage, before a single cover was fetched.
+    """
+    from manga_tracker.cli import soften_console_encoding
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", newline="")
+    soften_console_encoding(stream)
+
+    print("Kaijū Ū \u016a", file=stream)  # must not raise
+
+    stream.flush()
+    assert stream.buffer.getvalue()  # something was written, lossy or not
+
+
+def test_softening_tolerates_a_stream_that_cannot_be_reconfigured():
+    """Redirected or already-wrapped streams must be left alone, not replaced —
+    swallowing the whole command over a cosmetic concern would be worse than
+    the problem."""
+    from manga_tracker.cli import soften_console_encoding
+
+    class Unreconfigurable:
+        def reconfigure(self, **kwargs):
+            raise OSError("not a tty")
+
+    soften_console_encoding(Unreconfigurable(), object())  # must not raise

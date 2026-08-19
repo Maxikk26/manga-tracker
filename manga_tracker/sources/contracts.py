@@ -20,6 +20,10 @@ class Response:
     status: int
     text: str
     headers: dict[str, str]
+    #: Raw body. Defaulted so every existing fake keeps constructing a Response
+    #: with three fields; only binary callers (covers) ever read it, and
+    #: decoding an image through `text` would corrupt it.
+    content: bytes = b""
 
 
 class Transport(Protocol):

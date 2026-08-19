@@ -305,12 +305,18 @@ def test_shards_that_publish_no_manga_url_are_unexpected():
 
 
 class _RawResponse:
-    """What curl_cffi's `get` returns, reduced to what the transport reads."""
+    """What curl_cffi's `get` returns, reduced to what the transport reads.
+
+    `content` mirrors `text` rather than being empty: the real object always
+    carries both, and a double that answers b"" would let a caller reading bytes
+    pass against a body that was never there.
+    """
 
     def __init__(self, text: str, status_code: int = 200):
         self.text = text
         self.status_code = status_code
         self.headers = {}
+        self.content = text.encode("utf-8")
 
 
 def _recorder():
@@ -405,11 +411,18 @@ def test_progress_is_optional_and_defaults_to_silence():
 # --- SRC-3: the existing Response shape is sufficient -----------------------
 
 
-def test_the_response_contract_gains_no_bytes_field():
-    """SRC-3. The shard fixtures carry an `<?xml ... encoding="UTF-8"?>`
-    declaration and parse from `Response.text`; nothing here needed bytes, so
-    nothing here justifies widening the contract every source shares."""
-    assert {field.name for field in fields(Response)} == {"status", "text", "headers"}
+def test_the_sitemap_still_needs_no_bytes_and_the_contract_stays_narrow():
+    """Was SRC-3's "the contract gains no bytes field", updated rather than
+    deleted, because its reasoning was scoped and still holds where it applied.
+
+    The shard fixtures carry an `<?xml ... encoding="UTF-8"?>` declaration and
+    parse from `Response.text`: nothing in the sitemap needed bytes then and
+    nothing does now. What changed is elsewhere — the cover cache downloads
+    images, and decoding one through `text` corrupts it, so `content` is the
+    first field with a reason. The set is asserted exactly so the NEXT field
+    still has to argue for itself.
+    """
+    assert {field.name for field in fields(Response)} == {"status", "text", "headers", "content"}
     assert _fixture("sitemap_shard_1.xml").startswith("<?xml")
 
 

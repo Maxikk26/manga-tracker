@@ -11,7 +11,10 @@ linea en cli.py"; the constructor in `_cmd_import_kitsu` is that line, and it
 is only true while no other module names the class."""
 
 import argparse
+import sys
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 
 import uvicorn
 
@@ -20,6 +23,7 @@ from manga_tracker.catalogue.kitsu import KitsuCatalogue
 from manga_tracker.catalogue.transport import UrllibJsonTransport
 from manga_tracker.config import AppConfig, load_config, require_telegram
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
+from manga_tracker.discovery.covers import DEFAULT_STATUSES, backfill_covers
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
 from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
@@ -33,7 +37,9 @@ from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.transport import CurlCffiTransport
+from manga_tracker.storage.cover_cache import cache_dir_for, find_cached
 from manga_tracker.storage.db import connect, ensure_site
+from manga_tracker.storage.repositories import BOOKMARK_STATUSES, list_cover_candidates
 from manga_tracker.web.app import create_app
 
 
@@ -147,6 +153,86 @@ def _report_pending(report, pending_path) -> None:
         return
     print(f"Wrote {written} row(s) to {pending_path}.")
     print(f"Fill the url column, then: python -m manga_tracker seed --file {pending_path}")
+
+
+def _utc_now() -> str:
+    """The one timestamp format every writer in this project emits."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
+    """One-off: give every mapped manga a cover FILE, not just a cover URL.
+
+    Storing the address is not storing the image — manganato's image hosts
+    answer 403 without a manganato Referer, so a panel pointing at a stored URL
+    renders a broken image. The cache lives beside the database, inside the
+    persisted data volume.
+
+    Sequential and slow by construction — up to two requests per manga with the
+    transport's 5-15s delay — so the run is announced up front rather than
+    looking hung. `--dry-run` exists because the cheapest way to be sure of the
+    population is to see it before spending a single request on it.
+    """
+    statuses = tuple(args.statuses) if args.statuses else DEFAULT_STATUSES
+    cache_dir = cache_dir_for(config.db_path)
+
+    conn = connect(config.db_path)
+    try:
+        candidates = list_cover_candidates(conn, statuses=statuses)
+    finally:
+        conn.close()
+    pending = [
+        row for row in candidates if not row[3] or find_cached(cache_dir, row[0]) is None
+    ]
+    if args.limit is not None:
+        pending = pending[: args.limit]
+
+    print(f"Cache directory: {cache_dir}")
+    if not pending:
+        print(f"All {len(candidates)} mapped manga(s) in those statuses are already cached.")
+        return 0
+
+    needs_url = sum(1 for row in pending if not row[3])
+    print(
+        f"{len(pending)} of {len(candidates)} manga(s) need work, in statuses: "
+        f"{', '.join(statuses)}  ({needs_url} also need their cover_url looked up)"
+    )
+    for _, title, source_key, cover_url in pending:
+        print(f"  - {title}  [{source_key}]{'' if cover_url else '  (no cover_url yet)'}")
+
+    if args.dry_run:
+        print("\nDry run: no request was made.")
+        return 0
+
+    # 10s is the midpoint of the 5-15s policy delay; the first request has none.
+    requests = len(pending) + needs_url
+    print(f"\nFetching {requests} request(s), sequentially. Rough estimate: "
+          f"{(requests - 1) * 10 // 60 + 1} minute(s).")
+    report = backfill_covers(
+        db_path=config.db_path,
+        client=ManganatoClient(CurlCffiTransport()),
+        cache_dir=cache_dir,
+        statuses=statuses,
+        limit=args.limit,
+        now_fn=_utc_now,
+    )
+
+    print(
+        f"\nCached {report.files_written} image(s); learned {report.urls_learned} cover_url(s); "
+        f"{report.already_cached} were already done."
+    )
+    for label, titles in (
+        ("not found at the source", report.not_found),
+        ("transient failure, safe to rerun", report.transient),
+        ("unexpected response, the source may have changed", report.unexpected),
+    ):
+        if titles:
+            print(f"{len(titles)} {label}:")
+            for title in titles:
+                print(f"  - {title}")
+    # A partial run is not a failed run: the covers already written are kept,
+    # and a rerun costs only what is still missing.
+    return 0 if report.files_written or not report.failed else 1
 
 
 def _bootstrap(config: AppConfig) -> tuple[int, ManganatoClient]:
@@ -265,10 +351,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     test_telegram.set_defaults(handler=_cmd_test_telegram)
 
+    cache_covers = subparsers.add_parser(
+        "cache-covers",
+        help="Fetch and store the cover of every mapped manga that has none; one-off maintenance, never scheduled",
+    )
+    cache_covers.add_argument(
+        "--status", action="append", dest="statuses", choices=list(BOOKMARK_STATUSES),
+        help="Restrict to these bookmark statuses (repeatable). Default: reading, want_to_read, on_hold.",
+    )
+    cache_covers.add_argument(
+        "--limit", type=int, default=None,
+        help="Stop after this many mangas. Useful for a 1-item smoke test before spending the full run.",
+    )
+    cache_covers.add_argument(
+        "--dry-run", action="store_true",
+        help="List what would be fetched and exit without making a single request.",
+    )
+    cache_covers.set_defaults(handler=_cmd_cache_covers)
+
     return parser
 
 
+def soften_console_encoding(*streams) -> None:
+    """Make an unprintable character lossy instead of fatal.
+
+    Every command here prints manga titles, and a title is third-party text: it
+    can carry anything Unicode allows. A Windows console defaults to cp1252, so
+    `print()` on a title containing e.g. 'Ū' (U+016A) raises UnicodeEncodeError
+    and takes the whole process with it.
+
+    That is not theoretical. `cache-covers` lists its population BEFORE making
+    any request, so one such title killed a 145-image run at the listing stage,
+    before a single cover was fetched — a job that costs 25 minutes died
+    printing a name. The same trap sits in front of `seed`, `import-kitsu` and
+    every report that echoes a title.
+
+    Only the error handler changes, never the encoding: the console keeps
+    rendering what it can, and what it cannot becomes a replacement character.
+    Losing a glyph in a progress line is a cosmetic price; losing the run is
+    not. Streams that cannot be reconfigured (already-wrapped or redirected
+    ones) are left alone rather than replaced.
+    """
+    for stream in streams:
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError, ValueError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> int:
+    soften_console_encoding(sys.stdout, sys.stderr)
     args = build_parser().parse_args(argv)
     config = load_config()
     configure_logging(config.log_level)

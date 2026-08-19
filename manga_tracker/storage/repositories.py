@@ -396,3 +396,48 @@ def update_panel_bookmark(
                 (PANEL_ORIGIN, ceiling, manga_id),
             )
     return True
+
+
+# --- cover family (one-off maintenance) ----------------------------------------
+
+
+def list_cover_candidates(
+    conn: sqlite3.Connection, *, statuses: tuple[str, ...] | None = None
+) -> list[tuple[int, str, str, str | None]]:
+    """(manga_id, title, source_key, cover_url) for every mapped manga in these
+    statuses — including the ones that already have a cover_url.
+
+    Deliberately not filtered to "cover_url IS NULL". Knowing the address of an
+    image is not the same as having it: manganato's image hosts answer 403
+    without a manganato Referer, so a stored URL can be a cover the panel can
+    never render. Whether work is needed is decided by the caller, which is the
+    only side that can see the local cache.
+
+    INNER JOIN on manga_sites, not LEFT: a manga with no source mapping has no
+    slug, so there is nowhere to ask and listing it would only produce a row the
+    caller must skip. Terminal bookmarks are excluded by the caller's
+    `statuses`, never here — this helper does not own that policy.
+    """
+    sql = (
+        "SELECT m.id, m.title, ms.source_key, m.cover_url "
+        "FROM mangas m "
+        "JOIN manga_sites ms ON ms.manga_id = m.id "
+        "JOIN bookmarks b ON b.manga_id = m.id "
+    )
+    params: tuple = ()
+    if statuses:
+        # Placeholders are generated from the tuple's length, never from its
+        # contents; the values themselves stay bound.
+        sql += f"WHERE b.status IN ({', '.join('?' * len(statuses))}) "
+        params = statuses
+    return [tuple(row) for row in conn.execute(sql + "ORDER BY m.title", params)]
+
+
+def set_manga_cover(conn: sqlite3.Connection, manga_id: int, cover_url: str, *, now: str) -> None:
+    """Write one cover. Commits — a backfill interrupted halfway must keep the
+    covers it already fetched, since each one cost a real request."""
+    with transaction(conn):
+        conn.execute(
+            "UPDATE mangas SET cover_url = ?, updated_at = ? WHERE id = ?",
+            (cover_url, now, manga_id),
+        )

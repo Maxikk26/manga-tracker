@@ -10,6 +10,8 @@ implementation that trusted it would rewrite an unrelated row — or, worse,
 correct a row when the trigger never fired. Both corruptions are pinned by
 tests below."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -348,3 +350,96 @@ def test_statics_serve_index_and_fall_back_to_it_for_client_routes(db_path, tmp_
     assert "panel" in client.get("/some/spa/route").text
     # ... while the API keeps answering as itself under the same mount.
     assert client.get("/api/bookmarks").json() == []
+
+
+# --- GET /api/covers/{manga_id} -------------------------------------------------
+
+
+def _cache_dir(db_path) -> Path:
+    """Where the app looks: derived from the database path, never configured
+    separately. Asserted here so a change to that derivation breaks loudly."""
+    return Path(db_path).resolve().parent / "covers"
+
+
+def test_a_cached_cover_is_served_from_disk(client, db_path):
+    """The panel serves the bytes itself. It cannot redirect to cover_url: the
+    source's hosts answer 403 without their own Referer, so a hotlink renders
+    broken."""
+    conn = connect(db_path)
+    manga_id, _ = _bookmark(conn, _site(conn), "One Piece")
+    cache = _cache_dir(db_path)
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / f"{manga_id}.webp").write_bytes(b"\x89PNG fake")
+
+    response = client.get(f"/api/covers/{manga_id}")
+
+    assert response.status_code == 200
+    assert response.content == b"\x89PNG fake"
+    assert response.headers["content-type"] == "image/webp"
+
+
+def test_an_uncached_cover_is_404_not_an_error(client, db_path):
+    """An ordinary state, not a failure: a manga can be listed long before
+    cache-covers reaches it, so the grid needs a fallback rather than a
+    guarantee."""
+    conn = connect(db_path)
+    manga_id, _ = _bookmark(conn, _site(conn), "One Piece")
+
+    assert client.get(f"/api/covers/{manga_id}").status_code == 404
+
+
+def test_a_cover_carries_caching_headers(client, db_path):
+    """The grid asks for every visible cover on each load. Without this the
+    panel refetches ~18 images per visit for files that change only when
+    someone re-caches them on purpose."""
+    conn = connect(db_path)
+    manga_id, _ = _bookmark(conn, _site(conn), "One Piece")
+    cache = _cache_dir(db_path)
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / f"{manga_id}.jpg").write_bytes(b"jpeg bytes")
+
+    response = client.get(f"/api/covers/{manga_id}")
+
+    assert "max-age" in response.headers["cache-control"]
+    # etag/last-modified still ride along, so a re-cached file is picked up on
+    # revalidation instead of being pinned for the whole max-age.
+    assert response.headers.get("etag") or response.headers.get("last-modified")
+
+
+def test_a_cover_route_cannot_be_walked_out_of_its_directory(client):
+    """The id is typed `int`, so traversal is not expressible: anything that is
+    not a number is rejected before a path is ever built."""
+    for attempt in ("../../etc/passwd", "..%2F..%2Fsecret", "1;rm", "1.webp"):
+        assert client.get(f"/api/covers/{attempt}").status_code in (404, 422)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "media_type"),
+    [
+        (".webp", "image/webp"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".png", "image/png"),
+        (".gif", "image/gif"),
+    ],
+)
+def test_the_media_type_comes_from_our_table_not_from_the_host(
+    client, db_path, suffix, media_type
+):
+    """Pinned per extension because the alternative is host-dependent.
+
+    Left to `mimetypes`, `.webp` resolves to application/octet-stream on a
+    Windows box whose registry lacks it — and nearly every cover taken from the
+    source is a .webp, so the served type would have differed between the
+    container and a laptop.
+    """
+    conn = connect(db_path)
+    manga_id, _ = _bookmark(conn, _site(conn), f"Title {suffix}")
+    cache = _cache_dir(db_path)
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / f"{manga_id}{suffix}").write_bytes(b"bytes")
+
+    response = client.get(f"/api/covers/{manga_id}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == media_type
