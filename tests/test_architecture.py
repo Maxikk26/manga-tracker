@@ -9,14 +9,17 @@ PKG = Path(__file__).resolve().parent.parent / "manga_tracker"
 
 # top-level package -> other top-level packages it must never import
 DIRECTIONAL_RULES = {
-    "sources": {"storage", "discovery", "notifier", "seed", "catalogue", "importer"},
-    "notifier": {"storage", "sources", "discovery", "seed", "catalogue", "importer"},
-    "storage": {"sources", "discovery", "notifier", "seed", "catalogue", "importer"},
+    # `intake` and `web` join these four forbidden sets (design D9): they are
+    # not downstream of sources/storage/notifier/catalogue, and both were
+    # missing until the add-a-manga flow needed the boundary made explicit.
+    "sources": {"storage", "discovery", "notifier", "seed", "catalogue", "importer", "intake", "web"},
+    "notifier": {"storage", "sources", "discovery", "seed", "catalogue", "importer", "intake", "web"},
+    "storage": {"sources", "discovery", "notifier", "seed", "catalogue", "importer", "intake", "web"},
     "discovery": {"sources.manganato", "notifier.telegram"},
     "seed": {"sources.manganato", "notifier.telegram"},
     # catalogue is not downstream of the source client, nor of storage,
     # discovery, notifier, seed or its own consumer (design D8, CAT-6).
-    "catalogue": {"storage", "discovery", "notifier", "seed", "sources", "importer"},
+    "catalogue": {"storage", "discovery", "notifier", "seed", "sources", "importer", "intake", "web"},
     # The importer reads both contracts and writes through storage — that is
     # its job. What it must never do is name a concrete implementation: the
     # day it does, swapping Kitsu for AniList stops being a one-line change in
@@ -24,7 +27,34 @@ DIRECTIONAL_RULES = {
     "importer": {"catalogue.kitsu", "catalogue.transport", "sources.manganato"},
     # The panel shows and edits; it never detects or notifies. web -> storage
     # is the only arrow (decision-arquitectura-v1b.md, spec-panel-v1b.md).
-    "web": {"sources.manganato", "notifier.telegram"},
+    # Widened from {"sources.manganato", "notifier.telegram"} to all of
+    # `sources`: web must not reach the source at all, not even indirectly
+    # by sequencing it itself (spec.md "web never reaches the source,
+    # directly or by sequencing it itself", design D9). web asks `intake`
+    # for the add flow instead — `intake.pasted_url` is the one module web
+    # is allowed to import there.
+    "web": {
+        "sources",
+        "notifier",
+        "discovery",
+        "catalogue",
+        "importer",
+        "seed",
+        "intake.pasted_url",
+    },
+    # `intake` sequences the add flow: it may hold a SourceClient-typed
+    # dependency (sources.contracts) but must never name the concrete
+    # sources.manganato client, and it must not reach into web (design D9).
+    # `importer` stays reachable for matching.normalize/slug_variants only —
+    # pure, no I/O, no source knowledge (matching.py:21-33).
+    "intake": {
+        "sources.manganato",
+        "notifier",
+        "discovery",
+        "catalogue",
+        "seed",
+        "web",
+    },
 }
 
 # third-party module -> the file(s) (relative to manga_tracker/) allowed to import it
@@ -61,6 +91,10 @@ CONCRETE_IMPLEMENTATIONS = {
     "notifier.telegram",
     "catalogue.kitsu",
     "catalogue.transport",
+    # `PastedUrlIntake` is the only MangaIntake implementation; naming it
+    # outside cli.py would let a second module wire the add flow together
+    # on its own, the same risk import-kitsu closed for the catalogue.
+    "intake.pasted_url",
 }
 
 # word (lowercased) -> the only directory allowed to say it.
@@ -236,6 +270,21 @@ def test_boundary_check_flags_an_injected_violation(tmp_path):
         # ... and the panel shows and edits, never notifies (spec-panel-v1b.md:
         # every new directional rule is proven by injecting a violation).
         "web/probe.py": "from manga_tracker.notifier.telegram import TelegramSender\n",
+        # ... and intake names no concrete source, only the contract (design D9).
+        "intake/probe.py": "import manga_tracker.sources.manganato.client\n",
+        # ... and web cannot reach the source at all, not even the Protocol
+        # (design D9: the widened rule forbids all of `sources`, not just
+        # the concrete manganato client).
+        "web/probe2.py": "import manga_tracker.sources.contracts\n",
+        # ... and web asks the service, never builds it: only cli.py may
+        # name the concrete PastedUrlIntake (design D9, CONCRETE_IMPLEMENTATIONS).
+        "web/probe3.py": "import manga_tracker.intake.pasted_url\n",
+        # ... the spec-mandated probe, verbatim (spec.md "The boundary is
+        # proven by an injected violation"): a web-named module importing
+        # manga_tracker.sources.manganato. Not redundant with probe2 despite
+        # also being caught by the widened `sources` rule: probe2 proves the
+        # widened rule, this one proves the rule the spec names as a MUST.
+        "web/probe4.py": "import manga_tracker.sources.manganato\n",
         # Confinement: manganato's anti-bot transport stays in manganato ...
         "catalogue/probe2.py": "import curl_cffi\n",
         # ... and widening `urllib.request` to two homes must not open it to a
@@ -256,7 +305,11 @@ def test_boundary_check_flags_an_injected_violation(tmp_path):
     assert _directional_violations(root) == [
         "catalogue/probe.py imports forbidden module 'manga_tracker.storage'",
         "importer/probe.py imports forbidden module 'manga_tracker.catalogue.kitsu'",
+        "intake/probe.py imports forbidden module 'manga_tracker.sources.manganato.client'",
         "web/probe.py imports forbidden module 'manga_tracker.notifier.telegram'",
+        "web/probe2.py imports forbidden module 'manga_tracker.sources.contracts'",
+        "web/probe3.py imports forbidden module 'manga_tracker.intake.pasted_url'",
+        "web/probe4.py imports forbidden module 'manga_tracker.sources.manganato'",
     ]
     assert _confinement_violations(root) == [
         "catalogue/probe2.py imports confined module 'curl_cffi', "

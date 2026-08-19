@@ -111,3 +111,10 @@ class SourceClient(Protocol):
     def fetch_slug_update_times(
         self, *, progress: ProgressCallback | None = None
     ) -> dict[str, str | None]: ...
+
+    # The concrete already does this (manganato/client.py:79); declaring it
+    # here lets a caller — the panel's add flow — type against the interface
+    # instead of the concrete client. The `Referer` knowledge the image hosts
+    # require stays inside sources/manganato/: the Protocol only names the
+    # shape, never the header.
+    def fetch_cover(self, cover_url: str) -> bytes: ...
