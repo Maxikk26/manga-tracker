@@ -1,6 +1,22 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.8 — 2026-08-10. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.9 — 2026-08-18. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+
+## Resumen
+
+| Qué | Decisión | Dónde |
+|---|---|---|
+| **Motor** | **SQLite**, un solo archivo en un volumen de Docker. Postgres evaluado y descartado: costo completo (contenedor 24/7, credenciales, backups por dump) sin ninguna ventaja aprovechada. Respaldo = copiar un archivo | §Decisión de motor |
+| **Forma** | **7 tablas + 1 trigger**, creadas de una vez en la primera arrancada. Monousuario explícito: no hay tabla ni columna de usuario | §Las 7 tablas |
+| **Los dos capítulos** | `bookmarks.last_chapter_read` (por cuál voy yo) y `manga_sites.latest_chapter_num` (último publicado en la fuente). No existe una tercera noción de capítulo; `latest_chapter_seen`/`latest_chapter_available` están retirados | §Glosario |
+| **Timestamps** | Texto ISO 8601 **en UTC**, siempre. La zona local (America/Caracas) la aplica el backend al presentar, y **antes** de agrupar en toda agregación por día calendario | §Convenciones globales |
+| **Capturar lo irrecuperable** | `chapter_history` (lo que publica la fuente) y `reading_history` (lo que leo yo) se escriben desde el día uno aunque nadie las lea hasta V1b. El trigger dispara **solo en UPDATE**, para que el alta masiva del seed y del import no invente 340 lecturas falsas | §Tabla 5, §Tabla 6 |
+| **Fechas de estado** | `bookmarks.status_changed_at` (migración 2) responde "¿desde cuándo está en este estado?". **Sin backfill**: null = desconocido, que es la verdad; copiar `updated_at` habría afirmado que 141 mangas se pausaron el día del import | §Tabla 4 |
+| **Migraciones** | `PRAGMA user_version` + `MIGRATIONS`. Hay **2** aplicadas. Costo por migración: escribirla idempotente, un test sobre base **en archivo** (nunca `:memory:`), y respaldar antes de desplegar — copiar un archivo | §Versionado del esquema |
+| **Costo operativo** | Cero administración. `job_runs` crece ~5.500 filas/año de texto corto: sin política de retención, y si molesta, purga manual | §Tabla 7 |
+| **Fuera del esquema** | Tabla de usuarios, de notificaciones enviadas, de pendientes de slug, de auditoría; selectores CSS en `sites`; campos de hiatus; y las **imágenes** de portada, que son archivos en disco, no filas | §Qué NO está en el esquema |
+
+Cambios vs 1.8: **el esquema gana `bookmarks.status_changed_at` como migración 2**, y con ella la respuesta a "¿desde cuándo está pausado esto?", que hasta hoy no existía — `updated_at` no servía de sustituto y la razón está medida, no supuesta (las 141 filas `on_hold` de producción cargan exactamente dos valores distintos, así que ordenar por ahí produce dos bloques y no un orden). Se registra también que el **cache de portadas existe y deliberadamente no es esquema**: las imágenes viven como archivos junto a la base, dentro del mismo volumen, y `mangas.cover_url` sigue siendo la dirección, no la imagen. Y el documento paga su deuda con la convención del `runbook-mantenimiento.md`: gana la sección `## Resumen` inicial, que le faltaba desde la v1.0 — la que traía al final es de trazabilidad y no cumple, porque la convención exige abrir con ella.
 
 Cambios vs 1.7: **el esquema pasa a estar versionado** con `PRAGMA user_version`, y se agregan a `job_runs` las columnas `items_requested` e `items_skipped`. Lo fuerza un hallazgo, no un plan: `ensure_schema` ejecuta `schema.sql`, que es todo `CREATE ... IF NOT EXISTS`, así que **una columna agregada ahí no aparece jamás en una base que ya existe**. Verificado empíricamente. Y la forma del fallo es la peligrosa: toda la suite construye sus bases desde cero, donde el script aplica completo, así que el cambio se ve verde en los tests y falta en producción. La sección "Versionado del esquema" al final describe el mecanismo y su regla.
 
@@ -123,10 +139,17 @@ Una fila por manga trackeado (relación 1:1 con `mangas` en monousuario; la UNIQ
 | progress_is_approx | INTEGER (bool) | no | 0 | 1 = el progreso vino del import de Kitsu y no está verificado. El seed manual siempre escribe 0. V1b lo mostrará como aviso visual. |
 | origin | TEXT | no | — | CHECK: `seed`, `kitsu_import`, `manual`. De dónde nació este bookmark. **Implementa la regla dura del import**: si existe un bookmark con origin `seed`, el import de Kitsu no toca esta fila (solo enriquece la fila de `mangas`). |
 | last_read_at | TEXT | sí | null | Cuándo leí por última vez (timestamp completo). El seed puede dejarlo null; el import trae la última actividad de Kitsu como aproximación. |
+| status_changed_at | TEXT | sí | null | **Desde cuándo está en este `status`** (UTC). Agregada por la migración 2. Null = desconocido, y es un valor legítimo, no un hueco a rellenar (ver nota). Solo la escribe una transición real de estado. |
 | created_at | TEXT | no | — | |
 | updated_at | TEXT | no | — | |
 
 Índices/restricciones: UNIQUE sobre `manga_id`; índice sobre `status` (todas las consultas operativas filtran por estado).
+
+**Nota sobre `status_changed_at` (agregada en la v1.9)**. Responde una pregunta que el esquema no podía contestar: "¿desde cuándo está pausado esto?". Tres decisiones que la implementación debe respetar:
+
+1. **No hay backfill, y el null es la respuesta correcta.** Copiar `updated_at` a las filas existentes no habría sido una respuesta más débil sino una **equivocada**: esa columna se mueve con cualquier escritura, y las 141 filas `on_hold` de producción cargan exactamente **dos** valores distintos —el import de Kitsu y el movimiento manual que lo siguió—, así que ordenar por ella entrega dos bloques, no un orden. Null dice "no se sabe", que es cierto. Mismo principio que `reading_history`: se captura desde hoy, porque mañana sigue sin ser reconstruible.
+2. **Solo una transición real la sella.** Volver a elegir en el desplegable el estado que la fila ya tiene **no** es una transición y no toca la columna; sellarla ahí degradaría "pausado desde" hasta significar "última vez que toqué el select".
+3. **La columna se declara en `schema.sql` Y se registra como migración.** No es redundancia: el script solo construye bases nuevas (ver §Versionado del esquema). Quitar el registro y dejar la declaración deja la base de producción sin la columna, y el guardián de eso es `tests/storage/test_migrations.py`, que corre sobre archivo y no sobre `:memory:`.
 
 **Semántica operativa de los estados** (referencia para las specs de descubrimiento):
 - `reading`, `want_to_read` → activos: entran al barrido diario y sus matches del feed notifican.
@@ -240,7 +263,7 @@ Se descarta explícitamente una tabla de auditoría en DB: sería la versión en
 - **Tabla de notificaciones enviadas**: el dedupe de notificaciones ya lo garantiza `latest_chapter_num` (solo se notifica lo que lo supera, y al notificar se avanza). Registrar cada mensaje enviado no tiene consumidor en V1a. Si V1b quiere un historial de avisos, se agrega entonces.
 - **Tabla de pendientes de slug**: derivada, ver consulta 5.
 - **Tabla de auditoría**: ver estrategia de logging.
-- **Cache de portadas**: V1b (backlog). `cover_url` apunta al CDN externo mientras tanto.
+- **Cache de portadas**: existe desde V1b y **no es esquema**. Las imágenes se guardan como archivos en `data/covers/{manga_id}.{ext}`, junto al archivo de la base y dentro del mismo volumen persistido, así que sobreviven a un rebuild por la misma razón que la base. `mangas.cover_url` sigue guardando la **dirección**, que no es lo mismo que tener la imagen: los hosts de imágenes de la fuente responden 403 a un request sin su propio `Referer`, medido el 2026-08-18, así que una portada servida por hotlink se ve rota. Detalle completo en `spec-panel-v1b.md`. Ninguna columna nueva: el disco alcanza, y una tabla de blobs solo habría engordado el archivo que se respalda copiándolo.
 - **Selectores CSS en `sites`**: ver decisión en la tabla `sites`.
 - **Campos de hiatus** más allá de `publication_status`: la lógica diferida decidirá qué necesita (probablemente lea `chapter_history` y no requiera columnas nuevas).
 
@@ -260,10 +283,14 @@ Se descarta explícitamente una tabla de auditoría en DB: sería la versión en
 12. Sin tabla de usuarios, notificaciones ni pendientes.
 13. `manga_sites.consecutive_failures` como soporte del manejo de slugs muertos (lógica en la spec 3).
 14. Valores de `job_name`/`detected_via` nombrados por población (`active_sweep`, `onhold_sweep`), no por frecuencia.
+15. `bookmarks.status_changed_at` (migración 2) sin backfill: null = desconocido, y solo una transición real lo sella.
+16. El cache de portadas es de archivos, no de esquema: las imágenes van al disco junto a la base; `cover_url` guarda la dirección, no la imagen.
 
 ## Pendientes abiertos
 
-Ninguno a nivel de esquema. El documento está cerrado para implementación.
+- **Alta de mangas desde el panel (fase 3 de V1b) debe sellar `status_changed_at` al crear el bookmark.** Una fila nueva sí conoce la fecha de su estado inicial, así que dejarla en null ahí sería perder un dato disponible, no registrar un desconocido. No hay nada que cambiar hoy: ese formulario todavía no existe.
+
+Fuera de eso, el esquema está cerrado para implementación.
 
 ## Handoffs a la spec del descubrimiento (documento 3) — RESUELTOS
 
@@ -289,6 +316,15 @@ Si specs posteriores descubren cualquier otra necesidad de persistencia no conte
 | `MIGRATIONS` | `{número: función}`. Se aplican en orden, y `user_version` se escribe y commitea **después de cada una**, para que una interrupción deje el número describiendo lo que corrió y no lo que se pretendía. |
 
 **La decisión que hace que esto funcione**: `ensure_schema` mira si la base estaba vacía **antes** de ejecutar el script. Si nació en esa llamada, `schema.sql` ya la dejó al día y se la estampa con `SCHEMA_VERSION` sin migrar nada. Si ya existía, se le aplican las migraciones, que es el único camino capaz de alterar una tabla que SQLite ya creó.
+
+**Migraciones aplicadas hasta hoy** (`SCHEMA_VERSION` = 2):
+
+| Nº | Qué hace | Origen |
+|---|---|---|
+| 1 | `job_runs` gana `items_requested` e `items_skipped` | v1.8 de este documento |
+| 2 | `bookmarks` gana `status_changed_at` | v1.9 de este documento |
+
+Un número, una vez desplegado, es del `user_version` de esa base y no se reutiliza: **la migración que traiga `bookmarks.my_score` es la 3**, aunque `spec-panel-v1b.md` v1.0 la anunciara como la 2 — cuando se escribió esa spec el número estaba libre, y dejó de estarlo.
 
 **Reglas al agregar una migración:**
 

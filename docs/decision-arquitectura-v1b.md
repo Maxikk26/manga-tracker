@@ -1,6 +1,6 @@
 # Decisión de arquitectura: dónde vive el panel de V1b
 
-Versión 1.2 — 2026-08-17. Documento de decisión. Depende de `one-pager-v1a.md` (v1.14) y `spec-modelo-de-datos.md` (v1.8).
+Versión 1.2 — 2026-08-17. Documento de decisión. Depende de `one-pager-v1a.md` (v1.14) y `spec-modelo-de-datos.md` (v1.9).
 
 Cambios vs 1.1: **los tres pendientes abiertos se cierran** — `spec-panel-v1b.md` v1.0 existe y decide el framework (FastAPI) y la autenticación (ninguna mientras nada exponga el puerto fuera de la LAN). Se registra también la topología que esa spec fijó por decisión del dueño: el panel corre en **contenedor propio de la misma imagen**, para que un panel caído no tumbe la detección — el "sin segundo contenedor" de este documento rechazaba un runtime Node para SSR, no un segundo proceso Python, y la fila del Resumen ahora lo dice. Este documento queda como lo que siempre fue: el dónde y con qué; el qué vive en esa spec.
 

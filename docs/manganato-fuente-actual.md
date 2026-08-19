@@ -1,6 +1,6 @@
 # Fuente: manganato.gg (verificado 2026-07-20; re-verificado 2026-07-28 y 2026-07-31)
 
-Versión 1.4 — 2026-08-04. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.8).
+Versión 1.4 — 2026-08-04. Documento de apoyo del paquete SDD (no es una spec: describe la fuente, no el sistema). Alineado con el glosario de `spec-modelo-de-datos.md` (v1.9).
 
 Cambios vs 1.3: se escriben los hallazgos de la **ingeniería inversa del 2026-07-31** (§9.ter), que nunca se volcaron acá y que **contradicen cuatro afirmaciones de este documento**; y se agrega la sección `## Resumen` que exige la convención del `runbook-mantenimiento.md`. Lo que era falso, nombrado:
 
