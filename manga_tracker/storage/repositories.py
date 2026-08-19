@@ -18,6 +18,12 @@ import sqlite3
 
 from manga_tracker.storage.db import transaction
 
+# Re-exported so a caller outside `storage` (e.g. `intake.pasted_url`, which
+# must catch a unique-index race on `write_manual_add`) can recognize the
+# error without importing `sqlite3` itself — that import is confined to this
+# package (test_architecture.py's CONFINEMENT_RULES).
+IntegrityError = sqlite3.IntegrityError
+
 IMPORT_ORIGIN = "kitsu_import"
 IMPORT_DETECTED_VIA = "seed_backfill"
 PANEL_ORIGIN = "panel"
