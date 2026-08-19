@@ -29,3 +29,33 @@ export interface Bookmark {
 export type BookmarkPatch =
   | { last_chapter_read: number }
   | { status: BookmarkStatus };
+
+/** Wire shape of `POST /api/mangas/preview`'s 200 response (design's
+ *  Interfaces block, `AddPreview` echoed as JSON). No write happened yet. */
+export interface MangaPreview {
+  slug: string;
+  url: string;
+  title: string;
+  cover_url: string | null;
+  publication_status_text: string | null;
+}
+
+/** Body of `POST /api/mangas`. `url`/`title`/`cover_url` are the preview's own
+ *  fields echoed back verbatim (design D4) — the slug is re-derived
+ *  server-side, never trusted from the client. */
+export interface MangaAdd {
+  url: string;
+  title: string;
+  cover_url: string | null;
+  status: BookmarkStatus;
+  last_chapter_read: number;
+}
+
+/** The 409 conflict's sibling key (design's Error Taxonomy): names the
+ *  bookmark that already owns the slug/title and whether its status is
+ *  terminal, computed server-side so the frontend never re-derives it. */
+export interface ExistingManga {
+  title: string;
+  status: BookmarkStatus;
+  terminal: boolean;
+}
