@@ -58,15 +58,15 @@ describe("BookmarkListContainer", () => {
     expect(screen.getByText("Vagabond")).toBeInTheDocument();
 
     // The never-read row shows an em dash, not "null" or 0.
-    const berserkRow = screen.getByText("Berserk").closest("tr")!;
+    const berserkCard = screen.getByText("Berserk").closest("article")!;
     expect(
-      within(berserkRow).getByTitle(/haz clic para editar/i),
+      within(berserkCard).getByTitle(/haz clic para editar/i),
     ).toHaveTextContent("—");
-    expect(within(berserkRow).queryByText(/null/)).not.toBeInTheDocument();
+    expect(within(berserkCard).queryByText(/null/)).not.toBeInTheDocument();
 
     // The approx row carries the "~" marker.
-    const vagabondRow = screen.getByText("Vagabond").closest("tr")!;
-    expect(within(vagabondRow).getByTitle(/aproximado/i)).toHaveTextContent("~");
+    const vagabondCard = screen.getByText("Vagabond").closest("article")!;
+    expect(within(vagabondCard).getByTitle(/aproximado/i)).toHaveTextContent("~");
   });
 
   it("PATCHes only the changed field on an inline progress edit", async () => {
@@ -74,9 +74,9 @@ describe("BookmarkListContainer", () => {
     const user = userEvent.setup();
     render(<BookmarkListContainer />);
 
-    const row = (await screen.findByText("One Piece")).closest("tr")!;
-    await user.click(within(row).getByTitle(/haz clic para editar/i));
-    const input = within(row).getByRole("spinbutton");
+    const card = (await screen.findByText("One Piece")).closest("article")!;
+    await user.click(within(card).getByTitle(/haz clic para editar/i));
+    const input = within(card).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "1105{Enter}");
 
