@@ -73,8 +73,12 @@ export function BookmarkCard({ bookmark, saving, onChangeProgress, onChangeStatu
         >
           {poster}
           {bookmark.behind !== null && bookmark.behind > 0 && (
+            // Rounded for display. Chapter numbers are REAL — the source
+            // publishes 32.2 — so "behind" can legitimately be 21.5, but half a
+            // chapter is not a decision the pill helps with, and the exact
+            // value stays one hover away.
             <span className="behind-pill" title={`${bookmark.behind} sin leer`}>
-              +{bookmark.behind}
+              +{Math.round(bookmark.behind)}
             </span>
           )}
         </a>

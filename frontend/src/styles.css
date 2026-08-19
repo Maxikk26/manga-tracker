@@ -187,6 +187,11 @@ a.cover:hover {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* Always reserve both lines. Without this a one-line title pulls its
+     progress and status control up while the neighbour's stay down, and the
+     row reads as misaligned rather than as titles of different lengths. The
+     clamp already caps it at two, so this only pads the short ones. */
+  min-height: calc(2 * 1.25em);
 }
 
 .card-progress {
