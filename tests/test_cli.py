@@ -159,22 +159,29 @@ def test_run_hands_the_scheduler_every_configured_hour(tmp_path, monkeypatch):
 
 def test_panel_hands_uvicorn_the_app_for_the_configured_db_and_port(tmp_path, monkeypatch):
     """`panel` is wiring, and wiring is what this suite checks at the wiring
-    point: the app is built for DB_PATH, and uvicorn gets PANEL_PORT and the
-    LAN bind - a configured port that reached nothing is this repo's
-    recurring defect (see the scheduler-hours test above)."""
+    point: the app is built for DB_PATH with an injected `PastedUrlIntake`
+    (design D1/D8), and uvicorn gets PANEL_PORT and the LAN bind - a
+    configured port that reached nothing is this repo's recurring defect
+    (see the scheduler-hours test above)."""
     from manga_tracker import cli
 
     monkeypatch.setenv("DB_PATH", str(tmp_path / "panel.db"))
     monkeypatch.setenv("PANEL_PORT", "9111")
 
     captured = {}
-    monkeypatch.setattr(cli, "create_app", lambda db_path: {"db_path": db_path})
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: "the-client")
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+    monkeypatch.setattr(
+        cli, "create_app", lambda db_path, intake: {"db_path": db_path, "intake": intake}
+    )
     monkeypatch.setattr(
         cli.uvicorn, "run", lambda app, *, host, port: captured.update(app=app, host=host, port=port)
     )
 
     assert cli.main(["panel"]) == 0
-    assert captured["app"] == {"db_path": str(tmp_path / "panel.db")}
+    app = captured["app"]
+    assert app["db_path"] == str(tmp_path / "panel.db")
+    assert isinstance(app["intake"], cli.PastedUrlIntake)
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 9111
 

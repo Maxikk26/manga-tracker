@@ -8,7 +8,12 @@ this file and `__main__.py`, unchanged.
 `catalogue.transport` - and they are here for the same reason and under the
 same rule. KIT promises that replacing Kitsu with another catalogue is "una
 linea en cli.py"; the constructor in `_cmd_import_kitsu` is that line, and it
-is only true while no other module names the class."""
+is only true while no other module names the class.
+
+The panel's add flow (fase 3, design D1/D8) adds `intake.pasted_url` to the
+same list: `_cmd_panel` constructs the one `PastedUrlIntake` and hands it to
+`web.app.create_app` behind the `MangaIntake` Protocol, so `web` never names
+the concrete class itself."""
 
 import argparse
 import sys
@@ -30,6 +35,7 @@ from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
 from manga_tracker.importer.export import ExportError, read_export
 from manga_tracker.importer.pending import write_pending
 from manga_tracker.importer.run import STATUS_LOAD_ORDER, run_import
+from manga_tracker.intake.pasted_url import PastedUrlIntake
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
 from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, reap_stale_runs, run_job_once
@@ -236,10 +242,12 @@ def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
 
 
 def _bootstrap(config: AppConfig) -> tuple[int, ManganatoClient]:
-    """Shared by every subcommand that runs a job: `ensure_site` is called
-    only here, never by `scheduler.py`. The bootstrap connection closes right
-    away - each job run opens its own connection later, on its own worker
-    thread (design: one sqlite3 connection per run)."""
+    """Shared by every subcommand that needs a `site_id` and a client — every
+    job-running subcommand, and, since fase 3, `panel` too (design D8):
+    `ensure_site` is called only here, never by `scheduler.py` or `web.app`.
+    The bootstrap connection closes right away - each caller opens its own
+    connection later, on its own worker thread or its own request (design:
+    one sqlite3 connection per run)."""
     conn = connect(config.db_path)
     site_id = ensure_site(conn, "manganato", BASE_URL)
     conn.close()
@@ -283,8 +291,15 @@ def _cmd_panel(args: argparse.Namespace, config: AppConfig) -> int:
     """Serve the web panel (docs/spec-panel-v1b.md): its own process — in
     production its own container — so a hung panel cannot take detection down.
     0.0.0.0 because compose publishes the port to the home LAN, and the
-    declared no-auth decision is bound to exactly that scope."""
-    uvicorn.run(create_app(config.db_path), host="0.0.0.0", port=config.panel_port)
+    declared no-auth decision is bound to exactly that scope.
+
+    `PastedUrlIntake` is constructed here and nowhere else (design D1/D8):
+    `web` only ever sees it behind the `MangaIntake` Protocol it imports from
+    `intake.contracts`, never the concrete class.
+    """
+    site_id, client = _bootstrap(config)
+    intake = PastedUrlIntake(client, site_id, cache_dir_for(config.db_path))
+    uvicorn.run(create_app(config.db_path, intake), host="0.0.0.0", port=config.panel_port)
     return 0
 
 
