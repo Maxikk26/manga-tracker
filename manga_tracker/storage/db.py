@@ -12,7 +12,7 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 # Bump this with every migration added below, and never renumber an existing one:
 # the number is recorded in each deployed database's PRAGMA user_version.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -48,7 +48,28 @@ def _migration_1_job_runs_prefilter_split(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE job_runs ADD COLUMN {column} INTEGER")
 
 
-MIGRATIONS = {1: _migration_1_job_runs_prefilter_split}
+def _migration_2_bookmarks_status_changed_at(conn: sqlite3.Connection) -> None:
+    """bookmarks gains status_changed_at.
+
+    Deliberately NOT backfilled. The obvious candidate, `updated_at`, is not a
+    weaker answer but a wrong one: it moves on any edit, and in the production
+    database the 141 on_hold rows carry just two distinct values (the Kitsu
+    import and the manual move that followed it), so ordering by it yields two
+    blocks rather than an ordering. A null says "unknown", which is true;
+    copying updated_at would say "paused that day", which is not.
+
+    Same principle as reading_history: capture from today, because tomorrow it
+    is still unrecoverable.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(bookmarks)")}
+    if "status_changed_at" not in columns:
+        conn.execute("ALTER TABLE bookmarks ADD COLUMN status_changed_at TEXT")
+
+
+MIGRATIONS = {
+    1: _migration_1_job_runs_prefilter_split,
+    2: _migration_2_bookmarks_status_changed_at,
+}
 
 
 def _migrate(conn: sqlite3.Connection) -> int:

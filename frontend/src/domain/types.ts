@@ -20,6 +20,9 @@ export interface Bookmark {
   latest_chapter_at: string | null;
   behind: number | null;
   last_read_at: string | null;
+  /** When `status` last actually changed. Null for every row that predates the
+   *  column — that history is not reconstructible. */
+  status_changed_at: string | null;
 }
 
 /** Fields the panel is allowed to edit; sent one at a time. */

@@ -19,5 +19,13 @@ export default defineConfig({
     // describe/it/expect explicitly.
     globals: true,
     setupFiles: ["src/test/setup.ts"],
+    // Date formatting goes through Intl with no explicit timeZone, so it
+    // follows the machine. Pinned to the deployment zone: without this a
+    // date assertion passes in Caracas and fails everywhere else, which
+    // would make the UTC-to-local conversion untestable — the exact bug
+    // these tests exist to catch.
+    env: {
+      TZ: "America/Caracas",
+    },
   },
 });

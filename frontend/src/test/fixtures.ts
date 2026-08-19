@@ -1,6 +1,13 @@
 import type { Bookmark } from "../domain/types";
 
-/** Realistic wire-shaped bookmark; override per test. */
+/** Realistic wire-shaped bookmark; override per test.
+ *
+ * Timestamps use the exact format every backend writer emits
+ * (`%Y-%m-%dT%H:%M:%SZ`). They used to be SQLite-style "YYYY-MM-DD HH:MM:SS",
+ * which the API never sends — and a fixture that does not match the wire is a
+ * hole, not a detail: the tab ordering compares these strings directly, and a
+ * space sorts before "T".
+ */
 export function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
   return {
     id: 1,
@@ -11,9 +18,10 @@ export function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     progress_is_approx: false,
     latest_chapter_num: 1120,
     latest_chapter_url: "https://example.test/one-piece/chapter-1120",
-    latest_chapter_at: "2026-08-15 10:00:00",
+    latest_chapter_at: "2026-08-15T10:00:00Z",
     behind: 20,
-    last_read_at: "2026-08-10 03:00:00",
+    last_read_at: "2026-08-10T03:00:00Z",
+    status_changed_at: null,
     ...overrides,
   };
 }

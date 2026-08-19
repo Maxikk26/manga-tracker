@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     progress_is_approx INTEGER NOT NULL DEFAULT 0 CHECK (progress_is_approx IN (0, 1)),
     origin TEXT NOT NULL CHECK (origin IN ('seed', 'kitsu_import', 'manual')),
     last_read_at TEXT,
+    -- When `status` last actually changed. Null means unknown, which is what
+    -- every row imported or seeded before this column existed carries: that
+    -- history is not reconstructible, and `updated_at` is not a substitute for
+    -- it (it moves on any edit, so it cannot say when a manga was paused).
+    status_changed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
