@@ -10,6 +10,18 @@ source lives in `pasted_url.py`, never here.
 from dataclasses import dataclass
 from typing import Protocol
 
+# Re-exported so `web` can catch the source's failure taxonomy without ever
+# importing `sources` itself (spec.md "web never reaches the source, directly
+# or by sequencing it itself" — the enforceable form is that web may not
+# import `sources` at all, not even the Protocol). `pasted_url.py` lets these
+# propagate untranslated (design's Testing Strategy), so this is the one seam
+# through which their *type* — never their source — reaches `web`. Source-
+# agnostic categories by design (sources/contracts.py's own docstrings: "the
+# source reports...", "retryable failure...", "well-formed response with an
+# unexpected shape"), so re-exporting them is not the source knowledge this
+# module's docstring forbids.
+from manga_tracker.sources.contracts import NotFound, Transient, Unexpected  # noqa: F401
+
 
 @dataclass(frozen=True)
 class AddPreview:

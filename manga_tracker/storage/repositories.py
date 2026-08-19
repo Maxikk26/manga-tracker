@@ -18,9 +18,16 @@ import sqlite3
 
 from manga_tracker.storage.db import transaction
 
+# Re-exported so a caller outside `storage` (e.g. `intake.pasted_url`, which
+# must catch a unique-index race on `write_manual_add`) can recognize the
+# error without importing `sqlite3` itself — that import is confined to this
+# package (test_architecture.py's CONFINEMENT_RULES).
+IntegrityError = sqlite3.IntegrityError
+
 IMPORT_ORIGIN = "kitsu_import"
 IMPORT_DETECTED_VIA = "seed_backfill"
 PANEL_ORIGIN = "panel"
+MANUAL_ORIGIN = "manual"
 
 # The bookmark status enum exactly as the schema CHECK declares it. The panel
 # validates a request against this tuple before any SQL runs, so an invalid
@@ -269,6 +276,88 @@ def write_seed_backfill(conn, existing, title, site_id, slug, url, chapters, sta
             (status, last_chapter_read, now, existing_bm[0]),
         )
     conn.commit()
+
+
+# --- intake family (spec-panel-v1b.md fase 3, add-a-manga) --------------------
+
+
+def list_tracked_titles(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """`(title, status)` for every bookmarked manga — duplicate gates 2 and 3
+    (design D3). A manga always has exactly one bookmark by construction, so
+    this is one row per tracked title, not per manga_sites mapping."""
+    return [
+        tuple(row)
+        for row in conn.execute(
+            "SELECT m.title, b.status FROM bookmarks b JOIN mangas m ON m.id = b.manga_id"
+        )
+    ]
+
+
+def write_manual_add(
+    conn: sqlite3.Connection,
+    *,
+    title: str,
+    site_id: int,
+    slug: str,
+    url: str,
+    chapters,
+    status: str,
+    last_chapter_read: float,
+    cover_url: str | None,
+    now: str,
+) -> tuple[int, int]:
+    """`mangas` + `manga_sites` + `bookmarks` (+ `chapter_history`) in ONE
+    transaction (spec.md "Confirm is atomic; any rejection leaves zero rows").
+
+    `origin='manual'`, `progress_is_approx=0`, `status_changed_at=now` — a
+    fresh bookmark's status just changed, by definition, at the moment it was
+    created. `chapters` may be empty: `latest_chapter_num`/`_url`/`_at` stay
+    NULL and no `chapter_history` row is written — a legitimate state the next
+    `active_sweep` will seal once a chapter appears (design D5), not a dead
+    row. `detected_via` reuses `seed_backfill`: the CHECK constraint admits no
+    `'manual'`/`'panel'` value, so the existing value is reused, not invented.
+    `last_read_at` stays NULL: an initial chapter is progress, not a reading
+    event, and the `reading_history` trigger is UPDATE-only, so this INSERT
+    fires it not at all.
+
+    Returns `(manga_id, bookmark_id)`.
+    """
+    with transaction(conn):
+        manga_id = conn.execute(
+            "INSERT INTO mangas (title, cover_url, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (title, cover_url, now, now),
+        ).lastrowid
+        manga_site_id = conn.execute(
+            "INSERT INTO manga_sites (manga_id, site_id, source_key, url, last_checked_at, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (manga_id, site_id, slug, url, now, now, now),
+        ).lastrowid
+
+        if chapters:
+            newest = chapters[0]  # fetch_chapters returns newest-first
+            conn.execute(
+                "UPDATE manga_sites SET latest_chapter_num = ?, latest_chapter_url = ?, "
+                "latest_chapter_at = ? WHERE id = ?",
+                (newest.chapter_num, newest.url, newest.published_at, manga_site_id),
+            )
+            for chapter in chapters[:CHAPTER_HISTORY_LIMIT]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO chapter_history "
+                    "(manga_site_id, chapter_num, chapter_url, source_published_at, detected_at, detected_via) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (manga_site_id, chapter.chapter_num, chapter.url, chapter.published_at, now, IMPORT_DETECTED_VIA),
+                )
+        # else: latest_chapter_num/_url/_at stay NULL and no chapter_history
+        # row is written (D5) — the row is indistinguishable from any other
+        # NULL-latest mapping the sweep already knows how to handle.
+
+        bookmark_id = conn.execute(
+            "INSERT INTO bookmarks (manga_id, status, last_chapter_read, progress_is_approx, origin, "
+            "last_read_at, status_changed_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, 0, ?, NULL, ?, ?, ?)",
+            (manga_id, status, last_chapter_read, MANUAL_ORIGIN, now, now, now),
+        ).lastrowid
+    return manga_id, bookmark_id
 
 
 # --- panel family (spec-panel-v1b.md fase 1) -----------------------------------

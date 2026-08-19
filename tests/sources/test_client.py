@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_tracker.sources.contracts import NotFound, Response, Unexpected
+from manga_tracker.sources.contracts import NotFound, Response, SourceClient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -96,3 +96,20 @@ def test_fetch_manga_details_not_found():
 
     with pytest.raises(NotFound):
         client.fetch_manga_details("gone-manga")
+
+
+def _fetch_cover_through_the_protocol(client: SourceClient, cover_url: str) -> bytes:
+    """Typed against the Protocol, not the concrete class — proves
+    `fetch_cover` is reachable through a `SourceClient`-typed caller, the same
+    way `intake.pasted_url.PastedUrlIntake` holds its client (design D1/D9,
+    source-client spec.md "fetch_cover joins the SourceClient Protocol")."""
+    return client.fetch_cover(cover_url)
+
+
+def test_fetch_cover_is_reachable_through_a_sourceclient_typed_caller():
+    image = b"\x89PNG fake bytes"
+    transport = FakeTransport(Response(status=200, text="", headers={}, content=image))
+    client: SourceClient = ManganatoClient(transport)
+
+    assert _fetch_cover_through_the_protocol(client, "https://img-r2.2xstorage.com/thumb/x.webp") == image
+    assert transport.calls[0]["headers"]["Referer"] == f"{BASE_URL}/"

@@ -352,6 +352,14 @@ expressible; the fetch is outside the transaction, so the worst case is one wast
 that costs one request to fix. The panel has no auth by declared decision and is LAN-scoped, where any caller
 can already PATCH every bookmark — this is not a new trust boundary. Re-open it if the panel is ever exposed.
 
+A second **accepted risk**, recorded after slice 2 verification: `intake/contracts.py` re-exports the three
+failure categories (`NotFound`/`Transient`/`Unexpected`) from `sources.contracts` so that `web` can catch them
+without importing `sources`. Today this is a genuine re-export of source-agnostic categories, verified as such.
+The channel is structural, though: the AST check inspects direct imports only, so a future re-export of genuinely
+source-specific knowledge through `intake.contracts` would pass mechanically. The guard is review discipline plus
+this sentence: anything re-exported from `intake.contracts` must be a source-agnostic contract, never a concrete
+client symbol.
+
 ## Migration / Rollout
 
 No schema migration. Existing columns only (D5 confirms `latest_chapter_num` is already nullable), so no

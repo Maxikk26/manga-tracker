@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
-from manga_tracker.storage.cover_cache import cache_path, find_cached
+from manga_tracker.storage.cover_cache import find_cached, write_cover
 from manga_tracker.storage.db import connect
 from manga_tracker.storage.repositories import list_cover_candidates, set_manga_cover
 
@@ -142,12 +142,7 @@ def backfill_covers(
                 report.unexpected.append(title)
                 continue
 
-            destination = cache_path(cache_dir, manga_id, cover_url)
-            # Written whole then renamed: an interrupted write must not leave a
-            # truncated file that `find_cached` would report as done forever.
-            temporary = destination.with_suffix(destination.suffix + ".part")
-            temporary.write_bytes(image)
-            temporary.replace(destination)
+            destination = write_cover(cache_dir, manga_id, cover_url, image)
             report.files_written += 1
             logger.info("covers: cached %s for %r", destination.name, title)
 
