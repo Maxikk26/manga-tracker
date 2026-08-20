@@ -12,6 +12,10 @@
   --warn-soft: #fef3c7;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* The modal's own curve, matching the design's Modal UX decisions verbatim
+     -- a stronger ease-out than --ease-out above, kept separate rather than
+     changed in place since the cover-hover transition already relies on it. */
+  --ease-modal: cubic-bezier(0.23, 1, 0.32, 1);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light dark;
 }
@@ -59,13 +63,53 @@ body {
   margin: 0 0 1rem;
 }
 
+/* --- Toolbar (status tabs + add-manga button) --- */
+
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.add-manga-button {
+  flex-shrink: 0;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-modal);
+}
+
+.add-manga-button:hover {
+  filter: brightness(1.05);
+}
+
+.add-manga-button:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-manga-button {
+    transition: none;
+  }
+  .add-manga-button:active {
+    transform: none;
+  }
+}
+
 /* --- Status tabs --- */
 
 .status-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 1rem;
 }
 
 .tab {
@@ -298,4 +342,206 @@ a.cover:hover {
   padding: 0.5rem 0.75rem;
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
+}
+
+/* --- Add-manga modal --- */
+
+/* Occasional (per-visit, not per-click) surface, so it earns the animation
+   the cover hover and status select do not (emil-design-eng: "100+ times/day
+   -> no animation; occasional -> standard animation"). Entrance 200ms, exit
+   140ms, both --ease-modal -- never scale(0), the modal fades in already
+   visibly shaped. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(10, 10, 10, 0.45);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-modal);
+}
+
+.modal-backdrop.modal-open {
+  opacity: 1;
+}
+
+.modal-backdrop.modal-closing {
+  transition-duration: 140ms;
+  opacity: 0;
+}
+
+.modal {
+  width: min(420px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+  /* Modals are not anchored to a trigger, unlike a popover, so the origin
+     stays centered rather than following var(--transform-origin). */
+  transform-origin: center;
+  transform: scale(0.96);
+  opacity: 0;
+  transition: transform 200ms var(--ease-modal), opacity 200ms var(--ease-modal);
+}
+
+.modal.modal-open {
+  transform: scale(1);
+  opacity: 1;
+}
+
+.modal.modal-closing {
+  transition-duration: 140ms;
+  transform: scale(0.96);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal {
+    transition-property: opacity;
+    transform: none !important;
+  }
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.modal-field input,
+.modal-field select {
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.modal-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+}
+
+.modal-view-existing {
+  display: block;
+  margin-top: 0.4rem;
+  font: inherit;
+  font-size: 0.85rem;
+  border: none;
+  background: none;
+  color: var(--danger);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.modal-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.modal-preview-cover {
+  width: 56px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--accent-soft);
+}
+
+.modal-preview-cover-fallback {
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.modal-preview-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.modal-preview-status {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.modal-cancel,
+.modal-submit,
+.modal-confirm {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-modal);
+}
+
+.modal-cancel,
+.modal-submit {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.modal-confirm {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.modal-cancel:active,
+.modal-submit:active,
+.modal-confirm:active {
+  transform: scale(0.97);
+}
+
+.modal-cancel:disabled,
+.modal-submit:disabled,
+.modal-confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-cancel,
+  .modal-submit,
+  .modal-confirm {
+    transition: none;
+  }
+  .modal-cancel:active,
+  .modal-submit:active,
+  .modal-confirm:active {
+    transform: none;
+  }
 }
