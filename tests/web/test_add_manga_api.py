@@ -228,6 +228,19 @@ def test_transient_failure_is_503(db_path, tmp_path):
     assert "vuelve a intentar" in response.json()["detail"]
 
 
+def test_a_details_403_never_produces_a_200_preview_with_an_empty_title(db_path, tmp_path):
+    """D2/D5: when the source responds 403 to a details fetch, the client
+    raises Transient (not a 200 carrying an empty title), and the intake
+    layer's Transient reaches this endpoint as 503, never 200."""
+    client = _client(db_path, tmp_path, FakeIntake(preview_error=Transient("403 from source")))
+
+    response = client.post("/api/mangas/preview", json={"url": "https://www.manganato.gg/manga/some-manga"})
+
+    assert response.status_code == 503
+    assert "vuelve a intentar" in response.json()["detail"]
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
 def test_unexpected_response_is_502(db_path, tmp_path):
     client = _client(db_path, tmp_path, FakeIntake(confirm_error=Unexpected("shape")))
 

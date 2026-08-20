@@ -1,6 +1,6 @@
 # Medición: ventana del feed de manganato
 
-Versión 1.2 — 2026-08-08. Documento de apoyo del paquete SDD. Depende de `manganato-fuente-actual.md` (v1.4). Su resultado alimenta `spec-cliente-fuente-descubrimiento.md` (v1.8).
+Versión 1.2 — 2026-08-08. Documento de apoyo del paquete SDD. Depende de `manganato-fuente-actual.md` (v1.4). Su resultado alimenta `spec-cliente-fuente-descubrimiento.md` (v1.9).
 
 Cambios vs 1.1: **el intervalo pasa de 1 hora a 30 minutos** y el piso de 1 hora se retira de la regla de decisión, por evidencia de producción — cinco días con el feed sin aportar una sola detección. La medición de la ventana no cambia: los 41 minutos siguen siendo el número, y es justamente ese número el que el intervalo de 1 hora contradecía. Ver "Revisión 2026-08-08" al final.
 
