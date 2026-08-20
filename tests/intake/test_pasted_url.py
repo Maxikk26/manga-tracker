@@ -408,3 +408,42 @@ def test_confirm_a_concurrent_race_becomes_alreadytracked_not_a_500(conn, tmp_pa
     assert excinfo.value.title == "Winner Of The Race"
     # Only the racing winner's rows exist — the loser wrote nothing.
     assert conn.execute("SELECT COUNT(*) FROM mangas").fetchone()[0] == 1
+
+
+# ================================================================================
+# the request budget of one whole add
+# ================================================================================
+
+
+def test_the_whole_add_costs_exactly_three_source_requests(conn, tmp_path):
+    """The number the interactive traffic class is priced against.
+
+    Preview resolves the ficha (1), the modal asks for the cover image (2),
+    confirm reads the chapters (3) and promotes the already-fetched preview
+    file instead of downloading it again. Three, not four — and not two, which
+    would mean the modal is showing a placeholder where a cover exists.
+
+    Asserted as one sequence per operation rather than as a total, so a fourth
+    request is not only counted but attributed.
+    """
+    cache_dir = tmp_path / "covers"
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+    url = "https://www.manganato.gg/manga/some-manga"
+
+    preview = intake.preview(conn, url)
+    intake.preview_cover(preview.cover_url)
+    result = intake.confirm(
+        conn,
+        url=preview.url,
+        title=preview.title,
+        cover_url=preview.cover_url,
+        status="reading",
+        last_chapter_read=0.0,
+        now=NOW,
+    )
+
+    assert client.details_calls == ["some-manga"]
+    assert client.chapters_calls == ["some-manga"]
+    assert client.cover_calls == [COVER_URL]
+    assert result.cover_cached is True

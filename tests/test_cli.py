@@ -186,6 +186,65 @@ def test_panel_hands_uvicorn_the_app_for_the_configured_db_and_port(tmp_path, mo
     assert captured["port"] == 9111
 
 
+def _capture_transport_policies(cli, monkeypatch) -> list:
+    """Every `RequestPolicy` the command under test builds a transport with,
+    in order."""
+    policies = []
+
+    def _transport(**kwargs):
+        policies.append(kwargs.get("policy"))
+        return object()
+
+    monkeypatch.setattr(cli, "CurlCffiTransport", _transport)
+    return policies
+
+
+def test_the_panel_is_the_one_command_on_the_interactive_request_policy(tmp_path, monkeypatch):
+    """The traffic-class decision is wiring, so it is checked at the wiring
+    point. Three requests fired by one click do not deserve the 5-15s spacing
+    a 229-title unattended sweep does."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "panel.db"))
+    policies = _capture_transport_policies(cli, monkeypatch)
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: "the-client")
+    monkeypatch.setattr(cli, "create_app", lambda db_path, intake: object())
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, *, host, port: None)
+
+    assert cli.main(["panel"]) == 0
+
+    assert policies == [cli.INTERACTIVE_POLICY]
+
+
+def test_every_job_command_keeps_the_batch_request_policy(tmp_path, monkeypatch):
+    """The invariant that matters most: the interactive class is one keyword
+    away from the shared `_bootstrap`, and a job that drifted onto 1-2s spacing
+    would put 229 sequential requests through the source at six times the rate
+    the policy promises — with nobody watching to notice."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "jobs.db"))
+    policies = _capture_transport_policies(cli, monkeypatch)
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "TelegramSender", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "run_job_once", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "catch_up_sweep_if_overdue", lambda **k: False)
+
+    class Scheduler:
+        def start(self):
+            pass
+
+    monkeypatch.setattr(cli, "build_scheduler", lambda **kwargs: Scheduler())
+    monkeypatch.setattr(cli, "reap_stale_runs", lambda *a, **k: None)
+
+    assert cli.main(["run-job", "active_sweep"]) == 0
+    assert cli.main(["run"]) == 0
+
+    assert policies == [cli.BATCH_POLICY, cli.BATCH_POLICY]
+
+
 # --- import-kitsu -------------------------------------------------------------
 #
 # The doubles below can express failure on purpose. A catalogue that always
