@@ -3,9 +3,14 @@ a random 5-15s delay between consecutive requests but never before the first,
 a 30s timeout, and exactly one retry after a 30s wait on a transient failure —
 never more than two attempts per item per run.
 
+The delay is *spacing*, measured against a monotonic clock: what the policy
+owes is that two requests never land closer together than the draw, not that
+every call after the first sleeps. The distinction is invisible inside a batch
+and worth 15-45s per interactive add, which is why the clock is a seam here too.
+
 No test opens a socket and no test waits: `curl_get` is patched at this
-module's own call site and `sleeper`/`rng` are injected, which is the reason
-the constructor takes them at all.
+module's own call site and `sleeper`/`rng`/`clock` are injected, which is the
+reason the constructor takes them at all.
 """
 
 from types import SimpleNamespace
@@ -124,18 +129,43 @@ def _rng(value: float = STUB_DELAY):
     return _uniform
 
 
+def _clock(start: float = 1000.0):
+    """A hand-advanced monotonic clock, frozen unless a test moves it.
+
+    Frozen is the honest default for the delay assertions: with zero elapsed
+    time the transport owes the whole draw, which is exactly the batch case
+    (requests back to back) and keeps every assertion about the policy instead
+    of about how fast the test ran. `start` is deliberately not 0.0 —
+    `time.monotonic` has no defined epoch, so a transport that treated "small
+    number" as "never requested" would pass at 0.0 and fail in production.
+    """
+    state = {"now": start}
+
+    def _now() -> float:
+        return state["now"]
+
+    def _advance(seconds: float) -> None:
+        state["now"] += seconds
+
+    _now.advance = _advance
+    return _now
+
+
 def _harness(monkeypatch, *outcomes):
-    """A transport wired to the three seams every assertion in this file reads:
-    the scripted `curl_get`, the recording sleeper, and the recording rng."""
+    """A transport wired to the four seams every assertion in this file reads:
+    the scripted `curl_get`, the recording sleeper, the recording rng, and the
+    hand-advanced clock."""
     curl = _scripted_curl_get(*outcomes)
     monkeypatch.setattr(CALL_SITE, curl)
     sleeper = _sleeper()
     rng = _rng()
+    clock = _clock()
     return SimpleNamespace(
-        transport=CurlCffiTransport(sleeper=sleeper, rng=rng),
+        transport=CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock),
         curl=curl,
         sleeper=sleeper,
         rng=rng,
+        clock=clock,
     )
 
 
@@ -175,18 +205,94 @@ def test_the_delay_is_drawn_from_rng_between_5_and_15_seconds(monkeypatch):
 def test_the_first_request_of_each_transport_is_free(monkeypatch):
     """Why `fetch_latest_feed` pays no delay (SRC: "no aplica al feed, es un
     request aislado"). Nothing in the transport special-cases the feed — the
-    "have I requested yet" flag is per instance, so an operation that builds
-    its own transport for one call starts clean. A flag promoted to the class
-    would silently make the feed wait."""
+    last-request mark is per instance, so an operation that builds its own
+    transport for one call starts clean. A mark promoted to the class would
+    silently make the feed wait."""
     curl = _scripted_curl_get(FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
     monkeypatch.setattr(CALL_SITE, curl)
-    sleeper, rng = _sleeper(), _rng()
+    sleeper, rng, clock = _sleeper(), _rng(), _clock()
 
-    CurlCffiTransport(sleeper=sleeper, rng=rng).get(URL, headers={})
-    CurlCffiTransport(sleeper=sleeper, rng=rng).get(URL, headers={})
+    CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock).get(URL, headers={})
+    CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock).get(URL, headers={})
 
     assert sleeper.calls == []
     assert rng.calls == []
+
+
+# --- the delay is spacing, not a toll ---------------------------------------
+
+
+def test_no_sleep_when_the_window_already_passed_on_its_own(monkeypatch):
+    """The defect this file could not see. `cli.py` builds one transport for a
+    whole process, and under the old sticky boolean every request after the
+    first slept 5-15s — including one arriving an hour later, when the source
+    had already been left alone for an hour. Spacing that already happened must
+    not be paid for twice.
+    """
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
+
+    harness.transport.get(URL, headers={})
+    harness.clock.advance(3600.0)  # a human clicked "add" an hour after the last sweep request
+    harness.transport.get(URL, headers={})
+
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []
+    # The draw still happened: the transport has to know the window to know it
+    # elapsed. What must not happen is the sleep.
+    assert harness.rng.calls == [(SPEC_MIN_DELAY, SPEC_MAX_DELAY)]
+
+
+def test_only_the_remainder_of_the_window_is_slept(monkeypatch):
+    """Partial credit, which is the whole point of measuring instead of
+    flagging: 2s of the 7.25s draw already went by, so 5.25s are owed. Asserted
+    as arithmetic on the draw rather than as a constant — a transport that
+    ignored the elapsed time would sleep 7.25 and a transport that ignored the
+    draw would sleep something else entirely."""
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
+
+    harness.transport.get(URL, headers={})
+    harness.clock.advance(2.0)
+    harness.transport.get(URL, headers={})
+
+    assert harness.sleeper.calls == [STUB_DELAY - 2.0]
+
+
+def test_the_window_is_measured_from_the_last_attempt_not_the_last_success(monkeypatch):
+    """A request that failed still reached the source. Crediting only successes
+    would let a run of timeouts fire back to back — the opposite of what the
+    courtesy delay is for."""
+    harness = _harness(
+        monkeypatch,
+        RequestsError("timed out"),
+        RequestsError("timed out again"),
+        FakeCurlResponse(200, "ok"),
+    )
+
+    with pytest.raises(Transient):
+        harness.transport.get(URL, headers={})
+    harness.clock.advance(1.0)  # 1s since the second failed attempt
+    harness.transport.get(URL, headers={})
+
+    # The 30s retry wait, then the remainder of the courtesy window. If the
+    # failed attempts had not been marked, `_last_request_at` would still be
+    # None here and the second `get` would have been free.
+    assert harness.sleeper.calls == [SPEC_RETRY_WAIT, STUB_DELAY - 1.0]
+
+
+def test_the_batch_window_still_applies_in_full_to_back_to_back_requests(monkeypatch):
+    """The regression guard for the unattended jobs, which are the traffic the
+    policy exists for. A sweep fires its requests with no gap between them, so
+    elapsed time is ~0 and the transport owes the whole 5-15s draw — every
+    time, for as many requests as the sweep makes. Nothing about measuring
+    elapsed time is allowed to shorten that.
+    """
+    harness = _harness(monkeypatch, *[FakeCurlResponse(200, "ok")] * 4)
+
+    for _ in range(4):
+        harness.transport.get(URL, headers={})  # clock never advanced: no dead time to credit
+
+    assert harness.sleeper.calls == [STUB_DELAY] * 3
+    assert harness.rng.calls == [(SPEC_MIN_DELAY, SPEC_MAX_DELAY)] * 3
 
 
 def test_chrome_impersonation_reaches_curl_cffi(monkeypatch):
