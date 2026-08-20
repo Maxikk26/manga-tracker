@@ -310,6 +310,32 @@ def test_patch_progress_and_status_together(client, db_path):
     assert _history(conn, manga_id) == [(12.0, 10.0, "panel")]
 
 
+@pytest.mark.parametrize("status", ["completed", "dropped"])
+def test_patch_progress_on_an_already_terminal_bookmark_still_records(client, db_path, status):
+    """The spec's "terminal states are edited without side effects" bullet, for
+    the case the fase-1 verify report found untested: an edit of a row that is
+    ALREADY terminal, not a transition into one.
+
+    The distinction matters because the two cases exercise different code. A
+    transition carries a status change, so anything keyed on that change runs;
+    editing an already-terminal row changes only the chapter, and nothing in
+    the write path is conditional on status. This test pins that: the edit is
+    accepted, reading_history captures it, and the status is left alone.
+
+    "Terminal states consume nothing" is about the sweeps not visiting them —
+    it never meant the reader cannot correct their own progress afterwards.
+    """
+    conn = connect(db_path)
+    manga_id, bookmark_id = _bookmark(
+        conn, _site(conn), "One Piece", status=status, last_chapter_read=1000.0
+    )
+
+    body = client.patch(f"/api/bookmarks/{bookmark_id}", json={"last_chapter_read": 1001}).json()
+
+    assert (body["last_chapter_read"], body["status"]) == (1001.0, status)
+    assert _history(conn, manga_id) == [(1001.0, 1000.0, "panel")]
+
+
 def test_patch_unknown_bookmark_is_404(client, db_path):
     connect(db_path).close()  # bootstrap the schema; the table is just empty
     response = client.patch("/api/bookmarks/999", json={"last_chapter_read": 1})
