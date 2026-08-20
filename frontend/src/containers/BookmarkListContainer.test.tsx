@@ -153,7 +153,7 @@ describe("BookmarkListContainer", () => {
 
       await user.click(screen.getByRole("button", { name: "Agregar manga" }));
       await user.type(
-        screen.getByRole("textbox"),
+        screen.getByLabelText(/url de la ficha/i),
         "https://example.test/manga/chainsaw-man",
       );
       await user.click(screen.getByRole("button", { name: /vista previa/i }));
@@ -180,7 +180,7 @@ describe("BookmarkListContainer", () => {
 
       await user.click(screen.getByRole("button", { name: "Agregar manga" }));
       await user.type(
-        screen.getByRole("textbox"),
+        screen.getByLabelText(/url de la ficha/i),
         "https://example.test/manga/chainsaw-man",
       );
       await user.click(screen.getByRole("button", { name: /vista previa/i }));

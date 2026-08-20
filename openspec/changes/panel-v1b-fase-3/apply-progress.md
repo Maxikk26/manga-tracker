@@ -194,3 +194,13 @@ None.
 ### Status
 
 18/18 total tasks across the full change complete (Slice 1: 5/5, Slice 2: 7/7, Slice 3: 8/8). Ready for `sdd-verify` on the whole change, or for PR 3 to open against `feat/add-manga-endpoint` (once PR 2 merges, the orchestrator rebases this branch — not done here). No further apply work remains for `panel-v1b-fase-3`.
+
+## Post-verify real-use fixes (2026-08-19)
+
+Two fixes found by the owner minutes into real use of the add-manga modal, both on `feat/add-manga-modal`:
+
+1. **Preview cover 403'd on hotlink** (`fix(panel): proxy the preview cover through the API instead of hotlinking`). The modal rendered the raw CDN `cover_url` in its `<img>`; manganato's image hosts answer 403 without their own Referer (verified live), so every preview showed the fallback. `MangaIntake` gained `preview_cover(cover_url) -> (bytes, media type) | None` (URL gate, client fetch, atomic write to `covers/preview/<sha256[:16]>.<allow-listed suffix>`, None on any source failure), served by the new `GET /api/mangas/preview-cover?url=…` (404 when None, `Cache-Control: public, max-age=3600`). `confirm()` promotes the cached preview file — read, `write_cover`, delete — so the add's request budget stays at three (ficha + chapters + cover once). Abandoned preview files are small and regenerable; no GC, by decision. Files: `intake/contracts.py`, `intake/pasted_url.py`, `storage/cover_cache.py` (shared `_allowed_suffix`/`_write_atomic`, `preview_cache_path`, `write_preview`), `web/app.py`, `AddMangaModal.tsx` (+ tests on all three layers).
+
+2. **Native number input replaced by `DecimalInput`** (owner preference, standing): typing 170 into the chapter field showed "0170", and the native spinner is unwanted outright. New reusable `frontend/src/components/DecimalInput.tsx`: controlled text input, `inputMode="decimal"`, keystroke-level filter (digits plus at most one dot, leading-zero artifact stripped), starts empty with placeholder `0`; the container holds the draft as a string and submits `""` as 0. Future numeric fields reuse this component instead of `<input type="number">`. Files: `DecimalInput.tsx` (+ test), `AddMangaModal.tsx` (string-typed chapter props), `AddMangaContainer.tsx`, test updates in modal/container/`BookmarkListContainer` (label queries — the modal now has two textboxes).
+
+Verification: `uv run pytest -q` → 504 passed; `npm test` → 10 files, 101 tests passed; `npm run build` → clean.

@@ -23,7 +23,7 @@ function baseProps() {
     onChangeUrl: vi.fn(),
     status: "reading" as const,
     onChangeStatus: vi.fn(),
-    lastChapterRead: 0,
+    lastChapterRead: "",
     onChangeLastChapterRead: vi.fn(),
     preview: null,
     previewing: false,
@@ -41,9 +41,18 @@ describe("AddMangaModal", () => {
   it("renders as a dialog with a required, autofocused URL field", () => {
     render(<AddMangaModal {...baseProps()} />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    const input = screen.getByRole("textbox");
+    const input = screen.getByLabelText(/url de la ficha/i);
     expect(input).toHaveFocus();
     expect(input).toBeRequired();
+  });
+
+  it("the chapter field is the decimal text input, not a native number input", () => {
+    render(<AddMangaModal {...baseProps()} />);
+    const input = screen.getByLabelText(/capítulo inicial/i);
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("inputmode", "decimal");
+    expect(input).toHaveAttribute("placeholder", "0");
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
   });
 
   it("shows the preview panel with title, cover and publication status", () => {
@@ -120,9 +129,9 @@ describe("AddMangaModal", () => {
       <AddMangaModal {...baseProps()} preview={preview} confirming />,
     );
 
-    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(screen.getByLabelText(/url de la ficha/i)).toBeDisabled();
     expect(screen.getByRole("combobox")).toBeDisabled();
-    expect(screen.getByRole("spinbutton")).toBeDisabled();
+    expect(screen.getByLabelText(/capítulo inicial/i)).toBeDisabled();
     expect(screen.getByRole("button", { name: /cancelar/i })).toBeDisabled();
     expect(container.querySelector(".modal-confirm")).toBeDisabled();
   });
@@ -149,7 +158,7 @@ describe("AddMangaModal", () => {
     const onPreview = vi.fn();
     render(<AddMangaModal {...baseProps()} onPreview={onPreview} />);
 
-    fireEvent.submit(screen.getByRole("textbox").closest("form")!);
+    fireEvent.submit(screen.getByLabelText(/url de la ficha/i).closest("form")!);
 
     expect(onPreview).toHaveBeenCalledTimes(1);
   });

@@ -27,7 +27,10 @@ interface Props {
 export function AddMangaContainer({ onAdded, onViewExisting, onRequestClose }: Props) {
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<BookmarkStatus>("reading");
-  const [lastChapterRead, setLastChapterRead] = useState(0);
+  // A text draft, not a number: DecimalInput guarantees digits plus at most
+  // one dot, and starting empty (placeholder 0) is what kills the "0170"
+  // leading-zero artifact the native number input produced.
+  const [lastChapterRead, setLastChapterRead] = useState("");
   const [preview, setPreview] = useState<MangaPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -67,13 +70,16 @@ export function AddMangaContainer({ onAdded, onViewExisting, onRequestClose }: P
     setConfirming(true);
     setErrorMessage(null);
     setExisting(null);
+    // Number("") is 0 (empty submits as 0, by design); "." — a legal
+    // intermediate draft — is NaN, submitted as 0 too.
+    const parsedChapter = Number(lastChapterRead);
     try {
       const bookmark = await addManga({
         url: preview.url,
         title: preview.title,
         cover_url: preview.cover_url,
         status,
-        last_chapter_read: lastChapterRead,
+        last_chapter_read: Number.isFinite(parsedChapter) ? parsedChapter : 0,
       });
       onAdded(bookmark);
     } catch (error) {

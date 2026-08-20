@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { BOOKMARK_STATUSES, type BookmarkStatus, type ExistingManga, type MangaPreview } from "../domain/types";
 import { STATUS_LABELS } from "../domain/statusLabels";
+import { DecimalInput } from "./DecimalInput";
 
 interface Props {
   url: string;
   onChangeUrl: (value: string) => void;
   status: BookmarkStatus;
   onChangeStatus: (value: BookmarkStatus) => void;
-  lastChapterRead: number;
-  onChangeLastChapterRead: (value: number) => void;
+  /** Raw text draft — DecimalInput guarantees it is a positive decimal or
+   *  "" (the container submits "" as 0). */
+  lastChapterRead: string;
+  onChangeLastChapterRead: (value: string) => void;
   preview: MangaPreview | null;
   previewing: boolean;
   confirming: boolean;
@@ -139,16 +142,10 @@ export function AddMangaModal({
 
           <label className="modal-field">
             Capítulo inicial
-            <input
-              type="number"
-              min={0}
-              step="any"
+            <DecimalInput
               value={lastChapterRead}
+              onChange={onChangeLastChapterRead}
               disabled={busy}
-              onChange={(event) => {
-                const parsed = Number(event.target.value);
-                onChangeLastChapterRead(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
-              }}
             />
           </label>
 

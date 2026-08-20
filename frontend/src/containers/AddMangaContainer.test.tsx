@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 async function pasteUrl(user: ReturnType<typeof userEvent.setup>, url: string) {
-  await user.type(screen.getByRole("textbox"), url);
+  await user.type(screen.getByLabelText(/url de la ficha/i), url);
 }
 
 describe("AddMangaContainer", () => {
@@ -68,6 +68,52 @@ describe("AddMangaContainer", () => {
           cover_url: "https://example.test/cover.jpg",
           status: "reading",
           last_chapter_read: 0,
+        }),
+      }),
+    );
+  });
+
+  it("a typed chapter strips the leading-zero artifact and submits the decimal", async () => {
+    // The untouched field's case — empty submits as last_chapter_read: 0 —
+    // is already pinned by the previous test's confirm body.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/mangas/preview") {
+        return jsonResponse({
+          slug: "one-piece",
+          url: "https://example.test/manga/one-piece",
+          title: "One Piece",
+          cover_url: null,
+          publication_status_text: null,
+        });
+      }
+      return jsonResponse(makeBookmark({ id: 9, title: "One Piece" }), 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(
+      <AddMangaContainer onAdded={vi.fn()} onViewExisting={vi.fn()} onRequestClose={vi.fn()} />,
+    );
+
+    await pasteUrl(user, "https://example.test/manga/one-piece");
+    await user.click(screen.getByRole("button", { name: /vista previa/i }));
+    expect(await screen.findByText("One Piece")).toBeInTheDocument();
+
+    const chapterInput = screen.getByLabelText(/capítulo inicial/i) as HTMLInputElement;
+    await user.type(chapterInput, "0170.05");
+    expect(chapterInput.value).toBe("170.05"); // "0170" is impossible by construction
+
+    await user.click(screen.getByRole("button", { name: /^agregar$/i }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/mangas",
+      expect.objectContaining({
+        body: JSON.stringify({
+          url: "https://example.test/manga/one-piece",
+          title: "One Piece",
+          cover_url: null,
+          status: "reading",
+          last_chapter_read: 170.05,
         }),
       }),
     );
@@ -132,7 +178,7 @@ describe("AddMangaContainer", () => {
 
     // Editing the URL drops the stale preview: confirm is disabled again and
     // no POST /api/mangas is ever issued.
-    await user.type(screen.getByRole("textbox"), "x");
+    await user.type(screen.getByLabelText(/url de la ficha/i), "x");
 
     expect(screen.queryByText("One Piece")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^agregar$/i })).toBeDisabled();
