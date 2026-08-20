@@ -1,6 +1,6 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.11 — 2026-08-18. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.6).
+Versión 1.11 — 2026-08-18. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.7).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 
@@ -259,6 +259,8 @@ sqlite3 ~/manga-tracker-data/manga-tracker.db "select job_name,status,items_chec
 **Los domingos hay tres jobs en la misma hora y eso es esperado.** `active_sweep`, `heartbeat` y `onhold_sweep` comparten hora por defecto, y con un solo worker se **encolan**: los verás con `started_at` escalonado por lo que tardó el anterior, no simultáneos. Es lo que se quiere — cero concurrencia contra la fuente. Si la espera llegara a molestar, `ONHOLD_SWEEP_HOUR` mueve solo el semanal.
 
 **Silencio en Telegram no es señal de fallo.** Con títulos al día es el estado esperado durante días. Lo que sí es señal es un heartbeat que no llegó un lunes.
+
+**Tras desplegar la corrección de `spec-bot-telegram.md` v1.7, la primera lectura de "Última detección exitosa" puede salir igual o levemente más antigua que antes del despliegue.** Es la corrección funcionando, no un defecto: el cálculo ahora exige una corrida terminada con al menos un elemento revisado (`FINISHED_WITH_EVIDENCE`), y antes bastaba con `status = 'ok'`, valor que `open_run` ya escribe al abrir la fila, antes de que la corrida termine.
 
 ### Leer los status
 

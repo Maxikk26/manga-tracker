@@ -10,6 +10,7 @@ week. Read-only - adds no new state; job_runs already records every run."""
 
 from datetime import datetime, timedelta, timezone
 
+from manga_tracker.discovery import runs
 from manga_tracker.notifier.contracts import HeartbeatReport
 
 JOB_NAME = "heartbeat"
@@ -27,8 +28,8 @@ DEGRADED_WINDOW_DAYS = 7
 
 def _last_successful_run_at(conn) -> str | None:
     row = conn.execute(
-        "SELECT started_at FROM job_runs WHERE job_name IN (?, ?) AND status = 'ok' "
-        "ORDER BY started_at DESC LIMIT 1",
+        f"SELECT started_at FROM job_runs WHERE job_name IN (?, ?) AND status = 'ok' "
+        f"AND {runs.FINISHED_WITH_EVIDENCE} ORDER BY started_at DESC LIMIT 1",
         DETECTION_JOBS,
     ).fetchone()
     return row[0] if row is not None else None

@@ -13,6 +13,14 @@ class RunAlreadyOpen(Exception):
     """No new run while a prior run of the same job_name is still open."""
 
 
+# `open_run` below is what creates the ambiguity this fragment resolves: it
+# inserts status='ok' with finished_at NULL, so status='ok' alone cannot mean
+# "this run succeeded" - it also matches a run still in flight, or one whose
+# process died before closing it. Interpolate this into any query that means
+# "a run actually finished and looked at something", never repeat the literal.
+FINISHED_WITH_EVIDENCE = "finished_at IS NOT NULL AND IFNULL(items_checked, 0) > 0"
+
+
 def open_run(conn, job_name: str, now: str) -> int:
     open_row = conn.execute(
         "SELECT id FROM job_runs WHERE job_name = ? AND finished_at IS NULL", (job_name,)
