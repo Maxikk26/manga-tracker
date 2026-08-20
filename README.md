@@ -104,7 +104,9 @@ python -m manga_tracker cache-covers     # descarga las portadas a disco; one-of
 python -m manga_tracker run-job <job>    # corre un job una vez, fuera del scheduler
 ```
 
-Las tres cargas one-off (`seed`, `import-kitsu`, `cache-covers`) aceptan `--dry-run`: reportan qué harían sin gastar una sola petición. `run-job` no lo tiene — ejecuta el job de verdad. Todo lo que pega contra la fuente respeta el delay de 5-15 s entre peticiones y corre secuencial, sin concurrencia, por diseño.
+Las tres cargas one-off (`seed`, `import-kitsu`, `cache-covers`) aceptan `--dry-run`: reportan qué harían sin gastar una sola petición. `run-job` no lo tiene — ejecuta el job de verdad.
+
+Todo lo que pega contra la fuente corre secuencial, sin concurrencia, por diseño. El espaciado entre peticiones tiene **dos clases**: 5-15 s para todo lo no atendido (el scheduler y las tres cargas one-off) y 1-2 s para el alta manual del `panel`, donde los tres requests salen de un clic y hay alguien esperándolos. El motivo de las dos clases, y por qué el espaciado se mide por tiempo transcurrido y no por llamada, está en `docs/spec-cliente-fuente-descubrimiento.md` §"Política de request".
 
 En `frontend/`: `npm test`, `npm run dev` (proxy a `localhost:8000`) y `npm run build`.
 
@@ -143,12 +145,14 @@ Cada documento declara en su encabezado de qué versiones depende. Este mapa dic
 |---|---|
 | `one-pager-v1a.md` | modelo de datos, cliente+descubrimiento, bot, **runbook de despliegue, runbook de mantenimiento, spec del panel** |
 | `spec-modelo-de-datos.md` | cliente+descubrimiento, seed manual, fuente actual, **importador Kitsu, spec del panel** |
-| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana, **importador Kitsu** |
+| `spec-cliente-fuente-descubrimiento.md` | bot, seed manual, medición de ventana, **importador Kitsu**, ***runbook de despliegue, fuente actual*** |
 | `spec-bot-telegram.md` | **runbook de mantenimiento** |
 | `spec-seed-manual.md` | **runbook de despliegue, importador Kitsu** |
 | `manganato-fuente-actual.md` | cliente+descubrimiento, medición de ventana, **importador Kitsu** |
 | `one-pager-v1a.md` (de nuevo) | **decisión de arquitectura de V1b** |
 | `decision-arquitectura-v1b.md` | **spec del panel** |
+
+Las dos entradas en negrita cursiva se agregaron el 2026-08-19, al subir el cliente a v1.8: el mapa mandaba a revisar cuatro documentos y los que pineaban esa spec eran **seis**. `runbook-deploy.md` y `manganato-fuente-actual.md` la pinean en su encabezado desde antes y el mapa no lo decía, así que el comando de verificación del runbook encontraba pines que el mapa no anunciaba — exactamente al revés de para qué sirve el mapa.
 
 Las filas en negrita se agregaron el 2026-08-02: **el mapa mismo estaba desactualizado**. Le faltaban los dos runbooks, que pinean el one-pager desde que se escribieron, y dos documentos no tenían fila propia pese a ser pineados por otros. Un mapa incompleto es peor que no tenerlo, porque da la falsa seguridad de haber revisado.
 

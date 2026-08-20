@@ -7,6 +7,7 @@ source — manganato's image hosts answer 403 without a manganato Referer.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,7 @@ from manga_tracker.discovery.covers import backfill_covers
 from manga_tracker.storage.cover_cache import cache_path, find_cached
 from manga_tracker.sources.contracts import NotFound, Response, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
+from manga_tracker.sources.manganato.transport import CurlCffiTransport
 from manga_tracker.storage.db import connect
 
 NOW = "2026-08-18T12:00:00Z"
@@ -32,8 +34,10 @@ class FakeTransport:
         self._responses = list(responses)
         self.calls: list[dict] = []
 
-    def get(self, url, *, headers, timeout):
-        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+    def get(self, url, *, headers, timeout, retry=True):
+        self.calls.append(
+            {"url": url, "headers": headers, "timeout": timeout, "retry": retry}
+        )
         return self._responses.pop(0) if len(self._responses) > 1 else self._responses[0]
 
 
@@ -74,6 +78,46 @@ def test_fetch_cover_200_with_an_empty_body_is_unexpected():
     transport = FakeTransport(Response(status=200, text="", headers={}, content=b""))
     with pytest.raises(Unexpected):
         ManganatoClient(transport).fetch_cover("https://host/x.webp")
+
+
+def test_fetch_cover_opts_out_of_the_retry():
+    """The only operation that does. A cover that is not there is an ordinary
+    state, and the retry cannot change the answer — but it can cost the 30s
+    wait in front of it, which is what made one absent thumbnail measure 43.9s.
+    """
+    transport = FakeTransport(Response(status=200, text="", headers={}, content=IMAGE))
+
+    ManganatoClient(transport).fetch_cover("https://host/x.webp")
+
+    assert transport.calls[0]["retry"] is False
+
+
+def test_a_403_cover_costs_one_request_and_no_wait_through_the_real_transport(monkeypatch):
+    """The 43.9s regression guard, and a fake transport cannot be it: the retry
+    and its wait live in `CurlCffiTransport`, so opting out is only observable
+    there.
+
+    The measured path in production: the image hosts answer 403 for an absent
+    thumbnail, 403 is transient by SRC's taxonomy (a Cloudflare block looks the
+    same from outside), so the transport retried after 30s to be told 403
+    again. One attempt, no sleep, and the same `Unexpected` the intake already
+    catches — so the modal reaches its fallback in about a second.
+    """
+    calls = []
+
+    def _fake_curl_get(url, *, headers, timeout, impersonate):
+        calls.append(url)
+        return SimpleNamespace(status_code=403, text="denied", headers={}, content=b"denied")
+
+    monkeypatch.setattr("manga_tracker.sources.manganato.transport.curl_get", _fake_curl_get)
+    slept: list[float] = []
+    client = ManganatoClient(CurlCffiTransport(sleeper=slept.append))
+
+    with pytest.raises(Unexpected):
+        client.fetch_cover("https://img-r2.2xstorage.com/thumb/missing.webp")
+
+    assert len(calls) == 1  # not two
+    assert slept == []  # and no 30s wait between them
 
 
 # --- the file naming -----------------------------------------------------------

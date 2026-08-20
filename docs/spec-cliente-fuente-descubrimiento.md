@@ -1,6 +1,15 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.7 — 2026-08-08. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.9), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.8 — 2026-08-19. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.9), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+
+Cambios vs 1.7: **la política de request se parte en dos clases de tráfico**, y en el camino se corrigen tres cosas que tener una sola política escondía. Lo fuerza el uso real del panel, no revisión de documentos: agregar un manga a mano costaba entre 15 y 45 segundos de sleep contra 1-2 segundos de red real, y una portada ausente midió 43,9 s.
+
+- **Dos clases: `batch` e `interactive`.** El barrido no atendido conserva 5-15s exactos, sin cambio alguno; un alta iniciada por una persona usa 1-2s. El throttle existe para que un barrido de 229 títulos que corre solo todos los días no parezca un scraper enumerando el catálogo, y ahí los minutos son gratis porque nadie los espera. Tres requests disparados por un clic son **menos** tráfico que abrir esa misma ficha en un navegador, que carga decenas de recursos en dos segundos: espaciarlos 45 segundos no compra ninguna cortesía que la fuente pueda percibir, solo hace que el panel se sienta roto. La ventana interactiva lleva jitter y no es un 1,0s exacto, porque un intervalo regular es en sí mismo una señal de bot. Todo el resto de la política —secuencial, cero concurrencia, timeout de 30s, techo de dos intentos— es idéntico en las dos.
+- **El delay se mide por tiempo transcurrido, no por "¿ya hice algún request?".** Estaba implementado como un booleano pegajoso, y el proceso del panel construye **un** transporte para toda su vida: un request que llegaba horas después del anterior igual dormía 5-15s por un espaciado que el reloj de pared ya había dado. Ahora se duerme solo el remanente del sorteo. Dos requests siguen sin poder caer más cerca que lo que la política sortea, y uno que llega pasada la ventana es gratis. Dentro de un barrido no cambia nada: sus requests van uno detrás del otro, el transcurrido es ~0 y se paga el sorteo completo.
+- **La descarga de portada no reintenta.** Una portada que no está es un estado ordinario, no un fallo que valga 30 segundos: los hosts de imagen responden **403** cuando la miniatura no existe, 403 es transitorio en la taxonomía de esta spec porque un bloqueo de Cloudflare se ve igual desde afuera, y el segundo intento no podía cambiar la respuesta. Es la única operación con el reintento desactivado; el resto conserva su reintento único. La clasificación no cambia: el 403 sigue llegando como dato y sigue volviéndose "inesperado".
+- **La clase interactiva tampoco paga la espera de 30s previa al reintento.** `spec-panel-v1b.md` ya decidió que un fallo transitorio se le muestra al dueño, que vuelve a apretar, en vez de reintentarse en silencio; esperar 30s ahí solo demora un mensaje de error que la persona está mirando. El reintento se conserva —un parpadeo absorbido en un round-trip sigue valiendo— y la espera va a cero.
+
+Costo después del cambio, para el alta manual completa (3 requests: ficha, portada, capítulos): ~2-5 s, contra 15-45 s antes, y contra los 43,9 s medidos cuando la portada no existía. El costo del `batch` es el mismo de la v1.7, por construcción: la clase `batch` es el default y ningún job pasa otra cosa.
 
 Cambios vs 1.6: **el intervalo del feed baja de 1 hora a 30 minutos** (`FEED_CHECK_MINUTES`, default 30). Lo fuerza producción, no revisión: entre el 4 y el 8 de agosto el feed no aportó ninguna detección sobre títulos activos y todas las notificaciones salieron del barrido de las 22:00. El intervalo de 1 hora **excedía la ventana de 41 minutos** que lo originó, así que perdía publicaciones de forma sistemática; con el volumen de la lista caído a ~1 capítulo diario, esa pérdida pasó de ser un tercio a ser todo. Detalle, evidencia y el retiro del piso de 1 hora en `medicion-ventana-feed.md` v1.2. Se agrega también el pin a ese documento, que faltaba pese a que fija un parámetro de esta spec.
 
@@ -39,10 +48,14 @@ El cliente devuelve datos normalizados; el descubrimiento decide qué hacer con 
 |---|---|
 | Transporte | curl-cffi con impersonation de Chrome (verificado: pasa Cloudflare sin challenge). Sin Playwright. |
 | Referer | Al llamar el endpoint JSON, enviar como referer la URL de la ficha del manga correspondiente. |
-| Delay entre requests | Random 5-15s. Aplica entre llamadas consecutivas dentro de un barrido; no aplica al feed (es un request aislado). |
-| Timeout | 30 segundos por request. |
-| Reintentos | Un solo reintento ante error transitorio, esperando 30s. Si el reintento también falla, se reporta como fallo de ese ítem y se sigue. Nunca más de 2 intentos por ítem y por corrida. |
-| Concurrencia | Ninguna. Todo secuencial. |
+| **Clases de tráfico** | Dos, misma implementación y distintos números: **`batch`** (default — los tres jobs, el seed, el import, el backfill de portadas) e **`interactive`** (solo el alta manual del panel). La clase se elige en la raíz de composición y en ningún otro lugar; quien no elige, recibe `batch`. |
+| Delay entre requests | **Espaciado**, medido por tiempo transcurrido desde el request anterior: se duerme el remanente del sorteo, no el sorteo entero cuando el reloj ya lo cubrió. `batch`: random 5-15s. `interactive`: random 1-2s. No aplica antes del primer request de un transporte —el feed es un request aislado— y dentro de un barrido se paga completo, porque ahí el transcurrido es ~0. |
+| Timeout | 30 segundos por request. Igual en las dos clases. |
+| Reintentos | Un solo reintento ante error transitorio. La espera previa es de **30s en `batch`** y de **cero en `interactive`** (el panel le muestra el fallo al dueño en vez de reintentar en silencio). Si el reintento también falla, se reporta como fallo de ese ítem y se sigue. Nunca más de 2 intentos por ítem y por corrida, en ninguna de las dos clases. |
+| Excepción: portadas | La descarga de una portada **no reintenta**, en ninguna de las dos clases. Una portada ausente responde 403 y el segundo intento no cambia la respuesta; confirmarla costaba 30s de espera medidos. |
+| Concurrencia | Ninguna. Todo secuencial, en las dos clases. |
+
+**Por qué dos clases y no una.** El throttle existe para que un barrido de 229 títulos, corriendo solo todos los días, no parezca un scraper enumerando el catálogo; los minutos que cuesta son gratis porque nadie los espera. Tres requests disparados por un clic son menos tráfico que abrir esa misma ficha en un navegador, que carga decenas de recursos en dos segundos — así que espaciarlos 45 segundos no compra cortesía que la fuente pueda percibir, solo hace que el panel se sienta roto. La ventana interactiva se sortea entre 1 y 2 segundos y no es un 1,0s exacto a propósito: un intervalo regular es en sí mismo una señal de bot.
 
 ## Taxonomía de errores (la misma para las tres operaciones)
 
@@ -263,12 +276,14 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
 
 | Parámetro | Valor inicial |
 |---|---|
-| Intervalo del chequeo por feed | 1 hora (fijado por medición del 2026-07-28) |
+| Intervalo del chequeo por feed | 30 minutos (`FEED_CHECK_MINUTES`; era 1 hora, bajado el 2026-08-08 por quedar por encima de la ventana de 41 minutos) |
 | Frecuencia y hora del barrido de activos | Diario, hora fija (hoy 22:00 local, acoplada al refresco de la fuente) |
 | Día y hora del barrido de on-hold | Domingo, misma hora que el barrido de activos por defecto, configurable aparte |
-| Delay entre requests | Random entre 5 y 15 segundos |
-| Timeout por request | 30 segundos |
-| Reintentos por ítem | 1 |
+| Delay entre requests, clase `batch` | Random entre 5 y 15 segundos |
+| Delay entre requests, clase `interactive` | Random entre 1 y 2 segundos |
+| Espera antes del reintento | 30 segundos en `batch`, cero en `interactive` |
+| Timeout por request | 30 segundos, las dos clases |
+| Reintentos por ítem | 1; **cero para la descarga de portada** |
 | Límite de capítulos por llamada | 50 |
 | Umbral de fallos para pausar un mapeo | 5 |
 
@@ -283,8 +298,9 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
 ## Pendientes abiertos
 
 1. **Umbral de fallos consecutivos**: fijado en 5 por criterio, sin evidencia empírica. Revisable tras uso real.
+2. **La ventana de la clase `interactive`**: 1-2s se fijó por criterio, comparando contra lo que hace un navegador, no midiendo la tolerancia de la fuente. Lo que hay que vigilar es un 403 de la fuente durante un alta manual: sería la primera señal de que el ritmo molesta, y hoy nada la distingue de un 403 de Cloudflare por otra causa. Revisable tras uso real.
 
-Resuelto en la v1.1: el intervalo del chequeo por feed queda en 1 hora, fijado por medición (ver `medicion-ventana-feed.md`).
+Resuelto en la v1.1: el intervalo del chequeo por feed queda fijado por medición (ver `medicion-ventana-feed.md`); su valor vigente está en la tabla de parámetros.
 
 ## Cambio requerido en la spec del modelo de datos
 

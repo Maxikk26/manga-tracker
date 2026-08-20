@@ -17,8 +17,10 @@ class FakeTransport:
         self._response = response
         self.calls: list[dict] = []
 
-    def get(self, url, *, headers, timeout):
-        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+    def get(self, url, *, headers, timeout, retry=True):
+        self.calls.append(
+            {"url": url, "headers": headers, "timeout": timeout, "retry": retry}
+        )
         return self._response
 
 

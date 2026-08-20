@@ -13,11 +13,19 @@ the database does. No SQL here, and no sqlite3 import — this is the filesystem
 half of the same responsibility.
 """
 
+import hashlib
 from pathlib import Path
 from urllib.parse import urlparse
 
 #: Directory name, resolved relative to whatever directory holds the database.
 CACHE_DIRNAME = "covers"
+
+#: Subdirectory (inside the cache) for covers fetched during an add *preview*,
+#: before any manga row — and therefore any manga_id — exists. Keyed by a hash
+#: of the URL instead. A preview file is deleted when its add is confirmed
+#: (promoted to the real cache); one abandoned by a never-confirmed preview is
+#: small and regenerable, so nothing garbage-collects this directory.
+PREVIEW_DIRNAME = "preview"
 
 #: The only extensions a cached file may carry, each with the media type it is
 #: served as. A cover URL is third-party input, so the suffix is chosen from
@@ -56,18 +64,32 @@ def cache_dir_for(db_path: str) -> Path:
     return Path(db_path).resolve().parent / CACHE_DIRNAME
 
 
+def _allowed_suffix(cover_url: str) -> str:
+    """The URL's extension only after passing the allow list, so a hostile or
+    malformed URL cannot choose the filename's suffix."""
+    suffix = Path(urlparse(cover_url).path).suffix.lower()
+    return suffix if suffix in ALLOWED_SUFFIXES else ".jpg"
+
+
 def cache_path(cache_dir: Path, manga_id: int, cover_url: str) -> Path:
     """Where one manga's cover belongs, named by id rather than by title.
 
     The id is stable and filesystem-safe; titles carry slashes, quotes and
-    colons. The extension comes from the URL only after passing the allow list,
-    so a hostile or malformed URL cannot choose the filename — and since the
-    stem is an int, no path traversal is expressible.
+    colons. The extension passes the allow list (`_allowed_suffix`) — and
+    since the stem is an int, no path traversal is expressible.
     """
-    suffix = Path(urlparse(cover_url).path).suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        suffix = ".jpg"
-    return cache_dir / f"{manga_id}{suffix}"
+    return cache_dir / f"{manga_id}{_allowed_suffix(cover_url)}"
+
+
+def preview_cache_path(cache_dir: Path, cover_url: str) -> Path:
+    """Where a preview's cover belongs while its add has no manga_id yet.
+
+    Keyed by a hash of the URL — the one identity a preview has — truncated to
+    16 hex chars: plenty against accidental collision, and the stem stays a
+    fixed-alphabet string, so no path traversal is expressible here either.
+    """
+    digest = hashlib.sha256(cover_url.encode("utf-8")).hexdigest()[:16]
+    return cache_dir / PREVIEW_DIRNAME / f"{digest}{_allowed_suffix(cover_url)}"
 
 
 def find_cached(cache_dir: Path, manga_id: int) -> Path | None:
@@ -81,18 +103,31 @@ def find_cached(cache_dir: Path, manga_id: int) -> Path | None:
     return None
 
 
+def _write_atomic(destination: Path, image: bytes) -> Path:
+    """Written whole under a `.part` name then renamed — an interrupted write
+    must not leave a truncated file that `find_cached` would report as done
+    forever."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".part")
+    temporary.write_bytes(image)
+    temporary.replace(destination)
+    return destination
+
+
 def write_cover(cache_dir: Path, manga_id: int, cover_url: str, image: bytes) -> Path:
     """Write one cover's bytes to disk atomically, returning the final path.
 
     Moved out of `discovery/covers.py` (design D6): this module already owns
     "where cover images live on disk", and a second copy of the write is a
-    second place to get the crash-safety wrong. Written whole under a `.part`
-    name then renamed — an interrupted write must not leave a truncated file
-    that `find_cached` would report as done forever.
+    second place to get the crash-safety wrong.
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    destination = cache_path(cache_dir, manga_id, cover_url)
-    temporary = destination.with_suffix(destination.suffix + ".part")
-    temporary.write_bytes(image)
-    temporary.replace(destination)
-    return destination
+    return _write_atomic(cache_path(cache_dir, manga_id, cover_url), image)
+
+
+def write_preview(cache_dir: Path, cover_url: str, image: bytes) -> Path:
+    """Write one preview cover's bytes atomically, returning the final path.
+
+    Same crash-safety discipline as `write_cover`; only the naming differs
+    (see `preview_cache_path`).
+    """
+    return _write_atomic(preview_cache_path(cache_dir, cover_url), image)

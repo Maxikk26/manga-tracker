@@ -77,7 +77,11 @@ This file used to say "raise the sweep frequency — do not touch the feed", and
 
 ## Request policy (applies to all source operations)
 
-curl-cffi with Chrome impersonation, no Playwright. Organic `Referer` (the manga's page) when calling the JSON endpoint. Random 5-15s delay between consecutive requests, 30s timeout, exactly one retry on transient error, never more than two attempts per item per run, no concurrency.
+curl-cffi with Chrome impersonation, no Playwright. Organic `Referer` (the manga's page) when calling the JSON endpoint. 30s timeout, exactly one retry on transient error, never more than two attempts per item per run, no concurrency — all of that in both traffic classes below.
+
+**Two traffic classes, and the default is the conservative one.** `BATCH_POLICY` is 5-15s spacing with a 30s wait before the retry, and it covers everything unattended: the three jobs, `seed`, `import-kitsu`, `cache-covers`. `INTERACTIVE_POLICY` is 1-2s spacing with no retry wait, and `_cmd_panel` is its only caller. The reason the split is legitimate rather than a shortcut: the throttle exists so a 229-title sweep running alone every day does not look like a scraper enumerating a catalogue, while three requests fired by one human click are *less* traffic than opening the same page in a browser. Both classes stay sequential with zero concurrency; that part is not negotiable in either.
+
+Two things follow that are easy to undo by accident. **The delay is spacing measured against `time.monotonic`, not a toll charged per call** — sleep the remainder of the draw, never the whole draw when the wall clock already covered it. It was a sticky boolean until 2026-08-19, and because `cli.py` builds one transport per process, a request arriving hours later still slept 5-15s; free on a sweep, 15-45s per add on the panel. And **`fetch_cover` is the one operation that does not retry** (`retry=False` on the `Transport` Protocol): the image hosts answer 403 for an absent thumbnail, 403 is transient by the taxonomy below, and confirming a missing cover measured 43.9s. A cover that is not there is an ordinary state.
 
 Failures classify into three categories that discovery reacts to differently: **not found** (404 or false success — feeds the dead-slug counter), **transient** (timeout, 5xx, Cloudflare — says nothing about slug validity), **unexpected** (well-formed response with the wrong shape — the source probably changed; log the relevant fragment).
 

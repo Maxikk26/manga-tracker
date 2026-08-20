@@ -1,6 +1,6 @@
 # Spec: Seed manual — manga-tracker V1a
 
-Versión 2.4 — 2026-08-04. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.9) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.7).
+Versión 2.4 — 2026-08-04. Documento 5 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.9) y de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.8).
 
 Cambios vs 2.3: se cierra **cómo** se detecta el error «slug que en la base ya apunta a otro manga», que estaba enunciado sin decir contra qué se compara. La regla obvia —comparar el título— choca de frente con otra afirmación de este mismo documento: que el título tecleado no necesita ser el canónico porque Kitsu lo puede reemplazar. Se decide la comparación por título **con exención cuando el título es del catálogo**, y queda escrita abajo. Se registra además que el aviso de «más de 30 filas» no alcanza a la lista de pendientes del import de Kitsu (5 filas medidas), que se vuelve a comer por este mismo cargador. Y los pendientes abiertos dejan de decir «ninguno»: la invocación que omite las filas con error nunca se construyó.
 Cambios vs 2.2: la lista real y la base pasan a un directorio hermano del repositorio, fuera de él, porque `git clean -xdf` borra lo ignorado y ambos guardan data irreemplazable. Motivo completo en la sección del archivo.

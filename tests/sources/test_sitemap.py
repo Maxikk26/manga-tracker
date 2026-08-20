@@ -17,8 +17,8 @@ from manga_tracker.sources.contracts import Response, SourceClient, Transient, U
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 from manga_tracker.sources.manganato.sitemap import COMIC_SHARD_MARKER, DEFAULT_TIMEOUT
 from manga_tracker.sources.manganato.transport import (
-    MAX_DELAY_SECONDS,
-    MIN_DELAY_SECONDS,
+    BATCH_MAX_DELAY_SECONDS,
+    BATCH_MIN_DELAY_SECONDS,
     CurlCffiTransport,
 )
 
@@ -73,8 +73,10 @@ class ScriptedTransport:
         self._outcomes = list(outcomes)
         self.calls: list[dict] = []
 
-    def get(self, url, *, headers, timeout):
-        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+    def get(self, url, *, headers, timeout, retry=True):
+        self.calls.append(
+            {"url": url, "headers": headers, "timeout": timeout, "retry": retry}
+        )
         if not self._outcomes:
             raise AssertionError(f"unscripted request to {url}")
         outcome = self._outcomes.pop(0)
@@ -355,7 +357,7 @@ def test_every_request_after_the_first_pays_the_courtesy_delay(monkeypatch):
 
     assert slugs == frozenset({"one-piece", "solo-leveling"})
     assert len(sleeper.calls) == 2  # 3 requests, 2 delays: the sitemap gets no exemption
-    assert all(MIN_DELAY_SECONDS <= seconds <= MAX_DELAY_SECONDS for seconds in sleeper.calls)
+    assert all(BATCH_MIN_DELAY_SECONDS <= seconds <= BATCH_MAX_DELAY_SECONDS for seconds in sleeper.calls)
 
 
 def test_the_operation_shares_the_transport_so_an_earlier_request_still_counts(monkeypatch):
@@ -440,8 +442,12 @@ def test_fetch_known_slugs_is_on_the_source_client_contract_not_just_the_client(
     assert implementation.parameters["progress"].default is None
 
 
-def test_the_courtesy_window_is_the_source_wide_one():
+def test_the_courtesy_window_is_the_batch_one():
     """Pins SRC-2's numbers to the transport's, so an exemption smuggled in as
     a narrower window for this operation would have to move the shared
-    constants — and break every other test that reads them."""
-    assert (MIN_DELAY_SECONDS, MAX_DELAY_SECONDS) == (5.0, 15.0)
+    constants — and break every other test that reads them.
+
+    The sitemap operations are batch traffic by definition — thousands of slugs
+    for an unattended run — so the interactive class is not theirs to reach for.
+    """
+    assert (BATCH_MIN_DELAY_SECONDS, BATCH_MAX_DELAY_SECONDS) == (5.0, 15.0)

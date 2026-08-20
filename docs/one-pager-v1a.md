@@ -166,7 +166,7 @@ Tras cumplir 1-4: 1-2 semanas de uso real antes de abrir la spec de V1b. ✅ Cum
 ## Documentos siguientes (orden de producción en Fase 0)
 
 1. Spec del modelo de datos (esquema SQLite completo: 7 tablas, estados, índices, campos de cadencia futuros). ✅ cerrada, hoy en v1.9.
-2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada, hoy en v1.7.
+2. Spec del cliente de la fuente + descubrimiento (las 3 operaciones, parseo del feed, lógica de intersección y de las tres velocidades). ✅ cerrada, hoy en v1.8.
 3. Spec del bot Telegram (formato exacto de digest y heartbeat, manejo del token). ✅ cerrada, hoy en v1.6. **Ya no bloquea el corazón.**
 4. Spec del seed manual (formato del archivo de entrada, validaciones). ✅ cerrada, hoy en v2.4.
 5. Spec del importador Kitsu + matching de slugs. ✅ cerrada, hoy en v1.6 (`spec-importador-kitsu.md`). Con ella el paquete queda completo.

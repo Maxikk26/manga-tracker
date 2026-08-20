@@ -3,9 +3,14 @@ a random 5-15s delay between consecutive requests but never before the first,
 a 30s timeout, and exactly one retry after a 30s wait on a transient failure —
 never more than two attempts per item per run.
 
+The delay is *spacing*, measured against a monotonic clock: what the policy
+owes is that two requests never land closer together than the draw, not that
+every call after the first sleeps. The distinction is invisible inside a batch
+and worth 15-45s per interactive add, which is why the clock is a seam here too.
+
 No test opens a socket and no test waits: `curl_get` is patched at this
-module's own call site and `sleeper`/`rng` are injected, which is the reason
-the constructor takes them at all.
+module's own call site and `sleeper`/`rng`/`clock` are injected, which is the
+reason the constructor takes them at all.
 """
 
 from types import SimpleNamespace
@@ -22,7 +27,12 @@ import pytest
 from curl_cffi.requests import RequestsError
 
 from manga_tracker.sources.contracts import Response, Transient
-from manga_tracker.sources.manganato.transport import TRANSIENT_STATUS_CODES, CurlCffiTransport
+from manga_tracker.sources.manganato.transport import (
+    BATCH_POLICY,
+    INTERACTIVE_POLICY,
+    TRANSIENT_STATUS_CODES,
+    CurlCffiTransport,
+)
 
 # Patched here and not at `curl_cffi.requests.get`: `transport.py` does
 # `from curl_cffi.requests import get as curl_get`, so the name it calls is
@@ -40,6 +50,9 @@ SPEC_MAX_DELAY = 15.0
 SPEC_TIMEOUT = 30.0
 SPEC_RETRY_WAIT = 30.0
 SPEC_IMPERSONATE = "chrome"
+# The interactive class, likewise written out rather than imported.
+SPEC_INTERACTIVE_MIN_DELAY = 1.0
+SPEC_INTERACTIVE_MAX_DELAY = 2.0
 TRANSIENT_STATUSES = (403, 429, 500, 502, 503, 504)
 
 # What the stub `rng` returns. Inside 5-15 so it is a legal draw, but not a
@@ -124,18 +137,47 @@ def _rng(value: float = STUB_DELAY):
     return _uniform
 
 
-def _harness(monkeypatch, *outcomes):
-    """A transport wired to the three seams every assertion in this file reads:
-    the scripted `curl_get`, the recording sleeper, and the recording rng."""
+def _clock(start: float = 1000.0):
+    """A hand-advanced monotonic clock, frozen unless a test moves it.
+
+    Frozen is the honest default for the delay assertions: with zero elapsed
+    time the transport owes the whole draw, which is exactly the batch case
+    (requests back to back) and keeps every assertion about the policy instead
+    of about how fast the test ran. `start` is deliberately not 0.0 —
+    `time.monotonic` has no defined epoch, so a transport that treated "small
+    number" as "never requested" would pass at 0.0 and fail in production.
+    """
+    state = {"now": start}
+
+    def _now() -> float:
+        return state["now"]
+
+    def _advance(seconds: float) -> None:
+        state["now"] += seconds
+
+    _now.advance = _advance
+    return _now
+
+
+def _harness(monkeypatch, *outcomes, policy=BATCH_POLICY, delay=STUB_DELAY):
+    """A transport wired to the four seams every assertion in this file reads:
+    the scripted `curl_get`, the recording sleeper, the recording rng, and the
+    hand-advanced clock.
+
+    `policy` defaults to the batch one because that is what every caller
+    outside the panel gets — a harness that had to be told the class would let
+    a default flipped to "interactive" pass unnoticed."""
     curl = _scripted_curl_get(*outcomes)
     monkeypatch.setattr(CALL_SITE, curl)
     sleeper = _sleeper()
-    rng = _rng()
+    rng = _rng(delay)
+    clock = _clock()
     return SimpleNamespace(
-        transport=CurlCffiTransport(sleeper=sleeper, rng=rng),
+        transport=CurlCffiTransport(policy=policy, sleeper=sleeper, rng=rng, clock=clock),
         curl=curl,
         sleeper=sleeper,
         rng=rng,
+        clock=clock,
     )
 
 
@@ -175,18 +217,94 @@ def test_the_delay_is_drawn_from_rng_between_5_and_15_seconds(monkeypatch):
 def test_the_first_request_of_each_transport_is_free(monkeypatch):
     """Why `fetch_latest_feed` pays no delay (SRC: "no aplica al feed, es un
     request aislado"). Nothing in the transport special-cases the feed — the
-    "have I requested yet" flag is per instance, so an operation that builds
-    its own transport for one call starts clean. A flag promoted to the class
-    would silently make the feed wait."""
+    last-request mark is per instance, so an operation that builds its own
+    transport for one call starts clean. A mark promoted to the class would
+    silently make the feed wait."""
     curl = _scripted_curl_get(FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
     monkeypatch.setattr(CALL_SITE, curl)
-    sleeper, rng = _sleeper(), _rng()
+    sleeper, rng, clock = _sleeper(), _rng(), _clock()
 
-    CurlCffiTransport(sleeper=sleeper, rng=rng).get(URL, headers={})
-    CurlCffiTransport(sleeper=sleeper, rng=rng).get(URL, headers={})
+    CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock).get(URL, headers={})
+    CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock).get(URL, headers={})
 
     assert sleeper.calls == []
     assert rng.calls == []
+
+
+# --- the delay is spacing, not a toll ---------------------------------------
+
+
+def test_no_sleep_when_the_window_already_passed_on_its_own(monkeypatch):
+    """The defect this file could not see. `cli.py` builds one transport for a
+    whole process, and under the old sticky boolean every request after the
+    first slept 5-15s — including one arriving an hour later, when the source
+    had already been left alone for an hour. Spacing that already happened must
+    not be paid for twice.
+    """
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
+
+    harness.transport.get(URL, headers={})
+    harness.clock.advance(3600.0)  # a human clicked "add" an hour after the last sweep request
+    harness.transport.get(URL, headers={})
+
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []
+    # The draw still happened: the transport has to know the window to know it
+    # elapsed. What must not happen is the sleep.
+    assert harness.rng.calls == [(SPEC_MIN_DELAY, SPEC_MAX_DELAY)]
+
+
+def test_only_the_remainder_of_the_window_is_slept(monkeypatch):
+    """Partial credit, which is the whole point of measuring instead of
+    flagging: 2s of the 7.25s draw already went by, so 5.25s are owed. Asserted
+    as arithmetic on the draw rather than as a constant — a transport that
+    ignored the elapsed time would sleep 7.25 and a transport that ignored the
+    draw would sleep something else entirely."""
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "ok"))
+
+    harness.transport.get(URL, headers={})
+    harness.clock.advance(2.0)
+    harness.transport.get(URL, headers={})
+
+    assert harness.sleeper.calls == [STUB_DELAY - 2.0]
+
+
+def test_the_window_is_measured_from_the_last_attempt_not_the_last_success(monkeypatch):
+    """A request that failed still reached the source. Crediting only successes
+    would let a run of timeouts fire back to back — the opposite of what the
+    courtesy delay is for."""
+    harness = _harness(
+        monkeypatch,
+        RequestsError("timed out"),
+        RequestsError("timed out again"),
+        FakeCurlResponse(200, "ok"),
+    )
+
+    with pytest.raises(Transient):
+        harness.transport.get(URL, headers={})
+    harness.clock.advance(1.0)  # 1s since the second failed attempt
+    harness.transport.get(URL, headers={})
+
+    # The 30s retry wait, then the remainder of the courtesy window. If the
+    # failed attempts had not been marked, `_last_request_at` would still be
+    # None here and the second `get` would have been free.
+    assert harness.sleeper.calls == [SPEC_RETRY_WAIT, STUB_DELAY - 1.0]
+
+
+def test_the_batch_window_still_applies_in_full_to_back_to_back_requests(monkeypatch):
+    """The regression guard for the unattended jobs, which are the traffic the
+    policy exists for. A sweep fires its requests with no gap between them, so
+    elapsed time is ~0 and the transport owes the whole 5-15s draw — every
+    time, for as many requests as the sweep makes. Nothing about measuring
+    elapsed time is allowed to shorten that.
+    """
+    harness = _harness(monkeypatch, *[FakeCurlResponse(200, "ok")] * 4)
+
+    for _ in range(4):
+        harness.transport.get(URL, headers={})  # clock never advanced: no dead time to credit
+
+    assert harness.sleeper.calls == [STUB_DELAY] * 3
+    assert harness.rng.calls == [(SPEC_MIN_DELAY, SPEC_MAX_DELAY)] * 3
 
 
 def test_chrome_impersonation_reaches_curl_cffi(monkeypatch):
@@ -312,6 +430,153 @@ def test_the_response_is_normalized_and_never_curl_cffis_own_object(monkeypatch)
     assert (response.status, response.text) == (200, "<html/>")
     assert response.headers == {"Content-Type": "text/html"}
     assert response.headers is not raw.headers  # copied, not the source's own mapping
+
+
+# --- retry=False, the per-call opt-out --------------------------------------
+
+
+@pytest.mark.parametrize("status", TRANSIENT_STATUSES)
+def test_retry_false_makes_one_attempt_and_never_waits(monkeypatch, status):
+    """The scripted `curl_get` holds exactly one outcome, so a second attempt
+    would blow up rather than pass quietly."""
+    harness = _harness(monkeypatch, FakeCurlResponse(status, "denied"))
+
+    response = harness.transport.get(URL, headers={}, retry=False)
+
+    assert response.status == status  # still data, still the client's to classify
+    assert len(harness.curl.calls) == 1
+    assert harness.sleeper.calls == []
+
+
+def test_retry_false_still_raises_transient_on_a_network_failure(monkeypatch):
+    """Opting out of the retry does not opt out of the taxonomy: a connection
+    error is still `Transient`, so the caller reacts exactly as before —
+    `PastedUrlIntake.preview_cover` catches it and falls back."""
+    only = RequestsError("connection reset")
+    harness = _harness(monkeypatch, only)
+
+    with pytest.raises(Transient) as raised:
+        harness.transport.get(URL, headers={}, retry=False)
+
+    assert raised.value.__cause__ is only
+    assert len(harness.curl.calls) == 1
+    assert harness.sleeper.calls == []
+    # The message must not claim a retry that never happened: a log line saying
+    # "after one retry" sends the reader hunting for a second request.
+    assert "one retry" not in str(raised.value)
+
+
+def test_retry_false_still_pays_the_spacing_it_owes(monkeypatch):
+    """The opt-out is about the retry, not about the courtesy delay. A cover
+    request is still a request to the source and still has to be spaced."""
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "img"))
+
+    harness.transport.get(URL, headers={})
+    harness.transport.get(URL, headers={}, retry=False)
+
+    assert harness.sleeper.calls == [STUB_DELAY]
+
+
+def test_retry_defaults_to_on_so_every_other_operation_keeps_it(monkeypatch):
+    harness = _harness(monkeypatch, FakeCurlResponse(503), FakeCurlResponse(200, "second try"))
+
+    assert harness.transport.get(URL, headers={}).text == "second try"
+    assert len(harness.curl.calls) == 2
+
+
+# --- the two traffic classes ------------------------------------------------
+#
+# The batch numbers are asserted by every test above, which all run on the
+# default policy. What is left to pin is that the interactive class is a
+# genuinely different set of numbers and that opting into it changes nothing
+# else about the policy.
+
+INTERACTIVE_STUB_DELAY = 1.4  # inside 1-2, not a round number a constant would use
+
+
+def test_the_interactive_class_draws_its_spacing_from_a_one_to_two_second_window(monkeypatch):
+    """One human click makes three requests; 5-15s apiece turns that into 15-45s
+    of sleep against ~1-2s of real network. Opening the same page in a browser
+    is dozens of requests in two seconds, so this pacing is still less traffic
+    than a human reading the site — which is the argument that made the class
+    legitimate rather than a shortcut."""
+    harness = _harness(
+        monkeypatch,
+        *[FakeCurlResponse(200, "ok")] * 2,
+        policy=INTERACTIVE_POLICY,
+        delay=INTERACTIVE_STUB_DELAY,
+    )
+
+    harness.transport.get(URL, headers={})
+    harness.transport.get(URL, headers={})
+
+    assert harness.rng.calls == [(SPEC_INTERACTIVE_MIN_DELAY, SPEC_INTERACTIVE_MAX_DELAY)]
+    assert harness.sleeper.calls == [INTERACTIVE_STUB_DELAY]
+
+
+def test_the_interactive_class_still_pays_no_spacing_before_its_first_request(monkeypatch):
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), policy=INTERACTIVE_POLICY)
+
+    harness.transport.get(URL, headers={})
+
+    assert harness.sleeper.calls == []
+    assert harness.rng.calls == []
+
+
+@pytest.mark.parametrize("status", TRANSIENT_STATUSES)
+def test_the_interactive_class_retries_without_the_thirty_second_wait(monkeypatch, status):
+    """The panel spec already decided a `Transient` reaches the owner, who
+    presses again, instead of being retried silently. So the wait in front of
+    the retry buys nothing here: it delays an error message the human is
+    already waiting on. The retry itself stays — a blip absorbed in one
+    round-trip is still worth having — and two attempts is still the ceiling.
+    """
+    harness = _harness(
+        monkeypatch,
+        FakeCurlResponse(status, "down"),
+        FakeCurlResponse(status, "still down"),
+        policy=INTERACTIVE_POLICY,
+    )
+
+    response = harness.transport.get(URL, headers={})
+
+    assert response.status == status
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []  # not [0.0]: nothing was waited on at all
+
+
+def test_a_transient_that_survives_the_interactive_retry_raises_without_waiting(monkeypatch):
+    harness = _harness(
+        monkeypatch,
+        RequestsError("timed out"),
+        RequestsError("timed out again"),
+        policy=INTERACTIVE_POLICY,
+    )
+
+    with pytest.raises(Transient):
+        harness.transport.get(URL, headers={})
+
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []
+
+
+def test_the_batch_class_is_the_default_and_carries_the_spec_numbers():
+    """A caller that does not think about traffic class must get the
+    conservative one. Every job in `cli.py` is such a caller, and the
+    interactive class is one keyword away — a flipped default would quietly put
+    the 229-title sweep on 1-2s spacing.
+    """
+    assert CurlCffiTransport()._policy is BATCH_POLICY
+    assert (BATCH_POLICY.min_delay_seconds, BATCH_POLICY.max_delay_seconds) == (
+        SPEC_MIN_DELAY,
+        SPEC_MAX_DELAY,
+    )
+    assert BATCH_POLICY.retry_wait_seconds == SPEC_RETRY_WAIT
+    assert (INTERACTIVE_POLICY.min_delay_seconds, INTERACTIVE_POLICY.max_delay_seconds) == (
+        SPEC_INTERACTIVE_MIN_DELAY,
+        SPEC_INTERACTIVE_MAX_DELAY,
+    )
+    assert INTERACTIVE_POLICY.retry_wait_seconds == 0.0
 
 
 def test_the_transient_status_set_is_exactly_the_documented_one():

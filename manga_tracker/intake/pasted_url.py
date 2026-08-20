@@ -6,11 +6,17 @@ reconciliation key 3 (design D9)."""
 
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from manga_tracker.importer import matching
 from manga_tracker.intake.contracts import AddPreview, AddResult, AlreadyTracked, InvalidUrl
 from manga_tracker.sources.contracts import NotFound, SourceClient, Transient, Unexpected
-from manga_tracker.storage.cover_cache import write_cover
+from manga_tracker.storage.cover_cache import (
+    media_type_for,
+    preview_cache_path,
+    write_cover,
+    write_preview,
+)
 from manga_tracker.storage.repositories import (
     IntegrityError,
     find_slug_owner,
@@ -52,6 +58,27 @@ class PastedUrlIntake:
             publication_status_text=details.publication_status_text,
         )
 
+    def preview_cover(self, cover_url: str) -> tuple[bytes, str] | None:
+        """The preview's cover image, fetched through the client (which owns
+        the Referer the image hosts demand) and cached under covers/preview/
+        keyed by the URL — no manga_id exists yet. A repeat ask replays the
+        cached file, and `confirm()` promotes it, so the whole add still
+        costs three requests (ficha + chapters + cover once). None on an
+        unacceptable URL or any source failure: a missing preview image is
+        ordinary, never an error."""
+        if not _acceptable_cover_url(cover_url):
+            return None
+        path = preview_cache_path(self._cache_dir, cover_url)
+        if path.exists():
+            return path.read_bytes(), media_type_for(path)
+        try:
+            image = self._client.fetch_cover(cover_url)
+        except (NotFound, Transient, Unexpected) as exc:
+            logger.warning("intake: preview cover fetch failed for %r: %s", cover_url, exc)
+            return None
+        write_preview(self._cache_dir, cover_url, image)
+        return image, media_type_for(path)
+
     def confirm(
         self,
         conn,
@@ -72,6 +99,14 @@ class PastedUrlIntake:
         slug = self._client.extract_slug(url)
         if slug is None:
             raise InvalidUrl(f"no slug segment could be extracted from {url!r}")
+
+        if cover_url is not None and not _acceptable_cover_url(cover_url):
+            # The server will GET this client-echoed URL (design D4), and the
+            # stored value feeds the cache-covers backfill later — so anything
+            # that is not https with a real host is dropped before it is
+            # stored or fetched. The add stands, like any other missing cover.
+            logger.warning("intake: dropping non-https cover_url %r", cover_url)
+            cover_url = None
 
         self._check_gates_before_request(conn, slug)
         self._check_gate_after_ficha(conn, title)
@@ -108,13 +143,22 @@ class PastedUrlIntake:
         cover_cached = False
         if cover_url:
             # Outside the transaction, on purpose (design D6): the add must
-            # stand even when the cover never arrives.
+            # stand even when the cover never arrives — OSError included, so
+            # a filesystem hiccup after the commit cannot become a 500.
+            preview_path = preview_cache_path(self._cache_dir, cover_url)
             try:
-                image = self._client.fetch_cover(cover_url)
+                if preview_path.exists():
+                    # Promote the file `preview_cover()` already fetched:
+                    # zero source requests, which is what keeps the whole
+                    # add at three (ficha + chapters + cover once).
+                    image = preview_path.read_bytes()
+                else:
+                    image = self._client.fetch_cover(cover_url)
                 write_cover(self._cache_dir, manga_id, cover_url, image)
+                preview_path.unlink(missing_ok=True)
                 cover_cached = True
-            except (NotFound, Transient, Unexpected) as exc:
-                logger.warning("intake: cover fetch failed for manga %s: %s", manga_id, exc)
+            except (NotFound, Transient, Unexpected, OSError) as exc:
+                logger.warning("intake: cover caching failed for manga %s: %s", manga_id, exc)
 
         return AddResult(
             manga_id=manga_id,
@@ -146,6 +190,13 @@ class PastedUrlIntake:
         for title, status in list_tracked_titles(conn):
             if matching.normalize(title) == normalized:
                 raise AlreadyTracked(title=title, status=status)
+
+
+def _acceptable_cover_url(cover_url: str) -> bool:
+    """https with a non-empty host, nothing else — the design's threat matrix
+    promises exactly this gate on the one URL the client echoes back."""
+    parts = urlsplit(cover_url)
+    return parts.scheme == "https" and bool(parts.netloc)
 
 
 def _status_of(tracked: list[tuple[str, str]], title: str) -> str:

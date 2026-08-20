@@ -6,7 +6,7 @@ import pytest
 from manga_tracker.intake.contracts import AlreadyTracked, InvalidUrl
 from manga_tracker.intake.pasted_url import PastedUrlIntake
 from manga_tracker.sources.contracts import Chapter, MangaDetails, NotFound, Transient, Unexpected
-from manga_tracker.storage.cover_cache import find_cached
+from manga_tracker.storage.cover_cache import find_cached, preview_cache_path, write_preview
 from manga_tracker.storage.db import connect
 
 NOW = "2026-08-19T12:00:00Z"
@@ -189,6 +189,52 @@ def test_preview_returns_the_matched_metadata_and_writes_nothing(conn):
 
 
 # ================================================================================
+# preview_cover()
+# ================================================================================
+
+
+COVER_URL = "https://host/cover.webp"
+
+
+def test_preview_cover_fetches_once_and_replays_from_the_cache_file(tmp_path):
+    cache_dir = tmp_path / "covers"
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+    first = intake.preview_cover(COVER_URL)
+    second = intake.preview_cover(COVER_URL)
+
+    assert first == (IMAGE, "image/webp")
+    assert second == first
+    assert client.cover_calls == [COVER_URL]  # the replay cost zero requests
+    cached = preview_cache_path(cache_dir, COVER_URL)
+    assert cached.exists() and cached.suffix == ".webp"
+    assert cached.read_bytes() == IMAGE
+
+
+@pytest.mark.parametrize("bad", ["http://host/cover.webp", "not-a-url", "https:///no-host.webp"])
+def test_preview_cover_rejects_an_unacceptable_url_without_fetching(tmp_path, bad):
+    """Same gate as confirm's (`_acceptable_cover_url`): the server GETs this
+    client-echoed URL, so anything not https-with-a-host never reaches the
+    client. None, not an exception — the modal just shows its placeholder."""
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=tmp_path / "covers")
+
+    assert intake.preview_cover(bad) is None
+    assert client.cover_calls == []
+
+
+@pytest.mark.parametrize("error", [NotFound("gone"), Transient("timeout"), Unexpected("shape")])
+def test_preview_cover_source_failure_is_none_not_an_error(tmp_path, error):
+    cache_dir = tmp_path / "covers"
+    client = FakeClient(cover_error=error)
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+    assert intake.preview_cover(COVER_URL) is None
+    assert not preview_cache_path(cache_dir, COVER_URL).exists()  # nothing half-written
+
+
+# ================================================================================
 # confirm()
 # ================================================================================
 
@@ -217,6 +263,36 @@ def _confirm(conn, cache_dir, *, status="reading", last_chapter_read=0.0, **clie
     return result, client
 
 
+def test_confirm_drops_a_non_https_cover_url_without_fetching_or_storing_it(conn, tmp_path):
+    """The threat-matrix gate: the server GETs the client-echoed cover_url,
+    so anything that is not https with a real host never reaches the client
+    or the mangas row. The add itself stands, like any missing cover."""
+    cache_dir = tmp_path / "covers"
+    for bad in ("http://host/cover.webp", "not-a-url", "https:///no-host.webp"):
+        conn.execute("DELETE FROM bookmarks")
+        conn.execute("DELETE FROM chapter_history")
+        conn.execute("DELETE FROM manga_sites")
+        conn.execute("DELETE FROM mangas")
+        client = FakeClient()
+        intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+        result = intake.confirm(
+            conn,
+            url="https://www.manganato.gg/manga/some-manga",
+            title="Some Manga",
+            cover_url=bad,
+            status="reading",
+            last_chapter_read=0.0,
+            now=NOW,
+        )
+
+        assert result.cover_cached is False, bad
+        assert client.cover_calls == [], bad  # never fetched
+        stored = conn.execute("SELECT cover_url FROM mangas").fetchone()[0]
+        assert stored is None, bad  # never stored, so no backfill will fetch it either
+        assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 1, bad
+
+
 def test_confirm_happy_path_writes_all_four_tables(conn, tmp_path):
     cache_dir = tmp_path / "covers"
 
@@ -230,6 +306,30 @@ def test_confirm_happy_path_writes_all_four_tables(conn, tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM chapter_history").fetchone()[0] == 2
     assert find_cached(cache_dir, result.manga_id) is not None
+
+
+def test_confirm_promotes_a_cached_preview_cover_without_fetching(conn, tmp_path):
+    """The request-budget half of the preview cache: when `preview_cover()`
+    already fetched the image, confirm reads the file, writes the real cover
+    and deletes the preview — zero cover requests, so the whole add stays at
+    three (ficha + chapters + the cover the preview already paid for)."""
+    cache_dir = tmp_path / "covers"
+    write_preview(cache_dir, "https://host/cover.webp", IMAGE)
+
+    result, client = _confirm(conn, cache_dir)
+
+    assert result.cover_cached is True
+    assert client.cover_calls == []  # promoted, never re-fetched
+    promoted = find_cached(cache_dir, result.manga_id)
+    assert promoted is not None and promoted.read_bytes() == IMAGE
+    assert not preview_cache_path(cache_dir, "https://host/cover.webp").exists()
+
+
+def test_confirm_fetches_the_cover_when_no_preview_file_exists(conn, tmp_path):
+    result, client = _confirm(conn, tmp_path / "covers")
+
+    assert result.cover_cached is True
+    assert client.cover_calls == ["https://host/cover.webp"]
 
 
 def test_confirm_zero_chapters_is_a_successful_add_with_null_latest(conn, tmp_path):
@@ -308,3 +408,42 @@ def test_confirm_a_concurrent_race_becomes_alreadytracked_not_a_500(conn, tmp_pa
     assert excinfo.value.title == "Winner Of The Race"
     # Only the racing winner's rows exist — the loser wrote nothing.
     assert conn.execute("SELECT COUNT(*) FROM mangas").fetchone()[0] == 1
+
+
+# ================================================================================
+# the request budget of one whole add
+# ================================================================================
+
+
+def test_the_whole_add_costs_exactly_three_source_requests(conn, tmp_path):
+    """The number the interactive traffic class is priced against.
+
+    Preview resolves the ficha (1), the modal asks for the cover image (2),
+    confirm reads the chapters (3) and promotes the already-fetched preview
+    file instead of downloading it again. Three, not four — and not two, which
+    would mean the modal is showing a placeholder where a cover exists.
+
+    Asserted as one sequence per operation rather than as a total, so a fourth
+    request is not only counted but attributed.
+    """
+    cache_dir = tmp_path / "covers"
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+    url = "https://www.manganato.gg/manga/some-manga"
+
+    preview = intake.preview(conn, url)
+    intake.preview_cover(preview.cover_url)
+    result = intake.confirm(
+        conn,
+        url=preview.url,
+        title=preview.title,
+        cover_url=preview.cover_url,
+        status="reading",
+        last_chapter_read=0.0,
+        now=NOW,
+    )
+
+    assert client.details_calls == ["some-manga"]
+    assert client.chapters_calls == ["some-manga"]
+    assert client.cover_calls == [COVER_URL]
+    assert result.cover_cached is True

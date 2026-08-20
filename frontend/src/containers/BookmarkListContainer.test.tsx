@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BookmarkListContainer } from "./BookmarkListContainer";
 import { makeBookmark } from "../test/fixtures";
@@ -28,9 +28,9 @@ const payload: Bookmark[] = [
   }),
 ];
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -107,5 +107,93 @@ describe("BookmarkListContainer", () => {
     expect(
       screen.getByRole("button", { name: "Reintentar" }),
     ).toBeInTheDocument();
+  });
+
+  describe("adding a manga", () => {
+    const previewBody = {
+      slug: "chainsaw-man",
+      url: "https://example.test/manga/chainsaw-man",
+      title: "Chainsaw Man",
+      cover_url: null,
+      publication_status_text: "Finalizado",
+    };
+
+    function stubFetchWithAdd(addedBookmark: Bookmark) {
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (init?.method === "PATCH") return jsonResponse({});
+          if (url === "/api/mangas/preview") return jsonResponse(previewBody);
+          if (url === "/api/mangas") return jsonResponse(addedBookmark, 201);
+          return jsonResponse(payload);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("opens the add-manga dialog from the toolbar button", async () => {
+      stubFetchWithAdd(makeBookmark({ id: 4, title: "Chainsaw Man", status: "completed" }));
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("One Piece");
+
+      await user.click(screen.getByRole("button", { name: "Agregar manga" }));
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("a successful add refetches, closes the modal and switches to the added bookmark's tab", async () => {
+      const fetchMock = stubFetchWithAdd(
+        makeBookmark({ id: 4, title: "Chainsaw Man", status: "completed" }),
+      );
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("One Piece");
+
+      await user.click(screen.getByRole("button", { name: "Agregar manga" }));
+      await user.type(
+        screen.getByLabelText(/url de la ficha/i),
+        "https://example.test/manga/chainsaw-man",
+      );
+      await user.click(screen.getByRole("button", { name: /vista previa/i }));
+      expect(await screen.findByText("Chainsaw Man")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /^agregar$/i }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // Switched to the added bookmark's own status tab ("completed"), so the
+      // "reading" tab's One Piece card is no longer the visible grid.
+      expect(screen.queryByText("One Piece")).not.toBeInTheDocument();
+      // Refetched: the GET was called again after the confirm POST.
+      const gets = fetchMock.mock.calls.filter(
+        ([requestInput, init]) => String(requestInput) === "/api/bookmarks" && !init?.method,
+      );
+      expect(gets).toHaveLength(2);
+    });
+
+    it("closing the modal without confirming (Cancelar) sends no confirm request", async () => {
+      const fetchMock = stubFetchWithAdd(makeBookmark({ id: 4, title: "Chainsaw Man" }));
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("One Piece");
+
+      await user.click(screen.getByRole("button", { name: "Agregar manga" }));
+      await user.type(
+        screen.getByLabelText(/url de la ficha/i),
+        "https://example.test/manga/chainsaw-man",
+      );
+      await user.click(screen.getByRole("button", { name: /vista previa/i }));
+      expect(await screen.findByText("Chainsaw Man")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /cancelar/i }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(
+        fetchMock.mock.calls.some(([requestInput]) => String(requestInput) === "/api/mangas"),
+      ).toBe(false);
+      // The grid is unchanged: still on "reading", still showing One Piece.
+      expect(screen.getByText("One Piece")).toBeInTheDocument();
+    });
   });
 });

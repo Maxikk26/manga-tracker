@@ -120,24 +120,87 @@ Status: **done**. Tasks 2.1–2.7 complete, on branch `feat/add-manga-endpoint`,
 
 None.
 
-### Remaining tasks (Slice 3, not started)
+## Slice 3 — Frontend modal, container integration, Vitest coverage (PR 3, ~725 lines forecast)
 
-- [ ] 3.1 `frontend/src/api/http.ts`
-- [ ] 3.2 `frontend/src/api/mangas.ts`
-- [ ] 3.3 `frontend/src/domain/types.ts` extensions
-- [ ] 3.4 `frontend/src/components/AddMangaModal.tsx`
-- [ ] 3.5 `frontend/src/containers/AddMangaContainer.tsx`
-- [ ] 3.6 `frontend/src/containers/BookmarkListContainer.tsx` changes
-- [ ] 3.7 `frontend/src/styles.css` additions
-- [ ] 3.8 `npm run build` + `npm test` end to end
+Status: **done**. Tasks 3.1–3.8 complete, on branch `feat/add-manga-modal`, created from `feat/add-manga-endpoint` (slice 2, PR 2 pending merge at the time this slice started). This is the last slice of the change.
+
+### Completed tasks
+
+- [x] 3.1 Created `frontend/src/api/http.ts`: `ApiError` (now carrying an optional `existing: ExistingManga`) and `readDetail` (now returning `{detail, existing?}`), moved out of `bookmarks.ts`. `bookmarks.ts` imports from it and re-exports `ApiError` so existing importers do not churn. `frontend/src/api/http.test.ts` added (9 tests: plain detail, `existing` parsing, a malformed `existing` ignored, unparsable body, `ApiError` carrying/omitting `existing`).
+- [x] 3.2 Created `frontend/src/api/mangas.ts`: `previewManga(url)` / `addManga(body) -> Bookmark`, both routing non-ok responses through `readDetail` so a 409's `existing` survives as `ApiError.existing`; network failures map to the same Spanish-copy pattern `bookmarks.ts` already uses. `frontend/src/api/mangas.test.ts` added (6 tests: request bodies, 409 `existing` propagation for both preview and confirm, network-failure mapping).
+- [x] 3.3 Extended `frontend/src/domain/types.ts`: `MangaPreview` (incl. `publication_status_text`), `MangaAdd` request type, `ExistingManga` — the typed wire contracts for `POST /api/mangas{,/preview}`, matching `web/app.py`'s actual response/request shapes (verified against the slice-2 code, not the design's prose).
+- [x] 3.4 Created `frontend/src/components/AddMangaModal.tsx`: pure `<div role="dialog" aria-modal="true">` chrome (not `<dialog>`, per design — jsdom's `showModal` is uneven) + `<form>` (URL required/autofocused, status `<select>` over `BOOKMARK_STATUSES`/`STATUS_LABELS`, optional initial-chapter number input `min=0` defaulting to `0`, confirm disabled until a preview exists) + a preview panel (title, cover `<img>` with an `onError` fallback to a "Sin portada" placeholder, `publication_status_text` as muted secondary text) + the duplicate/terminal `Ver en «{label}»` affordance shown alongside the Spanish `errorMessage` when `existing` is present. Escape and backdrop-click request a close that is ignored while `previewing || confirming`; entrance (200ms) and exit (140ms) both use the design's own `cubic-bezier(0.23, 1, 0.32, 1)` curve (added as a new `--ease-modal` CSS variable, kept separate from the existing `--ease-out` token used by the cover hover), never `scale(0)`, and a `prefers-reduced-motion` block strips the transform and keeps only the opacity transition. `frontend/src/components/AddMangaModal.test.tsx` added (10 tests).
+- [x] 3.5 Created `frontend/src/containers/AddMangaContainer.tsx`: owns `url`/`status`/`lastChapterRead`, the preview and confirm round-trips, `errorMessage`, and `existing`. Editing the URL after a preview (or after a rejection) clears `preview`/`existing`/`errorMessage`, so a stale preview can never be confirmed against an edited URL. `frontend/src/containers/AddMangaContainer.test.tsx` added (3 tests: preview→confirm request bodies, the terminal-409 reactivation sentence and its button calling `onViewExisting` with the raw status, and abandoning a shown preview by editing the URL sending zero confirm requests).
+- [x] 3.6 Modified `frontend/src/containers/BookmarkListContainer.tsx`: added an "Agregar manga" button beside `StatusTabs` inside a new `.panel-toolbar` row, and conditionally mounts `AddMangaContainer`. On success: close the modal, `setActiveStatus(added.status)`, and fire `load(false)` for the full refetch. On the "Ver en «…»" affordance: close the modal and switch to that existing status tab, with zero confirm requests. Extended `BookmarkListContainer.test.tsx` with +3 cases (renamed `jsonResponse` to accept an optional status for the 201 case).
+- [x] 3.7 Modified `frontend/src/styles.css`: the `.panel-toolbar`/`.add-manga-button` styles, and the full modal/backdrop/form/preview-panel rule set (`.modal-backdrop`, `.modal`, `.modal-field`, `.modal-error`, `.modal-view-existing`, `.modal-preview*`, `.modal-actions`, `.modal-cancel/-submit/-confirm`), plus the new `--ease-modal` token. No dedicated test file — covered by `AddMangaModal.test.tsx`'s behavior assertions (class toggling, disabled states).
+- [x] 3.8 Ran `npm run build` (`tsc --noEmit && vite build`) and `npm test` end to end — both green — and `uv run pytest -q` to confirm the untouched backend suite stayed green.
+
+### Files changed (Slice 3)
+
+| File | Action | What was done |
+|------|--------|---------------|
+| `frontend/src/api/http.ts` | Created | `ApiError` (+`existing`), `readDetail` (returns `{detail, existing?}`) |
+| `frontend/src/api/http.test.ts` | Created | 9 tests |
+| `frontend/src/api/bookmarks.ts` | Modified | Imports `ApiError`/`readDetail` from `http.ts`, re-exports `ApiError`, updated the two `readDetail` call sites for the new return shape |
+| `frontend/src/api/mangas.ts` | Created | `previewManga`, `addManga` |
+| `frontend/src/api/mangas.test.ts` | Created | 6 tests |
+| `frontend/src/domain/types.ts` | Modified | `MangaPreview`, `MangaAdd`, `ExistingManga` |
+| `frontend/src/components/AddMangaModal.tsx` | Created | Pure dialog chrome, form, preview panel, duplicate affordance, entrance/exit animation |
+| `frontend/src/components/AddMangaModal.test.tsx` | Created | 10 tests |
+| `frontend/src/containers/AddMangaContainer.tsx` | Created | url/status/chapter state, preview/confirm calls, error/`existing` state |
+| `frontend/src/containers/AddMangaContainer.test.tsx` | Created | 3 tests |
+| `frontend/src/containers/BookmarkListContainer.tsx` | Modified | Toolbar button, conditional `AddMangaContainer` mount, success/duplicate handlers |
+| `frontend/src/containers/BookmarkListContainer.test.tsx` | Modified | +3 tests (`jsonResponse` gained an optional `status` parameter) |
+| `frontend/src/styles.css` | Modified | Toolbar, modal/backdrop/form/preview rules, `--ease-modal` token |
+| `openspec/changes/panel-v1b-fase-3/tasks.md` | Modified | Tasks 3.1–3.8 marked `[x]` |
+
+### Commits (branch `feat/add-manga-modal`, off `feat/add-manga-endpoint`)
+
+1. `12026ca` — `feat(frontend): extract api/http.ts and add the add-manga wire types`
+2. `bd8e2dd` — `feat(frontend): add the mangas API client (preview/confirm)`
+3. `ee53487` — `feat(frontend): add the AddMangaModal component and its styles`
+4. `ba1a898` — `feat(frontend): add AddMangaContainer wiring preview/confirm state`
+5. `14121b8` — `feat(frontend): wire the add-manga modal into BookmarkListContainer`
+6. `071e640` — `docs(tasks): mark slice 3 tasks 3.1-3.8 complete`
+
+### Work Unit Evidence (Slice 3)
+
+| Evidence | Value |
+|---|---|
+| Focused test command and result | `npm test` (Vitest) → 9 test files, 82 tests passed |
+| Full frontend build | `npm run build` (`tsc --noEmit && vite build`) → clean, no type errors, `dist/` produced |
+| Backend regression check | `uv run pytest -q` → 492 passed, 1 pre-existing warning (unrelated, same as slice 2) — confirms the untouched Python backend stayed green |
+| Runtime harness | `npm run build` then the manual click-through described in tasks.md's work-unit table (paste URL → preview → confirm → grid refetch) was exercised indirectly via `BookmarkListContainer.test.tsx`'s new integration cases (real fetch stubs, real DOM, real state transitions) rather than a live click-through against the owner's running :8000/:5173 processes, per the environment note that those must not be restarted or interfered with. The component/container/integration test layers together already exercise every step of that path against the actual wire shapes read from `web/app.py`. |
+| Rollback boundary | Revert `frontend/src/api/http.ts`, `frontend/src/api/mangas.ts` (+ their tests), the `domain/types.ts` additions, `frontend/src/components/AddMangaModal.tsx` (+ test), `frontend/src/containers/AddMangaContainer.tsx` (+ test), the `BookmarkListContainer.tsx`/`.test.tsx` edits, and the `styles.css` additions. `bookmarks.ts`'s two-line import change also reverts. Slices 1–2 (backend) keep working via `curl` with no frontend at all, exactly as tasks.md's own rollback note for this unit states. |
+
+### Deviations from design (Slice 3)
+
+- **No explicit "Preview"-vs-"Confirm" trigger was specified in design's Modal UX section beyond "confirm disabled until a preview exists".** Implemented the URL field inside a `<form>` whose `onSubmit` runs the preview (so Enter in the field and a visible "Vista previa" submit button both trigger it), with a separate always-visible `type="button"` "Agregar" action gated on `preview !== null`. This is an interaction-design decision the design text left open; noted rather than silently invented.
+- **Closing the modal on a successful add is not animated.** The entrance/exit transition (200ms/140ms) is fully implemented for Escape/backdrop/Cancelar dismissal, but `BookmarkListContainer.handleAdded` unmounts `AddMangaContainer` immediately on success rather than routing through `AddMangaModal`'s internal exit-transition timer. Design's Modal UX decisions describe the transition mechanics generally without stating whether a successful confirm's close is animated; keeping it instant avoids an artificial 140ms delay before the grid's refetched state is visible, and keeps the success-path tests deterministic without `waitFor`/fake-timer machinery. If the owner wants the animated close on success too, `BookmarkListContainer` would route `handleAdded`'s modal-closing step through the same `onRequestClose` timer path instead of `setAddModalOpen(false)` directly.
+- **The cover-fetch-failure fallback renders a text placeholder ("Sin portada")** rather than reusing `BookmarkCard`'s gradient-plus-initials treatment. The design only specifies "the same `onError` fallback branch `BookmarkCard.tsx:30` already uses" for the *mechanism* (an `onError`-driven state flag degrading gracefully), not the exact visual; a full initials-gradient treatment felt like more chrome than a transient preview panel warrants. Noted as a design judgment call, not a gap.
+- **`AddMangaContainer`'s `onAdded`/`onViewExisting`/`onRequestClose` props are synchronous (`void`-returning)** even though `handleAdded` internally fires `load(false)` (async, self-contained error handling) without awaiting it from the callback boundary — matching the existing `handleChangeProgress`/`handleChangeStatus` `void applyPatch(...)` fire-and-forget pattern already in this file, rather than introducing a new async-prop convention.
+
+### Issues found (Slice 3)
+
+None.
 
 ### Workload / PR boundary (cumulative)
 
 - Mode: chained PR slice (stacked-to-main), per tasks.md Review Workload Forecast
 - Slice 1: PR 1 of 3, done, ~395-line forecast (branch `feat/intake-boundary`, off `main`)
 - Slice 2: PR 2 of 3, done, ~515-line forecast — actual `git diff feat/intake-boundary --shortstat`: 16 files changed, 1334 insertions(+), 33 deletions(-). Materially over forecast, same root cause design.md's own Changed-Lines Forecast names for the whole change: this repo's modules run ~40% comment by line and "always do testing" puts most of the growth in tests (68 of the ~90 new test cases across this slice's 7 new/modified test files). Flagged as a risk for the orchestrator; not re-split without a new delivery decision, since the three-slice stack was already resolved by the owner before apply and re-slicing mid-slice was outside this batch's assignment.
-- Slice 3: not started (branch `feat/add-manga-endpoint`'s eventual follow-up, stacked on this one)
+- Slice 3: PR 3 of 3, done, ~725-line forecast — actual `git diff feat/add-manga-endpoint --shortstat`: 14 files changed, 1329 insertions(+), 26 deletions(-) (≈1355 changed lines). Same overage pattern as slice 2: of the 1321 lines touched in `frontend/src`, ~570 are the five new/modified test files (82 total Vitest cases in the suite after this slice, up from 59 before it) and the rest split across a genuinely new modal/container/API surface plus ~250 lines of CSS for the modal chrome and its animation states. Flagged as a risk for the orchestrator, same as slice 2 — not re-split mid-slice for the same reason (the three-slice stack was already an owner-resolved decision before apply).
 
 ### Status
 
-12/18 total tasks across the full change complete (Slice 1: 5/5, Slice 2: 7/7). Ready for `sdd-verify` on Slice 2, or for PR 2 to open against `feat/intake-boundary` (once PR 1 merges to `main`, the orchestrator rebases this branch — not done here). Slice 3 (frontend) is the next recommended work.
+18/18 total tasks across the full change complete (Slice 1: 5/5, Slice 2: 7/7, Slice 3: 8/8). Ready for `sdd-verify` on the whole change, or for PR 3 to open against `feat/add-manga-endpoint` (once PR 2 merges, the orchestrator rebases this branch — not done here). No further apply work remains for `panel-v1b-fase-3`.
+
+## Post-verify real-use fixes (2026-08-19)
+
+Two fixes found by the owner minutes into real use of the add-manga modal, both on `feat/add-manga-modal`:
+
+1. **Preview cover 403'd on hotlink** (`fix(panel): proxy the preview cover through the API instead of hotlinking`). The modal rendered the raw CDN `cover_url` in its `<img>`; manganato's image hosts answer 403 without their own Referer (verified live), so every preview showed the fallback. `MangaIntake` gained `preview_cover(cover_url) -> (bytes, media type) | None` (URL gate, client fetch, atomic write to `covers/preview/<sha256[:16]>.<allow-listed suffix>`, None on any source failure), served by the new `GET /api/mangas/preview-cover?url=…` (404 when None, `Cache-Control: public, max-age=3600`). `confirm()` promotes the cached preview file — read, `write_cover`, delete — so the add's request budget stays at three (ficha + chapters + cover once). Abandoned preview files are small and regenerable; no GC, by decision. Files: `intake/contracts.py`, `intake/pasted_url.py`, `storage/cover_cache.py` (shared `_allowed_suffix`/`_write_atomic`, `preview_cache_path`, `write_preview`), `web/app.py`, `AddMangaModal.tsx` (+ tests on all three layers).
+
+2. **Native number input replaced by `DecimalInput`** (owner preference, standing): typing 170 into the chapter field showed "0170", and the native spinner is unwanted outright. New reusable `frontend/src/components/DecimalInput.tsx`: controlled text input, `inputMode="decimal"`, keystroke-level filter (digits plus at most one dot, leading-zero artifact stripped), starts empty with placeholder `0`; the container holds the draft as a string and submits `""` as 0. Future numeric fields reuse this component instead of `<input type="number">`. Files: `DecimalInput.tsx` (+ test), `AddMangaModal.tsx` (string-typed chapter props), `AddMangaContainer.tsx`, test updates in modal/container/`BookmarkListContainer` (label queries — the modal now has two textboxes).
+
+Verification: `uv run pytest -q` → 504 passed; `npm test` → 10 files, 101 tests passed; `npm run build` → clean.

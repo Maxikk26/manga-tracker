@@ -27,7 +27,19 @@ class Response:
 
 
 class Transport(Protocol):
-    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> Response: ...
+    # `retry` is per call, and it is on the contract rather than on the
+    # transport's constructor because whether a failure is worth retrying is
+    # knowledge about the *operation*, not about the wire. A cover download
+    # opts out: a missing cover is an ordinary state, and confirming it cost a
+    # measured 43.9s — the image hosts answer 403 for an absent thumbnail, 403
+    # is a transient status by SRC's taxonomy (a Cloudflare block looks the
+    # same), so the retry wait fired for something no wait could fix.
+    #
+    # Defaulted to True so every other operation keeps its single retry and no
+    # caller has to ask for it.
+    def get(
+        self, url: str, *, headers: dict[str, str], timeout: float, retry: bool = True
+    ) -> Response: ...
 
 
 @dataclass(frozen=True)

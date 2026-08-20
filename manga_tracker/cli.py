@@ -42,7 +42,12 @@ from manga_tracker.scheduler import build_scheduler, catch_up_sweep_if_overdue, 
 from manga_tracker.seed.loader import load_seed
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
-from manga_tracker.sources.manganato.transport import CurlCffiTransport
+from manga_tracker.sources.manganato.transport import (
+    BATCH_POLICY,
+    INTERACTIVE_POLICY,
+    CurlCffiTransport,
+    RequestPolicy,
+)
 from manga_tracker.storage.cover_cache import cache_dir_for, find_cached
 from manga_tracker.storage.db import connect, ensure_site
 from manga_tracker.storage.repositories import BOOKMARK_STATUSES, list_cover_candidates
@@ -241,17 +246,25 @@ def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
     return 0 if report.files_written or not report.failed else 1
 
 
-def _bootstrap(config: AppConfig) -> tuple[int, ManganatoClient]:
+def _bootstrap(
+    config: AppConfig, *, policy: RequestPolicy = BATCH_POLICY
+) -> tuple[int, ManganatoClient]:
     """Shared by every subcommand that needs a `site_id` and a client — every
     job-running subcommand, and, since fase 3, `panel` too (design D8):
     `ensure_site` is called only here, never by `scheduler.py` or `web.app`.
     The bootstrap connection closes right away - each caller opens its own
     connection later, on its own worker thread or its own request (design:
-    one sqlite3 connection per run)."""
+    one sqlite3 connection per run).
+
+    `policy` is the traffic class, and it defaults to the batch one precisely
+    because this function is shared: a job that never thinks about traffic
+    class must keep the unattended 5-15s spacing, and only `_cmd_panel` — the
+    one caller whose requests come from a human waiting on them — passes
+    anything else."""
     conn = connect(config.db_path)
     site_id = ensure_site(conn, "manganato", BASE_URL)
     conn.close()
-    return site_id, ManganatoClient(CurlCffiTransport())
+    return site_id, ManganatoClient(CurlCffiTransport(policy=policy))
 
 
 def _cmd_run(args: argparse.Namespace, config: AppConfig) -> int:
@@ -296,8 +309,15 @@ def _cmd_panel(args: argparse.Namespace, config: AppConfig) -> int:
     `PastedUrlIntake` is constructed here and nowhere else (design D1/D8):
     `web` only ever sees it behind the `MangaIntake` Protocol it imports from
     `intake.contracts`, never the concrete class.
+
+    The one caller on the interactive traffic class. Every request this process
+    makes originates in a click, three of them per add (ficha, cover,
+    chapters), with the owner watching a spinner — while the batch numbers
+    exist for a 229-title sweep that nobody is waiting on. Passing the policy
+    here and only here keeps the whole decision at the composition root: the
+    intake never learns which class it is on, and no job can drift onto it.
     """
-    site_id, client = _bootstrap(config)
+    site_id, client = _bootstrap(config, policy=INTERACTIVE_POLICY)
     intake = PastedUrlIntake(client, site_id, cache_dir_for(config.db_path))
     uvicorn.run(create_app(config.db_path, intake), host="0.0.0.0", port=config.panel_port)
     return 0
