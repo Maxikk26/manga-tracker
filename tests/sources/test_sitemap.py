@@ -73,8 +73,10 @@ class ScriptedTransport:
         self._outcomes = list(outcomes)
         self.calls: list[dict] = []
 
-    def get(self, url, *, headers, timeout):
-        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+    def get(self, url, *, headers, timeout, retry=True):
+        self.calls.append(
+            {"url": url, "headers": headers, "timeout": timeout, "retry": retry}
+        )
         if not self._outcomes:
             raise AssertionError(f"unscripted request to {url}")
         outcome = self._outcomes.pop(0)

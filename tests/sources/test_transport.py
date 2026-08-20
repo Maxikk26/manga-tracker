@@ -432,6 +432,58 @@ def test_the_response_is_normalized_and_never_curl_cffis_own_object(monkeypatch)
     assert response.headers is not raw.headers  # copied, not the source's own mapping
 
 
+# --- retry=False, the per-call opt-out --------------------------------------
+
+
+@pytest.mark.parametrize("status", TRANSIENT_STATUSES)
+def test_retry_false_makes_one_attempt_and_never_waits(monkeypatch, status):
+    """The scripted `curl_get` holds exactly one outcome, so a second attempt
+    would blow up rather than pass quietly."""
+    harness = _harness(monkeypatch, FakeCurlResponse(status, "denied"))
+
+    response = harness.transport.get(URL, headers={}, retry=False)
+
+    assert response.status == status  # still data, still the client's to classify
+    assert len(harness.curl.calls) == 1
+    assert harness.sleeper.calls == []
+
+
+def test_retry_false_still_raises_transient_on_a_network_failure(monkeypatch):
+    """Opting out of the retry does not opt out of the taxonomy: a connection
+    error is still `Transient`, so the caller reacts exactly as before —
+    `PastedUrlIntake.preview_cover` catches it and falls back."""
+    only = RequestsError("connection reset")
+    harness = _harness(monkeypatch, only)
+
+    with pytest.raises(Transient) as raised:
+        harness.transport.get(URL, headers={}, retry=False)
+
+    assert raised.value.__cause__ is only
+    assert len(harness.curl.calls) == 1
+    assert harness.sleeper.calls == []
+    # The message must not claim a retry that never happened: a log line saying
+    # "after one retry" sends the reader hunting for a second request.
+    assert "one retry" not in str(raised.value)
+
+
+def test_retry_false_still_pays_the_spacing_it_owes(monkeypatch):
+    """The opt-out is about the retry, not about the courtesy delay. A cover
+    request is still a request to the source and still has to be spaced."""
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), FakeCurlResponse(200, "img"))
+
+    harness.transport.get(URL, headers={})
+    harness.transport.get(URL, headers={}, retry=False)
+
+    assert harness.sleeper.calls == [STUB_DELAY]
+
+
+def test_retry_defaults_to_on_so_every_other_operation_keeps_it(monkeypatch):
+    harness = _harness(monkeypatch, FakeCurlResponse(503), FakeCurlResponse(200, "second try"))
+
+    assert harness.transport.get(URL, headers={}).text == "second try"
+    assert len(harness.curl.calls) == 2
+
+
 # --- the two traffic classes ------------------------------------------------
 #
 # The batch numbers are asserted by every test above, which all run on the

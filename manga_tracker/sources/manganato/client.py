@@ -89,9 +89,17 @@ class ManganatoClient:
 
         The header is sent unconditionally. Hosts that do not check it, such as
         the Kitsu CDN the importer stored covers from, ignore it.
+
+        The one operation here that does not retry (`retry=False`). A cover
+        that is not there is an ordinary state, not a failure worth waiting on:
+        the hosts answer **403** for an absent thumbnail, 403 is transient by
+        SRC's taxonomy because a Cloudflare block is indistinguishable from it,
+        and the result was a measured 43.9s spent confirming that an image the
+        panel was going to fall back on anyway is still missing. The second
+        attempt could not have changed the answer.
         """
         response = self._transport.get(
-            cover_url, headers={"Referer": f"{BASE_URL}/"}, timeout=DEFAULT_TIMEOUT
+            cover_url, headers={"Referer": f"{BASE_URL}/"}, timeout=DEFAULT_TIMEOUT, retry=False
         )
         if response.status == 404:
             raise NotFound(f"cover 404 at {cover_url!r}")

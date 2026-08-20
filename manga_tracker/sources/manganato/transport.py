@@ -105,9 +105,16 @@ class CurlCffiTransport:
         #: requests.
         self._last_request_at: float | None = None
 
-    def get(self, url: str, *, headers: dict[str, str], timeout: float = DEFAULT_TIMEOUT) -> Response:
+    def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float = DEFAULT_TIMEOUT,
+        retry: bool = True,
+    ) -> Response:
         self._space_out_this_request()
-        return self._get_with_one_retry(url, headers=headers, timeout=timeout)
+        return self._get(url, headers=headers, timeout=timeout, retry=retry)
 
     def _space_out_this_request(self) -> None:
         """Sleep only the part of the window the wall clock has not already
@@ -144,16 +151,31 @@ class CurlCffiTransport:
         if self._policy.retry_wait_seconds > 0:
             self._sleeper(self._policy.retry_wait_seconds)
 
-    def _get_with_one_retry(self, url: str, *, headers: dict[str, str], timeout: float) -> Response:
-        for attempt in (1, 2):
+    def _get(self, url: str, *, headers: dict[str, str], timeout: float, retry: bool) -> Response:
+        """One attempt, or two when `retry` is on — never more, in either case.
+
+        `retry=False` collapses the loop to a single pass rather than skipping
+        the wait, so the caller pays neither the second request nor the wait in
+        front of it. Classification does not change: the failing status still
+        comes back as data, and the client still turns it into
+        `NotFound`/`Transient`/`Unexpected`.
+        """
+        attempts = (1, 2) if retry else (1,)
+        for attempt in attempts:
+            is_last = attempt == attempts[-1]
             try:
                 raw = self._attempt(url, headers=headers, timeout=timeout)
             except RequestsError as exc:
-                if attempt == 1:
-                    self._wait_before_retrying()
-                    continue
-                raise Transient(f"transport failed after one retry: {exc}") from exc
-            if attempt == 1 and raw.status_code in TRANSIENT_STATUS_CODES:
+                if is_last:
+                    # The message names how many attempts were actually made:
+                    # "after one retry" on a call that never retried would send
+                    # whoever reads the log looking for a second request that
+                    # does not exist.
+                    made = "after one retry" if retry else "on its only attempt"
+                    raise Transient(f"transport failed {made}: {exc}") from exc
+                self._wait_before_retrying()
+                continue
+            if not is_last and raw.status_code in TRANSIENT_STATUS_CODES:
                 self._wait_before_retrying()
                 continue
             return Response(
