@@ -36,6 +36,23 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # A ceiling, not a reservation: nothing is set aside, the container simply
+    # cannot grow past this. Steady state is ~75 MiB, so 512 MiB is roughly 6x
+    # headroom. The goal is not a smaller container — it is that a leak here
+    # stays a manga-tracker incident instead of taking the host down with it.
+    mem_limit: 512m
+    # Equal to mem_limit means: no swap for this container. Same reasoning as
+    # the host-side dev-agent slice — a process thrashing swap stalls every
+    # other process on the box waiting for the disk, so failing fast is the
+    # kinder outcome. Docker requires this to be >= mem_limit.
+    memswap_limit: 512m
+    # Detection is the one process on this host that must survive a global
+    # out-of-memory event, because a missed publication is not recoverable on
+    # the next run: the source only reports what moved today. A negative
+    # adjustment biases the kernel's victim selection so that almost anything
+    # else on the machine — panel, lab stack, an agent's test run — is killed
+    # first. Range is -1000..1000; the daemon sets it at container start.
+    oom_score_adj: -500
     # Deploy note (design D5): the jobstore is in memory, so a restart forgets
     # any active_sweep window it missed. That used to mean a manual
     # `run-job active_sweep` after every off-window restart, or up to ~47h
@@ -73,3 +90,15 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Steady state is ~48 MiB. Same ceiling as detection rather than a tighter
+    # one, because the panel is the surface that will grow: it is the process
+    # that renders lists and will hold query results in memory.
+    mem_limit: 512m
+    memswap_limit: 512m
+    # Deliberately less protected than detection, and this is the same decision
+    # the service comment above already records: a hung panel must never take
+    # detection down. Under global memory pressure the panel is the acceptable
+    # loss — it serves a reader who can reload, while detection missing a
+    # window loses data nothing can reconstruct. Still below the host default
+    # of 0, so both stay preferable to the lab stack and to agent processes.
+    oom_score_adj: -200
