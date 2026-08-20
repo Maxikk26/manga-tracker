@@ -6,6 +6,7 @@ reconciliation key 3 (design D9)."""
 
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from manga_tracker.importer import matching
 from manga_tracker.intake.contracts import AddPreview, AddResult, AlreadyTracked, InvalidUrl
@@ -72,6 +73,14 @@ class PastedUrlIntake:
         slug = self._client.extract_slug(url)
         if slug is None:
             raise InvalidUrl(f"no slug segment could be extracted from {url!r}")
+
+        if cover_url is not None and not _acceptable_cover_url(cover_url):
+            # The server will GET this client-echoed URL (design D4), and the
+            # stored value feeds the cache-covers backfill later — so anything
+            # that is not https with a real host is dropped before it is
+            # stored or fetched. The add stands, like any other missing cover.
+            logger.warning("intake: dropping non-https cover_url %r", cover_url)
+            cover_url = None
 
         self._check_gates_before_request(conn, slug)
         self._check_gate_after_ficha(conn, title)
@@ -146,6 +155,13 @@ class PastedUrlIntake:
         for title, status in list_tracked_titles(conn):
             if matching.normalize(title) == normalized:
                 raise AlreadyTracked(title=title, status=status)
+
+
+def _acceptable_cover_url(cover_url: str) -> bool:
+    """https with a non-empty host, nothing else — the design's threat matrix
+    promises exactly this gate on the one URL the client echoes back."""
+    parts = urlsplit(cover_url)
+    return parts.scheme == "https" and bool(parts.netloc)
 
 
 def _status_of(tracked: list[tuple[str, str]], title: str) -> str:

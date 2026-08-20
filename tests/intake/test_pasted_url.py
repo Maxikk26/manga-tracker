@@ -217,6 +217,36 @@ def _confirm(conn, cache_dir, *, status="reading", last_chapter_read=0.0, **clie
     return result, client
 
 
+def test_confirm_drops_a_non_https_cover_url_without_fetching_or_storing_it(conn, tmp_path):
+    """The threat-matrix gate: the server GETs the client-echoed cover_url,
+    so anything that is not https with a real host never reaches the client
+    or the mangas row. The add itself stands, like any missing cover."""
+    cache_dir = tmp_path / "covers"
+    for bad in ("http://host/cover.webp", "not-a-url", "https:///no-host.webp"):
+        conn.execute("DELETE FROM bookmarks")
+        conn.execute("DELETE FROM chapter_history")
+        conn.execute("DELETE FROM manga_sites")
+        conn.execute("DELETE FROM mangas")
+        client = FakeClient()
+        intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+        result = intake.confirm(
+            conn,
+            url="https://www.manganato.gg/manga/some-manga",
+            title="Some Manga",
+            cover_url=bad,
+            status="reading",
+            last_chapter_read=0.0,
+            now=NOW,
+        )
+
+        assert result.cover_cached is False, bad
+        assert client.cover_calls == [], bad  # never fetched
+        stored = conn.execute("SELECT cover_url FROM mangas").fetchone()[0]
+        assert stored is None, bad  # never stored, so no backfill will fetch it either
+        assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 1, bad
+
+
 def test_confirm_happy_path_writes_all_four_tables(conn, tmp_path):
     cache_dir = tmp_path / "covers"
 
