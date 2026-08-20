@@ -27,7 +27,12 @@ import pytest
 from curl_cffi.requests import RequestsError
 
 from manga_tracker.sources.contracts import Response, Transient
-from manga_tracker.sources.manganato.transport import TRANSIENT_STATUS_CODES, CurlCffiTransport
+from manga_tracker.sources.manganato.transport import (
+    BATCH_POLICY,
+    INTERACTIVE_POLICY,
+    TRANSIENT_STATUS_CODES,
+    CurlCffiTransport,
+)
 
 # Patched here and not at `curl_cffi.requests.get`: `transport.py` does
 # `from curl_cffi.requests import get as curl_get`, so the name it calls is
@@ -45,6 +50,9 @@ SPEC_MAX_DELAY = 15.0
 SPEC_TIMEOUT = 30.0
 SPEC_RETRY_WAIT = 30.0
 SPEC_IMPERSONATE = "chrome"
+# The interactive class, likewise written out rather than imported.
+SPEC_INTERACTIVE_MIN_DELAY = 1.0
+SPEC_INTERACTIVE_MAX_DELAY = 2.0
 TRANSIENT_STATUSES = (403, 429, 500, 502, 503, 504)
 
 # What the stub `rng` returns. Inside 5-15 so it is a legal draw, but not a
@@ -151,17 +159,21 @@ def _clock(start: float = 1000.0):
     return _now
 
 
-def _harness(monkeypatch, *outcomes):
+def _harness(monkeypatch, *outcomes, policy=BATCH_POLICY, delay=STUB_DELAY):
     """A transport wired to the four seams every assertion in this file reads:
     the scripted `curl_get`, the recording sleeper, the recording rng, and the
-    hand-advanced clock."""
+    hand-advanced clock.
+
+    `policy` defaults to the batch one because that is what every caller
+    outside the panel gets — a harness that had to be told the class would let
+    a default flipped to "interactive" pass unnoticed."""
     curl = _scripted_curl_get(*outcomes)
     monkeypatch.setattr(CALL_SITE, curl)
     sleeper = _sleeper()
-    rng = _rng()
+    rng = _rng(delay)
     clock = _clock()
     return SimpleNamespace(
-        transport=CurlCffiTransport(sleeper=sleeper, rng=rng, clock=clock),
+        transport=CurlCffiTransport(policy=policy, sleeper=sleeper, rng=rng, clock=clock),
         curl=curl,
         sleeper=sleeper,
         rng=rng,
@@ -418,6 +430,101 @@ def test_the_response_is_normalized_and_never_curl_cffis_own_object(monkeypatch)
     assert (response.status, response.text) == (200, "<html/>")
     assert response.headers == {"Content-Type": "text/html"}
     assert response.headers is not raw.headers  # copied, not the source's own mapping
+
+
+# --- the two traffic classes ------------------------------------------------
+#
+# The batch numbers are asserted by every test above, which all run on the
+# default policy. What is left to pin is that the interactive class is a
+# genuinely different set of numbers and that opting into it changes nothing
+# else about the policy.
+
+INTERACTIVE_STUB_DELAY = 1.4  # inside 1-2, not a round number a constant would use
+
+
+def test_the_interactive_class_draws_its_spacing_from_a_one_to_two_second_window(monkeypatch):
+    """One human click makes three requests; 5-15s apiece turns that into 15-45s
+    of sleep against ~1-2s of real network. Opening the same page in a browser
+    is dozens of requests in two seconds, so this pacing is still less traffic
+    than a human reading the site — which is the argument that made the class
+    legitimate rather than a shortcut."""
+    harness = _harness(
+        monkeypatch,
+        *[FakeCurlResponse(200, "ok")] * 2,
+        policy=INTERACTIVE_POLICY,
+        delay=INTERACTIVE_STUB_DELAY,
+    )
+
+    harness.transport.get(URL, headers={})
+    harness.transport.get(URL, headers={})
+
+    assert harness.rng.calls == [(SPEC_INTERACTIVE_MIN_DELAY, SPEC_INTERACTIVE_MAX_DELAY)]
+    assert harness.sleeper.calls == [INTERACTIVE_STUB_DELAY]
+
+
+def test_the_interactive_class_still_pays_no_spacing_before_its_first_request(monkeypatch):
+    harness = _harness(monkeypatch, FakeCurlResponse(200, "ok"), policy=INTERACTIVE_POLICY)
+
+    harness.transport.get(URL, headers={})
+
+    assert harness.sleeper.calls == []
+    assert harness.rng.calls == []
+
+
+@pytest.mark.parametrize("status", TRANSIENT_STATUSES)
+def test_the_interactive_class_retries_without_the_thirty_second_wait(monkeypatch, status):
+    """The panel spec already decided a `Transient` reaches the owner, who
+    presses again, instead of being retried silently. So the wait in front of
+    the retry buys nothing here: it delays an error message the human is
+    already waiting on. The retry itself stays — a blip absorbed in one
+    round-trip is still worth having — and two attempts is still the ceiling.
+    """
+    harness = _harness(
+        monkeypatch,
+        FakeCurlResponse(status, "down"),
+        FakeCurlResponse(status, "still down"),
+        policy=INTERACTIVE_POLICY,
+    )
+
+    response = harness.transport.get(URL, headers={})
+
+    assert response.status == status
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []  # not [0.0]: nothing was waited on at all
+
+
+def test_a_transient_that_survives_the_interactive_retry_raises_without_waiting(monkeypatch):
+    harness = _harness(
+        monkeypatch,
+        RequestsError("timed out"),
+        RequestsError("timed out again"),
+        policy=INTERACTIVE_POLICY,
+    )
+
+    with pytest.raises(Transient):
+        harness.transport.get(URL, headers={})
+
+    assert len(harness.curl.calls) == 2
+    assert harness.sleeper.calls == []
+
+
+def test_the_batch_class_is_the_default_and_carries_the_spec_numbers():
+    """A caller that does not think about traffic class must get the
+    conservative one. Every job in `cli.py` is such a caller, and the
+    interactive class is one keyword away — a flipped default would quietly put
+    the 229-title sweep on 1-2s spacing.
+    """
+    assert CurlCffiTransport()._policy is BATCH_POLICY
+    assert (BATCH_POLICY.min_delay_seconds, BATCH_POLICY.max_delay_seconds) == (
+        SPEC_MIN_DELAY,
+        SPEC_MAX_DELAY,
+    )
+    assert BATCH_POLICY.retry_wait_seconds == SPEC_RETRY_WAIT
+    assert (INTERACTIVE_POLICY.min_delay_seconds, INTERACTIVE_POLICY.max_delay_seconds) == (
+        SPEC_INTERACTIVE_MIN_DELAY,
+        SPEC_INTERACTIVE_MAX_DELAY,
+    )
+    assert INTERACTIVE_POLICY.retry_wait_seconds == 0.0
 
 
 def test_the_transient_status_set_is_exactly_the_documented_one():
