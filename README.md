@@ -23,8 +23,8 @@ Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está termi
 |---|---|
 | Fase 1 — lista, editar progreso y estado | ✅ desplegada el 2026-08-18, en su propio contenedor, sirviendo en la LAN |
 | Fase 2 — historial y heatmap | ⬜ no empezada |
-| Fase 3 — alta y baja de mangas | ⬜ no empezada. La estrategia ya existe en el cliente: pegar la URL, `extract_slug` sin red, ficha, confirmar, y recién ahí escribir |
-| Fase 4 — portadas + `my_score` | 🟨 **las portadas se adelantaron**; `my_score` sigue pendiente |
+| Fase 3 — alta y baja de mangas | ✅ desplegada el 2026-08-20, en tres PRs encadenados (#27, #28, #29). Pegar la URL, `extract_slug` sin red, vista previa sin escribir, confirmar, y recién ahí escribir. La baja sigue siendo `status='dropped'`: no hay `DELETE` |
+| Fase 4 — portadas + `my_score` | 🟨 **las portadas se adelantaron** y se entregaron el 2026-08-18; `my_score` y su migración 3 siguen pendientes |
 
 Las portadas se adelantaron porque el dueño no reconocía sus propios títulos en la lista: son 18 mangas del mismo género cuyos nombres colisionan (*Genius* aparece en tres, *Regressed* en dos). Con eso la lista dejó de ser una tabla y pasó a ser una **grilla de portadas**, donde el póster es el enlace al capítulo siguiente. Las imágenes se **cachean en disco** y las sirve el propio panel: guardar la URL no alcanza, porque los hosts de imágenes de la fuente responden 403 a una petición sin su propio `Referer` (medido el 2026-08-18).
 
@@ -64,8 +64,9 @@ manga-tracker/
 │   ├── storage/              esquema, migraciones y consultas; el único que importa sqlite3
 │   ├── catalogue/            Kitsu, detrás de una interfaz que no lo nombra
 │   ├── importer/  seed/      las dos vías de carga inicial
+│   ├── intake/               el alta desde el panel: secuencia ficha, capítulos y portada
 │   ├── notifier/             Telegram: solo emite, nunca escucha
-│   ├── web/                  el API del panel (FastAPI)
+│   ├── web/                  el API del panel (FastAPI); recibe `MangaIntake` inyectado y nunca importa `sources`
 │   ├── scheduler.py          APScheduler en proceso
 │   └── cli.py                la única raíz de composición
 ├── frontend/              ← el panel (React 19 + Vite + TS), servido por el propio API
@@ -180,7 +181,7 @@ El intento anterior de este proyecto murió sobre-ingenierado, con el cron —el
 ## Roadmap
 
 - **V1a — "El cron que sí funciona"**: seed manual, detección, digest de Telegram, Docker. Termina cuando llega la primera notificación real y correcta.
-- **V1b — Panel web** *(en curso)*: los 6 estados tipo Kenmei, portadas, mi capítulo vs el último disponible, botón "abrir próximo", estadísticas de lectura (heatmap, volumen, géneros). La captura de esa data ya ocurre desde V1a. La fase 1 y las portadas ya están entregadas; ver la tabla de fases en §Estado.
+- **V1b — Panel web** *(en curso)*: los 6 estados tipo Kenmei, portadas, mi capítulo vs el último disponible, botón "abrir próximo", estadísticas de lectura (heatmap, volumen, géneros). La captura de esa data ya ocurre desde V1a. Las fases 1 y 3 y las portadas ya están entregadas; falta la fase 2 (historial y heatmap) y lo que queda de la 4 (`my_score`). Ver la tabla de fases en §Estado.
 - **V1c — Extensión de Firefox**: trackear y marcar leído desde la propia página.
 - **V2 — Multi-fuente**: segunda fuente detrás de la misma interfaz de cliente.
 
