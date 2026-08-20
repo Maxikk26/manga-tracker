@@ -3,6 +3,7 @@ import { ApiError, fetchBookmarks, patchBookmark } from "../api/bookmarks";
 import type { Bookmark, BookmarkStatus } from "../domain/types";
 import { StatusTabs } from "../components/StatusTabs";
 import { BookmarkGrid } from "../components/BookmarkGrid";
+import { AddMangaContainer } from "./AddMangaContainer";
 import { sortBookmarksForTab } from "../domain/sortBookmarks";
 
 type LoadState = "loading" | "ready" | "error";
@@ -19,6 +20,7 @@ export function BookmarkListContainer() {
   const [activeStatus, setActiveStatus] = useState<BookmarkStatus>("reading");
   const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   const load = useCallback(async (initial: boolean) => {
     if (initial) setLoadState("loading");
@@ -78,6 +80,24 @@ export function BookmarkListContainer() {
     [applyPatch],
   );
 
+  const handleAdded = useCallback(
+    (added: Bookmark) => {
+      setAddModalOpen(false);
+      setActiveStatus(added.status);
+      void load(false);
+    },
+    [load],
+  );
+
+  const handleViewExistingFromAdd = useCallback((status: BookmarkStatus) => {
+    setAddModalOpen(false);
+    setActiveStatus(status);
+  }, []);
+
+  const handleCloseAddModal = useCallback(() => {
+    setAddModalOpen(false);
+  }, []);
+
   const counts = useMemo(() => {
     const result: Partial<Record<BookmarkStatus, number>> = {};
     for (const bookmark of bookmarks) {
@@ -112,7 +132,16 @@ export function BookmarkListContainer() {
 
   return (
     <>
-      <StatusTabs active={activeStatus} counts={counts} onSelect={setActiveStatus} />
+      <div className="panel-toolbar">
+        <StatusTabs active={activeStatus} counts={counts} onSelect={setActiveStatus} />
+        <button
+          type="button"
+          className="add-manga-button"
+          onClick={() => setAddModalOpen(true)}
+        >
+          Agregar manga
+        </button>
+      </div>
       {errorMessage && (
         <p className="error-banner" role="alert">
           {errorMessage}
@@ -124,6 +153,13 @@ export function BookmarkListContainer() {
         onChangeProgress={handleChangeProgress}
         onChangeStatus={handleChangeStatus}
       />
+      {addModalOpen && (
+        <AddMangaContainer
+          onAdded={handleAdded}
+          onViewExisting={handleViewExistingFromAdd}
+          onRequestClose={handleCloseAddModal}
+        />
+      )}
     </>
   );
 }
