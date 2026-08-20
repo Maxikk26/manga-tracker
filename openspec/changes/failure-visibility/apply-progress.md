@@ -59,3 +59,85 @@ planning artifacts — `proposal.md`, `design.md`, `specs/` — add another 376
 lines in their own commit, not counted against the review budget). Well
 under the 400-line PR budget and the 800-line session budget; no chaining
 needed, matching the tasks.md forecast (Medium risk, no decision needed).
+
+## Phase 6 — Verify remediation (outside the sdd-attempt ledger)
+
+`sdd-verify` returned **FAIL** on one CRITICAL and raised one WARNING
+(`verify-report.md`). Both are closed by two tests; no production code was
+touched.
+
+**Ledger note.** This remediation ran **OUTSIDE the `gentle-ai sdd-attempt`
+ledger**, deliberately. The `failure-visibility` objective became
+unadvanceable: it was rescoped with `max_attempts` equal to the carried
+`cumulative_attempts`, so every ledger operation refuses in a cycle — the
+budget is exhausted the moment it is consulted, and there is no ledger
+transition left that could record this pass. The work is therefore recorded
+here, in the change's own progress file, rather than as an attempt.
+
+### CRITICAL #1 — onhold_sweep failures must not inflate degraded_run_count
+
+- **Added** `tests/discovery/test_heartbeat.py::test_degraded_run_count_never_counts_an_onhold_sweep_failure`,
+  and imported `_degraded_run_count` alongside the existing
+  `_last_successful_run_at` import. Asserts in two steps: an `onhold_sweep`
+  row closed `status='error'` inside the 7-day window reads **0**, and adding
+  a degraded `feed_check` row reads **1**, not 2. The second half pins the
+  *exclusion*; the empty case alone would also pass against a query that
+  counts nothing at all.
+- **Guard-break evidence.** Widening `DETECTION_JOBS` to
+  `("feed_check", "active_sweep", "onhold_sweep")` alone fails on a binding
+  error (`sqlite3.ProgrammingError: Incorrect number of bindings supplied.
+  The current statement uses 3, and there are 4 supplied.`) because the
+  query hardcodes `IN (?, ?)` — a failure, but not the semantic one. So the
+  widening was done *faithfully*, the way a real refactor would (placeholders
+  generated from `len(DETECTION_JOBS)`), and the assertion itself caught it:
+
+  ```text
+  >       assert _degraded_run_count(conn, NOW) == 0
+  E       AssertionError: assert 1 == 0
+  E        +  where 1 = _degraded_run_count(<sqlite3.Connection object at 0x785a19d693f0>, '2026-07-26T03:00:00Z')
+  ```
+
+  The second half was verified separately under the same widened tuple (the
+  first `assert` short-circuits): it reads **2** where the test demands 1.
+  Reverted → `git diff` on `manga_tracker/discovery/heartbeat.py` empty,
+  10/10 green in that file.
+
+### WARNING #1 — nothing wired a real client 403 through to the panel's 503
+
+- **Added** `tests/web/test_add_manga_wiring.py::test_a_real_client_403_reaches_the_panel_as_a_503`,
+  a **new file** rather than an addition to `tests/web/test_add_manga_api.py`.
+  The reason is that file's own docstring: it states that `intake` is a fake
+  there and that the file proves *only what `web` itself does*. A real-object-graph
+  test inside it would contradict that contract and blur what a failure there
+  means. The new file states the opposite scope explicitly.
+- The graph is the production one, assembled exactly as `cli.py::_cmd_panel`
+  assembles it — `FakeTransport` → real `ManganatoClient` → real
+  `PastedUrlIntake` → real `create_app` — with the `Transport` double as the
+  only fake, because the wire is the only thing a test may not touch. The
+  architecture boundary holds: the client enters by injection, `web` still
+  imports no `sources` module, and `tests/test_architecture.py` passes.
+- It also asserts `transport.calls == [".../manga/throttled-manga"]`, so a
+  duplicate-gate short-circuit upstream of the request cannot produce the
+  same 503 and prove nothing, and asserts zero `mangas` rows written.
+- **Guard-break evidence.** Commenting out the 403/`Transient` branch in
+  `manga_tracker/sources/manganato/client.py::fetch_manga_details` (403 then
+  falls through to the `!= 200` → `Unexpected` case):
+
+  ```text
+  >       assert response.status_code == 503
+  E       assert 502 == 503
+  E        +  where 502 = <Response [502 Bad Gateway]>.status_code
+  ```
+
+  Under that same break `tests/web/test_add_manga_api.py` stayed **21/21
+  green**, which is precisely the gap the WARNING described — now closed.
+  Reverted → `git diff` on `client.py` empty.
+
+### Verification
+
+- `uv run pytest -q`: **545 passed** (543 verify baseline + 2 new).
+- `npm test` from `frontend/`: **101 passed** — frontend untouched, matching
+  the verify baseline exactly.
+- `uv run pytest -q tests/test_architecture.py`: green — the `web ↛ sources`
+  directional rule is intact.
+- No production file was modified: `git status` shows only the two test files.
