@@ -14,6 +14,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from manga_tracker.discovery import runs
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP
 from manga_tracker.discovery.active_sweep import active_sweep
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK
@@ -313,9 +314,8 @@ def sweep_is_overdue(conn, *, max_age_seconds: int = SWEEP_CATCHUP_AFTER_SECONDS
       sweep, whatever its status says.
     """
     row = conn.execute(
-        "SELECT started_at FROM job_runs WHERE job_name = ? AND status IN ('ok', 'partial') "
-        "AND finished_at IS NOT NULL AND IFNULL(items_checked, 0) > 0 "
-        "ORDER BY started_at DESC LIMIT 1",
+        f"SELECT started_at FROM job_runs WHERE job_name = ? AND status IN ('ok', 'partial') "
+        f"AND {runs.FINISHED_WITH_EVIDENCE} ORDER BY started_at DESC LIMIT 1",
         (ACTIVE_SWEEP,),
     ).fetchone()
     if row is None:

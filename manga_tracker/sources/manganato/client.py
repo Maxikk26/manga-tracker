@@ -11,11 +11,13 @@ from manga_tracker.sources.contracts import (
     MangaDetails,
     NotFound,
     ProgressCallback,
+    Transient,
     Transport,
     Unexpected,
 )
 from manga_tracker.sources.manganato.parsing import parse_feed, parse_manga_details
 from manga_tracker.sources.manganato.sitemap import fetch_published_entries, fetch_published_urls
+from manga_tracker.sources.manganato.transport import TRANSIENT_STATUS_CODES
 
 BASE_URL = "https://www.manganato.gg"
 FEED_PATH = "/manga-list/latest-manga"
@@ -70,10 +72,24 @@ class ManganatoClient:
         return parse_feed(response.text)
 
     def fetch_manga_details(self, slug: str) -> MangaDetails:
-        """CD Operacion 3: fallback-only, never called by any detection mechanism."""
+        """CD Operacion 3: fallback-only, never called by any detection mechanism.
+
+        A 403/429/5xx here (`TRANSIENT_STATUS_CODES`, reused from transport.py
+        rather than duplicated) means the source is throttling or Cloudflare
+        blocked the request, per spec-cliente-fuente-descubrimiento.md:65 -
+        neither is evidence the slug is gone or the page shape changed, so it
+        raises Transient rather than falling through to parse_manga_details,
+        which used to return MangaDetails(title="", ...) on any non-404
+        status: an empty-title fabrication that could reach `/api/mangas/preview`.
+        Any other non-200 status is a genuine protocol surprise (Unexpected).
+        """
         response = self._transport.get(f"{BASE_URL}/manga/{slug}", headers={}, timeout=DEFAULT_TIMEOUT)
         if response.status == 404:
             raise NotFound(f"manga details 404 for slug {slug!r}")
+        if response.status in TRANSIENT_STATUS_CODES:
+            raise Transient(f"manga details request for slug {slug!r} returned status {response.status}")
+        if response.status != 200:
+            raise Unexpected(f"manga details request for slug {slug!r} returned status {response.status}")
         return parse_manga_details(response.text)
 
     def fetch_cover(self, cover_url: str) -> bytes:

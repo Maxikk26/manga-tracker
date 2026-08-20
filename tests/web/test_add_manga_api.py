@@ -228,6 +228,19 @@ def test_transient_failure_is_503(db_path, tmp_path):
     assert "vuelve a intentar" in response.json()["detail"]
 
 
+def test_a_details_403_never_produces_a_200_preview_with_an_empty_title(db_path, tmp_path):
+    """D2/D5: when the source responds 403 to a details fetch, the client
+    raises Transient (not a 200 carrying an empty title), and the intake
+    layer's Transient reaches this endpoint as 503, never 200."""
+    client = _client(db_path, tmp_path, FakeIntake(preview_error=Transient("403 from source")))
+
+    response = client.post("/api/mangas/preview", json={"url": "https://www.manganato.gg/manga/some-manga"})
+
+    assert response.status_code == 503
+    assert "vuelve a intentar" in response.json()["detail"]
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
 def test_unexpected_response_is_502(db_path, tmp_path):
     client = _client(db_path, tmp_path, FakeIntake(confirm_error=Unexpected("shape")))
 
@@ -280,3 +293,39 @@ def test_confirm_receives_the_raw_status_value_and_the_default_chapter(db_path, 
     assert call["status"] == "reading"
     assert call["last_chapter_read"] == 0.0
     assert call["cover_url"] is None
+
+
+# --- empty title unwritable ------------------------------------------------------
+
+
+def test_empty_title_is_422_and_writes_nothing(db_path, tmp_path):
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json={**_ADD_BODY, "title": ""})
+
+    assert response.status_code == 422
+    assert intake.confirm_calls == []
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
+def test_whitespace_only_title_is_422_and_writes_nothing(db_path, tmp_path):
+    """min_length=1 alone would accept this - it is not empty, only blank."""
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json={**_ADD_BODY, "title": "   "})
+
+    assert response.status_code == 422
+    assert intake.confirm_calls == []
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
+def test_a_normal_title_still_validates_and_reaches_the_write_path(db_path, tmp_path):
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json=_ADD_BODY)
+
+    assert response.status_code == 201
+    assert intake.confirm_calls[0]["title"] == "Some Manga"

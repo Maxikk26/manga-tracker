@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.6 — 2026-08-10. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.8).
+Versión 1.7 — 2026-08-20. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.9).
+
+Cambios vs 1.6: **corrección de semántica en "última detección exitosa".** Hasta la v1.6 el cálculo exigía únicamente `status = 'ok'`, y `open_run` inserta esa columna en `'ok'` desde que abre la fila, antes de que la corrida termine. Eso dejaba contar como éxito una corrida todavía en curso o una cuyo proceso murió a mitad de camino y jamás cerró su fila — exactamente el escenario que este mensaje existe para exponer. Ahora exige además `finished_at IS NOT NULL` y `items_checked > 0` (`FINISHED_WITH_EVIDENCE` en `manga_tracker/discovery/runs.py`), el mismo criterio de tres condiciones que `sweep_is_overdue` ya aplicaba (`manga_tracker/scheduler.py`). Consecuencia esperada tras el despliegue: la primera lectura de "Última detección exitosa" puede salir igual o levemente más antigua que antes de la corrección — es la corrección funcionando, no una regresión. `onhold_sweep` sigue sin alimentar este dato ni el conteo de corridas degradadas, sin cambios respecto a la v1.6.
 
 Cambios vs 1.4: **la desviación registrada del Mensaje 3 queda resuelta**. `onhold_sweep` existe, y su población incluye todo mapeo pausado por el contador, así que el reintento semanal que el aviso se negaba a prometer ahora ocurre de verdad y el mensaje lo dice. La redacción condicionada hizo su trabajo: se corrigió sola al entrar el barrido, sin que nadie tuviera que acordarse del texto. Se registra también el hueco que este mensaje **no** cubre: el aviso lo emite únicamente el barrido diario, cuya población son los activos, así que un título `on_hold` cuyo slug muere no genera aviso alguno.
 

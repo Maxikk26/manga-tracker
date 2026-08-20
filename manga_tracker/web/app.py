@@ -14,11 +14,12 @@ database file, so a write colliding with a sweep must wait, not fail.
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from manga_tracker.intake.contracts import (
@@ -90,7 +91,15 @@ class MangaAddRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
-    title: str
+    # min_length=1 alone accepts "   " - strip_whitespace runs first, so a
+    # whitespace-only title also fails the length check. This closes the
+    # write path (spec's "empty or whitespace-only title is unwritable"):
+    # confirm() trusts the title preview() echoed and never re-fetches it, so
+    # a title lost to a details failure or any other cause cannot reach
+    # `mangas`. strip_whitespace is also a real write-path change, not a
+    # side effect to gloss over: the stored title is now trimmed, matching
+    # the `TRIM(title)` production audit.
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     cover_url: str | None = None
     status: BookmarkStatus
     last_chapter_read: float = Field(default=0.0, ge=0)

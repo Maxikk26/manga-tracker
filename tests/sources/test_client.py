@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_tracker.sources.contracts import NotFound, Response, SourceClient, Unexpected
+from manga_tracker.sources.contracts import NotFound, Response, SourceClient, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -98,6 +98,33 @@ def test_fetch_manga_details_not_found():
 
     with pytest.raises(NotFound):
         client.fetch_manga_details("gone-manga")
+
+
+def test_fetch_manga_details_403_is_transient():
+    """A 403 on the ficha means the source is throttling or Cloudflare
+    blocked the request - neither means the slug is gone or the page shape
+    changed. Before this fix a 403 fell through to parse_manga_details,
+    returning MangaDetails(title="", ...) - an empty-title fabrication."""
+    client, _ = _client(403, None)
+
+    with pytest.raises(Transient):
+        client.fetch_manga_details("throttled-manga")
+
+
+def test_fetch_manga_details_500_is_transient():
+    client, _ = _client(500, None)
+
+    with pytest.raises(Transient):
+        client.fetch_manga_details("erroring-manga")
+
+
+def test_fetch_manga_details_other_non_200_is_unexpected():
+    """418 is neither 200/404 nor in TRANSIENT_STATUS_CODES - a protocol
+    surprise, not a retry-worthy failure."""
+    client, _ = _client(418, None)
+
+    with pytest.raises(Unexpected):
+        client.fetch_manga_details("teapot-manga")
 
 
 def _fetch_cover_through_the_protocol(client: SourceClient, cover_url: str) -> bytes:

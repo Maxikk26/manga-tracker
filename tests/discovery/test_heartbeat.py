@@ -5,7 +5,11 @@ computed report (recorded spec deviation from BOT's onhold_sweep-tied
 
 import logging
 
-from manga_tracker.discovery.heartbeat import heartbeat
+from manga_tracker.discovery.heartbeat import (
+    _degraded_run_count,
+    _last_successful_run_at,
+    heartbeat,
+)
 from manga_tracker.notifier.telegram import TelegramSender
 from manga_tracker.storage.db import connect, ensure_site
 
@@ -160,3 +164,91 @@ def test_heartbeat_renders_without_crashing_when_no_run_has_ever_succeeded():
     heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
 
     assert "Última detección exitosa: ninguna todavía" in api.calls[0]["text"]
+
+
+def test_last_successful_run_at_excludes_an_in_flight_run():
+    """A row opened but never closed must not count, even though open_run
+    inserts it with status='ok' already set. items_checked is set > 0 here
+    on purpose, isolating the finished_at condition from the separate
+    zero-items exclusion covered below."""
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('feed_check', '2026-07-25T03:00:00Z', 'ok', 3, 0, 0)"
+    )
+    conn.commit()
+
+    assert _last_successful_run_at(conn) is None
+
+
+def test_last_successful_run_at_excludes_a_run_killed_mid_sweep_left_open_forever():
+    """Same exclusion as the in-flight case, regardless of how long the row
+    stays open - a killed process leaves finished_at NULL permanently."""
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('active_sweep', '2026-01-01T03:00:00Z', 'ok', 5, 1, 1)"
+    )
+    conn.commit()
+
+    assert _last_successful_run_at(conn) is None
+
+
+def test_last_successful_run_at_excludes_a_finished_run_that_examined_nothing():
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('feed_check', ?, ?, 'ok', 0, 0, 0)",
+        ("2026-07-25T03:00:00Z", "2026-07-25T03:01:00Z"),
+    )
+    conn.commit()
+
+    assert _last_successful_run_at(conn) is None
+
+
+def test_last_successful_run_at_reports_a_qualifying_row():
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('active_sweep', ?, ?, 'ok', 2, 1, 1)",
+        ("2026-07-25T03:00:00Z", "2026-07-25T03:02:00Z"),
+    )
+    conn.commit()
+
+    assert _last_successful_run_at(conn) == "2026-07-25T03:00:00Z"
+
+
+def test_degraded_run_count_never_counts_an_onhold_sweep_failure():
+    """A failed on-hold sweep must not inflate "corridas degradadas".
+
+    Same reasoning as the detection-line exclusion above, pointed the other
+    way: the on-hold sweep notifies nothing, so neither its success nor its
+    failure says anything about whether feed_check/active_sweep are alive.
+    An error there inflating this number sends the owner looking at healthy
+    detection, and the digit that should mean "detection is degraded" stops
+    meaning it.
+
+    Asserted in two steps rather than one so the two halves fail separately:
+    the on-hold error alone must read 0, and adding a real detection failure
+    must read 1 - not 2. Today this holds only because DETECTION_JOBS never
+    contains onhold_sweep; widening that tuple would pass silently without
+    this test.
+    """
+    conn = connect(":memory:")
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('onhold_sweep', ?, ?, 'error', 4, 0, 0)",
+        ("2026-07-24T02:00:00Z", "2026-07-24T02:03:00Z"),
+    )
+    conn.commit()
+
+    assert _degraded_run_count(conn, NOW) == 0
+
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, updates_found, "
+        "notifications_sent) VALUES ('feed_check', ?, ?, 'error', 1, 0, 0)",
+        ("2026-07-24T10:00:00Z", "2026-07-24T10:01:00Z"),
+    )
+    conn.commit()
+
+    assert _degraded_run_count(conn, NOW) == 1
