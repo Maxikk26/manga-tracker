@@ -37,18 +37,31 @@ _PREVIEW = AddPreview(
 class FakeIntake:
     """Records every call; raises or returns whatever the test configures."""
 
-    def __init__(self, *, preview_error=None, confirm_error=None, cover_cached=True):
+    def __init__(
+        self,
+        *,
+        preview_error=None,
+        confirm_error=None,
+        cover_cached=True,
+        preview_cover_result=(b"cover-bytes", "image/webp"),
+    ):
         self._preview_error = preview_error
         self._confirm_error = confirm_error
         self._cover_cached = cover_cached
+        self._preview_cover_result = preview_cover_result
         self.preview_calls: list[str] = []
         self.confirm_calls: list[dict] = []
+        self.preview_cover_calls: list[str] = []
 
     def preview(self, conn, url):
         self.preview_calls.append(url)
         if self._preview_error:
             raise self._preview_error
         return _PREVIEW
+
+    def preview_cover(self, cover_url):
+        self.preview_cover_calls.append(cover_url)
+        return self._preview_cover_result
 
     def confirm(self, conn, **kwargs):
         self.confirm_calls.append(kwargs)
@@ -107,6 +120,35 @@ def test_preview_writes_nothing_and_returns_publication_status_text(db_path, tmp
     assert body["cover_url"] == "https://host/cover.webp"
     assert intake.preview_calls == ["https://www.manganato.gg/manga/some-manga"]
     assert _counts(db_path) == (0, 0, 0, 0)
+
+
+# --- preview-cover ---------------------------------------------------------------
+
+
+def test_preview_cover_serves_the_bytes_with_media_type_and_a_modest_cache_header(db_path, tmp_path):
+    """The modal's <img> points here, never at the CDN URL: the source's image
+    hosts answer 403 to a hotlinked request, so `web` asks `intake` (which owns
+    the fetch) and serves the bytes itself, like /api/covers/{id} does."""
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.get("/api/mangas/preview-cover", params={"url": "https://host/cover.webp"})
+
+    assert response.status_code == 200
+    assert response.content == b"cover-bytes"
+    assert response.headers["content-type"] == "image/webp"
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert intake.preview_cover_calls == ["https://host/cover.webp"]
+
+
+def test_preview_cover_none_from_intake_is_404_not_500(db_path, tmp_path):
+    """None covers both the unacceptable URL and the source failure: a missing
+    preview image is ordinary, and the modal's onError fallback handles it."""
+    client = _client(db_path, tmp_path, FakeIntake(preview_cover_result=None))
+
+    response = client.get("/api/mangas/preview-cover", params={"url": "http://host/cover.webp"})
+
+    assert response.status_code == 404
 
 
 # --- the taxonomy, one case per row ---------------------------------------------

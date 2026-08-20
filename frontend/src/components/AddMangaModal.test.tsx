@@ -51,7 +51,12 @@ describe("AddMangaModal", () => {
 
     expect(screen.getByText("One Piece")).toBeInTheDocument();
     expect(screen.getByText("En curso")).toBeInTheDocument();
-    expect(modalCoverImage()).toHaveAttribute("src", preview.cover_url);
+    // Proxied through the panel — the raw CDN URL 403s without a manganato
+    // Referer, so pointing the <img> at it always showed the fallback.
+    expect(modalCoverImage()).toHaveAttribute(
+      "src",
+      `/api/mangas/preview-cover?url=${encodeURIComponent(preview.cover_url!)}`,
+    );
   });
 
   it("falls back when the cover candidate fails to load", () => {

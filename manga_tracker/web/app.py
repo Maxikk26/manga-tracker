@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -248,6 +248,28 @@ def create_app(db_path: str, intake: MangaIntake, frontend_dist: Path | None = N
             path,
             media_type=media_type_for(path),
             headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @app.get("/api/mangas/preview-cover")
+    def preview_cover(url: str) -> Response:
+        """Serve the cover of a preview that has no manga row — and so no
+        /api/covers/{manga_id} — yet. Same hotlinking reality get_cover
+        documents: the source's image hosts answer 403 without their own
+        Referer, so the modal's <img> must point here, never at the CDN.
+        The fetch is delegated to `intake` (the Referer knowledge lives in
+        the source client); 404 when it declines the URL or the source did
+        not deliver — the modal falls back to its placeholder, an ordinary
+        state, never a 500."""
+        result = intake.preview_cover(url)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No preview cover available for {url!r}")
+        image, media_type = result
+        # Modest on purpose: an hour outlives any open modal without pinning
+        # a third-party URL's bytes the way the by-id covers route may.
+        return Response(
+            content=image,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
         )
 
     @app.post("/api/mangas/preview")

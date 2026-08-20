@@ -76,6 +76,14 @@ class MangaIntake(Protocol):
 
     def preview(self, conn, url: str) -> AddPreview: ...
 
+    # The preview's cover image, as `(bytes, media type)`, or None when the
+    # URL is unacceptable or the source did not deliver — a missing preview
+    # image is an ordinary state, never an error. Exists because the source's
+    # image hosts answer 403 to a hotlinked <img>: the panel must serve the
+    # preview cover itself, and the Referer knowledge that makes the fetch
+    # succeed is source knowledge, so `web` may only ask, never fetch.
+    def preview_cover(self, cover_url: str) -> tuple[bytes, str] | None: ...
+
     def confirm(
         self,
         conn,

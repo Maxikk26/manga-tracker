@@ -6,7 +6,7 @@ import pytest
 from manga_tracker.intake.contracts import AlreadyTracked, InvalidUrl
 from manga_tracker.intake.pasted_url import PastedUrlIntake
 from manga_tracker.sources.contracts import Chapter, MangaDetails, NotFound, Transient, Unexpected
-from manga_tracker.storage.cover_cache import find_cached
+from manga_tracker.storage.cover_cache import find_cached, preview_cache_path, write_preview
 from manga_tracker.storage.db import connect
 
 NOW = "2026-08-19T12:00:00Z"
@@ -189,6 +189,52 @@ def test_preview_returns_the_matched_metadata_and_writes_nothing(conn):
 
 
 # ================================================================================
+# preview_cover()
+# ================================================================================
+
+
+COVER_URL = "https://host/cover.webp"
+
+
+def test_preview_cover_fetches_once_and_replays_from_the_cache_file(tmp_path):
+    cache_dir = tmp_path / "covers"
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+    first = intake.preview_cover(COVER_URL)
+    second = intake.preview_cover(COVER_URL)
+
+    assert first == (IMAGE, "image/webp")
+    assert second == first
+    assert client.cover_calls == [COVER_URL]  # the replay cost zero requests
+    cached = preview_cache_path(cache_dir, COVER_URL)
+    assert cached.exists() and cached.suffix == ".webp"
+    assert cached.read_bytes() == IMAGE
+
+
+@pytest.mark.parametrize("bad", ["http://host/cover.webp", "not-a-url", "https:///no-host.webp"])
+def test_preview_cover_rejects_an_unacceptable_url_without_fetching(tmp_path, bad):
+    """Same gate as confirm's (`_acceptable_cover_url`): the server GETs this
+    client-echoed URL, so anything not https-with-a-host never reaches the
+    client. None, not an exception — the modal just shows its placeholder."""
+    client = FakeClient()
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=tmp_path / "covers")
+
+    assert intake.preview_cover(bad) is None
+    assert client.cover_calls == []
+
+
+@pytest.mark.parametrize("error", [NotFound("gone"), Transient("timeout"), Unexpected("shape")])
+def test_preview_cover_source_failure_is_none_not_an_error(tmp_path, error):
+    cache_dir = tmp_path / "covers"
+    client = FakeClient(cover_error=error)
+    intake = PastedUrlIntake(client, SITE_ID, cache_dir=cache_dir)
+
+    assert intake.preview_cover(COVER_URL) is None
+    assert not preview_cache_path(cache_dir, COVER_URL).exists()  # nothing half-written
+
+
+# ================================================================================
 # confirm()
 # ================================================================================
 
@@ -260,6 +306,30 @@ def test_confirm_happy_path_writes_all_four_tables(conn, tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM chapter_history").fetchone()[0] == 2
     assert find_cached(cache_dir, result.manga_id) is not None
+
+
+def test_confirm_promotes_a_cached_preview_cover_without_fetching(conn, tmp_path):
+    """The request-budget half of the preview cache: when `preview_cover()`
+    already fetched the image, confirm reads the file, writes the real cover
+    and deletes the preview — zero cover requests, so the whole add stays at
+    three (ficha + chapters + the cover the preview already paid for)."""
+    cache_dir = tmp_path / "covers"
+    write_preview(cache_dir, "https://host/cover.webp", IMAGE)
+
+    result, client = _confirm(conn, cache_dir)
+
+    assert result.cover_cached is True
+    assert client.cover_calls == []  # promoted, never re-fetched
+    promoted = find_cached(cache_dir, result.manga_id)
+    assert promoted is not None and promoted.read_bytes() == IMAGE
+    assert not preview_cache_path(cache_dir, "https://host/cover.webp").exists()
+
+
+def test_confirm_fetches_the_cover_when_no_preview_file_exists(conn, tmp_path):
+    result, client = _confirm(conn, tmp_path / "covers")
+
+    assert result.cover_cached is True
+    assert client.cover_calls == ["https://host/cover.webp"]
 
 
 def test_confirm_zero_chapters_is_a_successful_add_with_null_latest(conn, tmp_path):

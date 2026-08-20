@@ -172,7 +172,10 @@ export function AddMangaModal({
               {preview.cover_url && !coverFailed ? (
                 <img
                   className="modal-preview-cover"
-                  src={preview.cover_url}
+                  // Proxied through the panel, never the raw CDN URL: the
+                  // source's image hosts answer 403 to a hotlinked <img>
+                  // (no manganato Referer), so the raw URL always fell back.
+                  src={`/api/mangas/preview-cover?url=${encodeURIComponent(preview.cover_url)}`}
                   alt=""
                   onError={() => setCoverFailed(true)}
                 />
