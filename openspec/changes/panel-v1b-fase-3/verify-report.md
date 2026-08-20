@@ -434,3 +434,85 @@ structural loophole for future additions, flagged as a SUGGESTION. One
 WARNING (a "process killed" claim in apply-progress.md that did not hold,
 discovered and remediated during this verification) does not block PR 2;
 nothing here blocks proceeding to Slice 3 or to opening PR 2.
+
+## Slice 3 + Whole-Change Verification Report
+
+**Change**: panel-v1b-fase-3 (Slice 3 of 3, PR 3: `feat/add-manga-modal`, stacked on `feat/add-manga-endpoint`)
+**Version**: docs/spec-panel-v1b.md v1.2
+**Mode**: Standard, full spec-driven verification (all 18/18 tasks claimed done across 3 slices)
+
+### Task completeness
+| Slice | Tasks | Complete |
+|---|---|---|
+| 1 | 1.1-1.5 | 5/5 checked |
+| 2 | 2.1-2.7 | 7/7 checked |
+| 3 | 3.1-3.8 | 8/8 checked |
+| Total | 18 | 18/18 |
+
+All boxes in tasks.md verified checked by direct read; no unchecked task found.
+
+### Build and Tests Execution
+| Command | Result |
+|---|---|
+| cd frontend and npm test (Vitest) | 9 test files, 82 tests passed -- matches apply-progress claim exactly |
+| cd frontend and npm run build (tsc --noEmit and vite build) | Clean, no type errors, dist/ produced (204.82 kB JS, 7.23 kB CSS) |
+| uv run pytest -q | 492 passed, 1 pre-existing unrelated warning (starlette/httpx deprecation) -- matches apply-progress claim exactly, confirms the backend suite is untouched by this frontend-only slice |
+
+uv was not on this shell's PATH; resolved to the venv's uv.exe and re-run successfully. No source was hit -- all source calls in the backend suite are faked per tests/conftest.py's socket block, and no manual click-through against the owner's running :8000/:5173 was performed, per the environment constraint.
+
+### Guard-break (mandatory, Slice-3-specific: frontend confirm-gate)
+Edited frontend/src/components/AddMangaModal.tsx, changing the confirm button's disabled condition from busy-or-not-preview to busy-only (enabling "Agregar" before any preview exists -- the inverse of Slices 1-2's backend/architecture guard-breaks). Re-ran npm test:
+
+- AddMangaModal.test.tsx: "disables the confirm button until a preview exists" -- FAILED (button not disabled)
+- AddMangaContainer.test.tsx: "abandoning the preview (changing the URL) sends no confirm request" -- FAILED (same assertion, different layer)
+
+Both failures name the exact guard broken. Reverted with git checkout on the one file; npm test back to 82/82 green; git status --short clean (confirmed empty).
+
+
+### Spanish copy audit
+Read AddMangaModal.tsx, AddMangaContainer.tsx, BookmarkListContainer.tsx, api/http.ts, api/mangas.ts in full. Every user-facing string is Spanish, neutral register: "URL de la ficha", "Estado", "Capitulo inicial", "Cancelar", "Vista previa"/"Buscando...", "Agregar"/"Agregando...", "Ver en <label>", "Sin portada", "Agregar manga", "Cargando...", "Ocurrio un error inesperado...", the two network-failure strings in mangas.ts. No English leaked into any label or message. Rejection copy is not re-translated: AddMangaContainer's handlePreview/handleConfirm call setErrorMessage(error.message) directly from the backend's detail, confirmed by reading the container -- the frontend never re-derives or re-maps taxonomy text, satisfying "backend detail strings are rendered, not re-translated."
+
+STATUS_LABELS in frontend/src/domain/statusLabels.ts and the Python mirror in manga_tracker/web/app.py are byte-identical (5 entries), and tests/web/test_status_labels_parity.py pins this executably.
+
+### Wire-shape truth (frontend vs manga_tracker/web/app.py)
+Read app.py's preview_manga/add_manga handlers directly (not just the design's prose):
+
+| Wire point | Backend (app.py) | Frontend (domain/types.ts) | Match |
+|---|---|---|---|
+| Preview response | slug, url, title, cover_url, publication_status_text | MangaPreview -- same 5 fields, same nullability | Yes |
+| Add request body | MangaAddRequest: url, title, cover_url optional, status, last_chapter_read default 0 | MangaAdd: url, title, cover_url, status, last_chapter_read | Yes |
+| 409 body | detail plus existing sibling key: title, status, terminal | ExistingManga: title, status, terminal, parsed by http.ts's isExistingManga | Yes, incl. the existing sibling key |
+| 201 body | get_panel_bookmark via _panel_bookmark_row: id, manga_id, title, status, last_chapter_read, progress_is_approx, latest_chapter_num, latest_chapter_url, latest_chapter_at, behind, last_read_at, status_changed_at | Bookmark interface -- same 12 fields | Yes |
+
+No drift found between the actually-implemented backend shapes and the frontend's typed contracts.
+
+### The 4 recorded deviations -- assessed
+1. Instant close on success, no exit animation (BookmarkListContainer.handleAdded calls setAddModalOpen(false) directly). spec.md's scenario only requires "the modal closes, the grid performs a full refetch" -- no animation timing is a SHALL. Compliant, not a violation.
+2. "Sin portada" text fallback instead of BookmarkCard's gradient-initials treatment. spec.md doesn't mandate a specific visual, only that a broken cover candidate degrades gracefully; design only specifies the onError mechanism match, not the exact visual. Compliant.
+3. Preview-on-submit + gated "Agregar" button as the preview/confirm trigger split. Matches spec.md "confirm disabled until a preview exists" literally; the design left the trigger UX open. Compliant.
+4. onAdded/onViewExisting/onRequestClose are synchronous props, matching the existing handleChangeProgress fire-and-forget convention already in BookmarkListContainer.tsx. Consistent with existing code, no spec impact.
+
+
+### Undisclosed finding -- WARNING (not in the 4 recorded deviations)
+design.md's Threat Matrix accepted-risk paragraph states, present tense, that intake rejects anything that is not https with a non-empty host, for a client-supplied cover_url before the server fetches it. Read manga_tracker/intake/pasted_url.py's confirm() in full and grepped the whole manga_tracker/ tree for a scheme/host check (urlparse, startswith https, netloc) on cover_url -- no such validation exists. MangaAddRequest.cover_url is a plain optional str with no HttpUrl/scheme constraint, and confirm() passes cover_url straight to self._client.fetch_cover(cover_url) with no prior check. tests/intake/test_pasted_url.py has no case for a non-https or empty-host cover_url either.
+- Severity: WARNING, not CRITICAL -- it does not violate any spec.md SHALL (the panel-add-manga spec never mentions cover-URL scheme validation), the design's own risk analysis already treats the panel as an unauthenticated, LAN-scoped surface where any caller can already PATCH every bookmark (not a new trust boundary), and the bounded worst case per that same analysis is one wasted request plus a junk file that cover_cache.write_cover's own path-sanitization already contains.
+- Action: either implement the stated scheme/host check in PastedUrlIntake.confirm() (matching the design's own sentence) or correct design.md's accepted-risk paragraph to state the mitigation is not yet implemented. Left for the orchestrator/owner to decide; not a blocker for this slice's own task list, which never assigned this check to any of tasks 3.1-3.8 or 2.1-2.7.
+
+### Minor gap -- SUGGESTION
+The 409 "Ver en" tab-switch affordance is unit-tested at AddMangaContainer.test.tsx (button calls onViewExisting with the raw status) but not exercised end-to-end through BookmarkListContainer.test.tsx's +3 new cases (which cover: opening the dialog, a successful add's refetch/close/tab-switch, and abandoning without confirming). BookmarkListContainer.handleViewExistingFromAdd is two lines of direct glue (setAddModalOpen(false); setActiveStatus(status)), so risk is low, but it is the one wiring path in this slice with no integration-level test.
+
+### Whole-change completeness (both spec files, all three slices)
+Cross-checked every Requirement/Scenario in specs/panel-add-manga/spec.md and specs/source-client/spec.md against test names in tests/intake/test_pasted_url.py, tests/web/test_add_manga_api.py, tests/storage/test_write_manual_add.py, tests/sources/test_client.py, tests/discovery/test_covers.py, and the frontend's AddMangaModal.test.tsx / AddMangaContainer.test.tsx / BookmarkListContainer.test.tsx / api/mangas.test.ts / api/http.test.ts.
+
+- panel-add-manga spec.md: all 12 requirements and their scenarios have at least one covering, currently-passing test -- preview-no-write, malformed URL, duplicate/terminal detection (both the no-manga_sites-row case and the plain-dropped case), unknown slug, transient, unexpected, zero-chapters-is-success, the manual write shape (status_changed_at format, origin, progress_is_approx, detected_via seed_backfill), initial status/chapter validation, cover-cache-on-confirm (both present and absent), atomicity-on-rejection, the web-boundary requirement and its injected-violation probe (4 probes, all in test_architecture.py, part of the 492 green), and the modal/grid-refresh/abandon/rejection-copy requirements at the frontend layer.
+- source-client spec.md: "fetch_cover joins the Protocol" and "existing concrete behavior is unchanged" are covered (test_fetch_cover_is_reachable_through_a_sourceclient_typed_caller, plus the pre-existing test_fetch_cover_* regression tests in tests/discovery/test_covers.py and tests/sources/test_client.py staying green). "fetch_cover follows the existing error taxonomy" is covered for NotFound and Unexpected explicitly (test_fetch_cover_404_is_not_found, test_fetch_cover_403_is_unexpected_not_silence, test_fetch_cover_200_with_an_empty_body_is_unexpected) but no test names a Transient/timeout case specifically through fetch_cover -- the mechanism is shared with every other SourceClient operation via the transport layer (transport.py's single raise Transient site every .get() call goes through), so the category is exercised generically elsewhere, just not by name for this operation. SUGGESTION: add one test_fetch_cover_timeout_is_transient-style case for literal 1:1 scenario coverage; not currently a gap in behavior, only in the letter of the scenario-to-test mapping.
+
+No requirement was found with zero covering test.
+
+### Result Contract
+- status: done
+- executive_summary: Slice 3 and the whole change verify clean -- 0 CRITICAL, 1 WARNING (design.md's accepted-risk cover-URL scheme check is not actually implemented), 2 SUGGESTION (no BookmarkListContainer-level integration test for the 409 tab-switch affordance; no test literally named for fetch_cover's Transient case). All 18/18 tasks confirmed complete against real code; 82/82 frontend tests and 492/492 backend tests pass; npm run build is clean; the guard-break on the confirm-button gate failed the two expected Vitest cases by name and was fully reverted (git status --short clean).
+- artifacts: openspec/changes/panel-v1b-fase-3/verify-report.md (this section appended); Engram sdd/panel-v1b-fase-3/verify-report
+- next_recommended: sdd-archive (no CRITICAL issues found; the one WARNING is a documentation/implementation mismatch in an already-accepted, bounded risk, not a blocker)
+- risks: (1) design.md's stated cover_url scheme/host validation does not exist in PastedUrlIntake.confirm() -- bounded impact (LAN-only, no-auth panel, one wasted request plus a sanitized-path junk file) but should be corrected in either code or docs before this design doc is trusted again; (2) the 409-to-tab-switch path has no container-level integration test, low risk given it is two lines of direct glue.
+- skill_resolution: paths-injected -- loaded the sdd-verify SKILL.md and the shared sdd-phase-common.md directly per the launch instructions.
