@@ -293,3 +293,39 @@ def test_confirm_receives_the_raw_status_value_and_the_default_chapter(db_path, 
     assert call["status"] == "reading"
     assert call["last_chapter_read"] == 0.0
     assert call["cover_url"] is None
+
+
+# --- empty title unwritable ------------------------------------------------------
+
+
+def test_empty_title_is_422_and_writes_nothing(db_path, tmp_path):
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json={**_ADD_BODY, "title": ""})
+
+    assert response.status_code == 422
+    assert intake.confirm_calls == []
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
+def test_whitespace_only_title_is_422_and_writes_nothing(db_path, tmp_path):
+    """min_length=1 alone would accept this - it is not empty, only blank."""
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json={**_ADD_BODY, "title": "   "})
+
+    assert response.status_code == 422
+    assert intake.confirm_calls == []
+    assert _counts(db_path) == (0, 0, 0, 0)
+
+
+def test_a_normal_title_still_validates_and_reaches_the_write_path(db_path, tmp_path):
+    intake = FakeIntake()
+    client = _client(db_path, tmp_path, intake)
+
+    response = client.post("/api/mangas", json=_ADD_BODY)
+
+    assert response.status_code == 201
+    assert intake.confirm_calls[0]["title"] == "Some Manga"

@@ -70,20 +70,20 @@ rewrite + the 7-pin sweep, unit 3 has no doc of its own (covered by unit 2's
 
 ## Phase 3: Empty title unwritable
 
-- [ ] 3.1 RED: in `tests/web/test_add_manga_api.py`, add a test that `POST /api/mangas` with `title: ""` returns 422 and writes zero rows to `mangas`.
-- [ ] 3.2 RED: add a test that `title: "   "` (whitespace-only) also returns 422 and writes zero rows — this is the case `min_length=1` alone would miss.
-- [ ] 3.3 RED: add a test that a normal non-empty title still validates and reaches the existing write path unchanged (no behavior regression).
-- [ ] 3.4 GREEN: in `manga_tracker/web/app.py`, change `MangaAddRequest.title: str` to `Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]` (import `Annotated` from `typing`, `StringConstraints` from `pydantic`). Note in a code comment that `strip_whitespace=True` also normalizes the stored title (matches the `TRIM(title)` production audit) — call this out as a real write-path behavior change, not a side effect to gloss over.
-- [ ] 3.5 Break the guard on purpose: temporarily drop `strip_whitespace=True` (keep `min_length=1`), confirm test 3.2 fails with a written row, then restore it — record the result.
-- [ ] 3.6 `uv run pytest -q tests/web/test_add_manga_api.py` green.
+- [x] 3.1 RED: in `tests/web/test_add_manga_api.py`, add a test that `POST /api/mangas` with `title: ""` returns 422 and writes zero rows to `mangas`.
+- [x] 3.2 RED: add a test that `title: "   "` (whitespace-only) also returns 422 and writes zero rows — this is the case `min_length=1` alone would miss.
+- [x] 3.3 RED: add a test that a normal non-empty title still validates and reaches the existing write path unchanged (no behavior regression).
+- [x] 3.4 GREEN: in `manga_tracker/web/app.py`, change `MangaAddRequest.title: str` to `Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]` (import `Annotated` from `typing`, `StringConstraints` from `pydantic`). Note in a code comment that `strip_whitespace=True` also normalizes the stored title (matches the `TRIM(title)` production audit) — call this out as a real write-path behavior change, not a side effect to gloss over.
+- [x] 3.5 Break the guard on purpose: temporarily drop `strip_whitespace=True` (keep `min_length=1`), confirm test 3.2 fails with a written row, then restore it — record the result.
+- [x] 3.6 `uv run pytest -q tests/web/test_add_manga_api.py` green.
 
 ## Phase 4: Owner prerequisite and CLAUDE.md check (not implementer tasks)
 
 - [ ] 4.1 **Owner action, NOT completable by the implementer.** Record in the PR body as an explicit archive prerequisite: run `SELECT id, title FROM mangas WHERE TRIM(title) = '';` against production before archiving this change. Status: UNRUN — this account has no `docker` socket permission and `data/` in the checkout is empty. Expect zero rows; any row is a pre-existing empty-title add from the sibling defect, remediation is owner-decided and out of scope here.
-- [ ] 4.2 Judge whether `CLAUDE.md` §"Request policy" or §"Rules that are easy to get wrong" goes stale from this change. Conclusion to record: **no update needed** — no new job_name, no new traffic class, no change to the detection rule, retry policy, or `fetch_cover`'s divergent 403 handling; the heartbeat and client changes are read-and-raise only, not policy changes.
+- [x] 4.2 Judge whether `CLAUDE.md` §"Request policy" or §"Rules that are easy to get wrong" goes stale from this change. Conclusion to record: **no update needed** — no new job_name, no new traffic class, no change to the detection rule, retry policy, or `fetch_cover`'s divergent 403 handling; the heartbeat and client changes are read-and-raise only, not policy changes.
 
 ## Phase 5: Final verification
 
-- [ ] 5.1 `uv run pytest -q` — full backend suite green (532+ tests plus additions).
-- [ ] 5.2 `npm test` from `frontend/` — confirm untouched; no frontend files are modified by this change (no UI surface consumes `fetch_manga_details`'s exception classes directly, and `MangaAddRequest` validation surfaces as an existing 422 the frontend already handles).
-- [ ] 5.3 Confirm `docs/` pin sweep is complete: grep for the old version numbers (`spec-bot-telegram.md.*v1\.6`, `spec-cliente-fuente-descubrimiento.md.*v1\.8`) across `docs/` and `one-pager-v1a.md` and confirm zero remaining stale hits outside changelog history.
+- [x] 5.1 `uv run pytest -q` — full backend suite green (532+ tests plus additions).
+- [x] 5.2 `npm test` from `frontend/` — confirm untouched; no frontend files are modified by this change (no UI surface consumes `fetch_manga_details`'s exception classes directly, and `MangaAddRequest` validation surfaces as an existing 422 the frontend already handles).
+- [x] 5.3 Confirm `docs/` pin sweep is complete: grep for the old version numbers (`spec-bot-telegram.md.*v1\.6`, `spec-cliente-fuente-descubrimiento.md.*v1\.8`) across `docs/` and `one-pager-v1a.md` and confirm zero remaining stale hits outside changelog history.
