@@ -22,8 +22,8 @@ NOW = "2026-08-17T12:00:00Z"
 
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
-    "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind", "last_read_at",
-    "status_changed_at",
+    "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind",
+    "last_read_at", "status_changed_at",
 }
 
 
@@ -62,18 +62,21 @@ def _site(conn) -> int:
 
 def _bookmark(
     conn, site_id, title, *, status="reading", last_chapter_read=None, progress_is_approx=0,
-    latest_chapter_num=None, latest_chapter_url=None, latest_chapter_at=None, mapped=True,
+    url=None, latest_chapter_num=None, latest_chapter_url=None, latest_chapter_at=None,
+    mapped=True,
 ):
     """One manga + mapping + bookmark, returning (manga_id, bookmark_id)."""
     manga_id = conn.execute(
         "INSERT INTO mangas (title, created_at, updated_at) VALUES (?, ?, ?)", (title, NOW, NOW)
     ).lastrowid
     if mapped:
+        slug = title.lower().replace(" ", "-")
         conn.execute(
-            "INSERT INTO manga_sites (manga_id, site_id, source_key, latest_chapter_num, "
-            "latest_chapter_url, latest_chapter_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (manga_id, site_id, title.lower().replace(" ", "-"), latest_chapter_num,
-             latest_chapter_url, latest_chapter_at, NOW, NOW),
+            "INSERT INTO manga_sites (manga_id, site_id, source_key, url, latest_chapter_num, "
+            "latest_chapter_url, latest_chapter_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (manga_id, site_id, slug, url or f"https://www.manganato.gg/manga/{slug}",
+             latest_chapter_num, latest_chapter_url, latest_chapter_at, NOW, NOW),
         )
     bookmark_id = conn.execute(
         "INSERT INTO bookmarks (manga_id, status, last_chapter_read, progress_is_approx, origin, "
@@ -97,7 +100,8 @@ def _history(conn, manga_id):
 def test_list_returns_every_bookmark_with_manga_and_source_state(client, db_path):
     conn = connect(db_path)
     site_id = _site(conn)
-    _bookmark(conn, site_id, "One Piece", last_chapter_read=1100.0, latest_chapter_num=1120.0,
+    _bookmark(conn, site_id, "One Piece", last_chapter_read=1100.0,
+              url="https://www.manganato.gg/manga/one-piece", latest_chapter_num=1120.0,
               latest_chapter_url="https://www.manganato.gg/manga/one-piece/chapter-1120",
               latest_chapter_at="2026-08-15T10:00:00Z")
     _bookmark(conn, site_id, "Berserk", status="on_hold", last_chapter_read=364.0)
@@ -111,6 +115,7 @@ def test_list_returns_every_bookmark_with_manga_and_source_state(client, db_path
     assert set(one_piece) == BOOKMARK_KEYS
     assert one_piece["status"] == "reading"
     assert one_piece["last_chapter_read"] == 1100.0
+    assert one_piece["manga_url"] == "https://www.manganato.gg/manga/one-piece"
     assert one_piece["latest_chapter_num"] == 1120.0
     assert one_piece["latest_chapter_url"] == "https://www.manganato.gg/manga/one-piece/chapter-1120"
     assert one_piece["latest_chapter_at"] == "2026-08-15T10:00:00Z"
@@ -143,9 +148,47 @@ def test_list_includes_a_bookmark_whose_manga_has_no_source_mapping(client, db_p
     body = client.get("/api/bookmarks").json()
 
     assert len(body) == 1
+    assert body[0]["manga_url"] is None
     assert body[0]["latest_chapter_num"] is None
     assert body[0]["latest_chapter_url"] is None
     assert body[0]["behind"] is None
+
+
+def test_manga_url_is_the_stored_column_not_the_chapter_url_with_its_tail_cut(client, db_path):
+    """`manga_url` is served from `manga_sites.url`, never derived by stripping
+    the last segment off `latest_chapter_url`.
+
+    The two agree in production, which is exactly why a derivation would pass
+    unnoticed — so this row makes them disagree on purpose. Cutting the tail
+    off the chapter url would yield `.../manga/renamed-slug`; the stored column
+    says `old-slug`, and the stored column is what the panel must send. It
+    matters because the source renumbers and renames, and because assembling
+    source urls is client knowledge, not panel knowledge (CLAUDE.md, "the
+    structural boundary").
+    """
+    conn = connect(db_path)
+    site_id = _site(conn)
+    _bookmark(conn, site_id, "Divergent", url="https://www.manganato.gg/manga/old-slug",
+              latest_chapter_num=33.0,
+              latest_chapter_url="https://www.manganato.gg/manga/renamed-slug/chapter-33")
+
+    body = client.get("/api/bookmarks").json()
+
+    assert body[0]["manga_url"] == "https://www.manganato.gg/manga/old-slug"
+
+
+def test_manga_url_is_served_for_a_mapped_title_with_no_detection_yet(client, db_path):
+    """A title added by hand and not yet swept has a url and no chapters. The
+    chapter list is still a valid place to send the owner, so the field must
+    not be gated on a detection having happened."""
+    conn = connect(db_path)
+    site_id = _site(conn)
+    _bookmark(conn, site_id, "Just Added", url="https://www.manganato.gg/manga/just-added")
+
+    body = client.get("/api/bookmarks").json()
+
+    assert body[0]["manga_url"] == "https://www.manganato.gg/manga/just-added"
+    assert body[0]["latest_chapter_url"] is None
 
 
 def test_list_filters_by_status(client, db_path):

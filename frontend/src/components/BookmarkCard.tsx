@@ -15,9 +15,17 @@ interface Props {
  * One manga as a cover-led card.
  *
  * The cover is the entry point, not decoration: the owner scans covers first
- * and opens what catches him, so the poster itself is the link to the next
- * chapter and the title below is confirmation. Demoting the image to a
- * thumbnail beside a text link would undo the reason this design was chosen.
+ * and opens what catches him, so the poster itself is the link and the title
+ * below is confirmation. Demoting the image to a thumbnail beside a text link
+ * would undo the reason this design was chosen.
+ *
+ * The link targets the manga's CHAPTER LIST, not its latest chapter. Sending
+ * the owner to the newest chapter was wrong for the only case that matters:
+ * read up to 175 with 800 available, the latest is 625 chapters past where he
+ * left off. Opening the list lets him find his place. Resolving the actual
+ * next unread chapter is a later stage and needs the real chapter list from
+ * the source, because numbers are decimal and have gaps — it is never
+ * `last_chapter_read + 1`.
  *
  * The "behind" count is a pill on the poster rather than the sentence it used
  * to be. It fires on every reading row -- 18 of 18 in production -- so as prose
@@ -59,17 +67,20 @@ export function BookmarkCard({ bookmark, saving, onChangeProgress, onChangeStatu
     />
   );
 
-  const readable = bookmark.latest_chapter_url && bookmark.latest_chapter_num !== null;
+  // Gated on the manga page alone, no longer on a detected chapter: the
+  // chapter list is a valid destination for a mapped title even before the
+  // first detection lands.
+  const readable = bookmark.manga_url !== null;
 
   return (
     <article className={saving ? "card card-saving" : "card"}>
       {readable ? (
         <a
           className="cover"
-          href={bookmark.latest_chapter_url!}
+          href={bookmark.manga_url!}
           target="_blank"
           rel="noreferrer"
-          aria-label={`Leer ${bookmark.title}, capítulo ${bookmark.latest_chapter_num}`}
+          aria-label={`Ver capítulos de ${bookmark.title}`}
         >
           {poster}
           {bookmark.behind !== null && bookmark.behind > 0 && (
@@ -83,8 +94,9 @@ export function BookmarkCard({ bookmark, saving, onChangeProgress, onChangeStatu
           )}
         </a>
       ) : (
-        // Nothing detected at the source yet: the cover stays, the link does
-        // not, because a dead anchor reads as a broken feature.
+        // No source mapping at all — a pending Kitsu entry whose url was never
+        // pasted, 59 of 229 in production. The cover stays, the link does not,
+        // because a dead anchor reads as a broken feature.
         <span className="cover">{poster}</span>
       )}
 

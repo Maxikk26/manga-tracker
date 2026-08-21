@@ -16,6 +16,7 @@ export function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     status: "reading",
     last_chapter_read: 1100,
     progress_is_approx: false,
+    manga_url: "https://example.test/manga/one-piece",
     latest_chapter_num: 1120,
     latest_chapter_url: "https://example.test/one-piece/chapter-1120",
     latest_chapter_at: "2026-08-15T10:00:00Z",

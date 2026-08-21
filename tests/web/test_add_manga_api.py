@@ -24,8 +24,8 @@ NOW = "2026-08-19T12:00:00Z"
 
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
-    "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind", "last_read_at",
-    "status_changed_at",
+    "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind",
+    "last_read_at", "status_changed_at",
 }
 
 _PREVIEW = AddPreview(
@@ -281,6 +281,10 @@ def test_201_returns_the_bookmark_keys_shape(db_path, tmp_path):
     assert set(body) == BOOKMARK_KEYS
     assert body["title"] == "Some Manga"
     assert body["status"] == "reading"
+    # `manga_url` is in the shape but not asserted by value here: FakeIntake
+    # writes no manga_sites row, so any value check would be testing the stub.
+    # The real write is pinned in tests/storage/test_write_manual_add.py and
+    # the serialization in tests/web/test_panel_api.py.
 
 
 def test_confirm_receives_the_raw_status_value_and_the_default_chapter(db_path, tmp_path):
