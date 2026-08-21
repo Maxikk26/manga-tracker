@@ -86,7 +86,9 @@ def db_path(tmp_path):
 
 
 def _client(db_path, tmp_path, intake) -> TestClient:
-    return TestClient(create_app(db_path, intake, frontend_dist=tmp_path / "no-dist"))
+    return TestClient(
+        create_app(db_path, intake, frontend_dist=tmp_path / "no-dist", timezone_name="America/Caracas")
+    )
 
 
 def _counts(db_path) -> tuple[int, int, int, int]:

@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -37,6 +37,8 @@ from manga_tracker.storage.repositories import (
     UNSET,
     get_panel_bookmark,
     list_panel_bookmarks,
+    manga_history,
+    reading_days,
     update_panel_bookmark,
 )
 
@@ -191,13 +193,22 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def create_app(db_path: str, intake: MangaIntake, frontend_dist: Path | None = None) -> FastAPI:
+def create_app(
+    db_path: str, intake: MangaIntake, frontend_dist: Path | None = None, *, timezone_name: str
+) -> FastAPI:
     """Build the panel app against one database path.
 
     `intake` is the only thing this module holds instead of a `SourceClient`
     (design D1): the add flow's slug/ficha/chapters sequencing lives entirely
     behind it, never in this file. `frontend_dist` exists for tests;
     production always means the checked-in build location.
+
+    `timezone_name` is a REQUIRED keyword with no default (design D1, phase
+    2): a default would be either a third hardcoded `"America/Caracas"` or a
+    silent UTC fallback, and the silent fallback is exactly the local-day
+    aggregation bug this phase exists to prevent. The composition root
+    (`cli.py:_cmd_panel`) already builds everything else here, so it passes
+    `config.timezone_name` too.
     """
     dist = FRONTEND_DIST if frontend_dist is None else frontend_dist
     cache_dir = cache_dir_for(db_path)
@@ -226,6 +237,33 @@ def create_app(db_path: str, intake: MangaIntake, frontend_dist: Path | None = N
             if not found:
                 raise HTTPException(status_code=404, detail=f"No bookmark with id {bookmark_id}")
             return get_panel_bookmark(conn, bookmark_id)
+        finally:
+            conn.close()
+
+    @app.get("/api/history/reading")
+    def get_reading_history(days: Annotated[int, Query(ge=1, le=3650)] = 365) -> dict:
+        """Reading heatmap data (spec-panel-v1b.md fase 2): `reading_history`
+        aggregated by LOCAL calendar day, trailing `days` days ending today.
+        All the local-day math lives in `repositories.reading_days`; this
+        route only validates `days` and supplies `now`/`timezone_name`."""
+        conn = connect(db_path)
+        try:
+            return reading_days(conn, days=days, timezone_name=timezone_name, now=_utc_now())
+        finally:
+            conn.close()
+
+    @app.get("/api/mangas/{manga_id}/history")
+    def get_manga_history(manga_id: int) -> dict:
+        """Per-manga timeline: readings interleaved with detected publications
+        (spec-panel-v1b.md fase 2). 404 when the manga itself does not exist;
+        200 with an empty `events` list when it exists but has none — those
+        are different states and the caller must be able to tell them apart."""
+        conn = connect(db_path)
+        try:
+            result = manga_history(conn, manga_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail=f"No manga with id {manga_id}")
+            return result
         finally:
             conn.close()
 

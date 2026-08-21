@@ -319,7 +319,11 @@ def _cmd_panel(args: argparse.Namespace, config: AppConfig) -> int:
     """
     site_id, client = _bootstrap(config, policy=INTERACTIVE_POLICY)
     intake = PastedUrlIntake(client, site_id, cache_dir_for(config.db_path))
-    uvicorn.run(create_app(config.db_path, intake), host="0.0.0.0", port=config.panel_port)
+    uvicorn.run(
+        create_app(config.db_path, intake, timezone_name=config.timezone_name),
+        host="0.0.0.0",
+        port=config.panel_port,
+    )
     return 0
 
 
