@@ -51,25 +51,66 @@ describe("the cover", () => {
     expect(screen.getByText("SA")).toBeInTheDocument();
   });
 
-  it("makes the poster itself the link to the next chapter", () => {
+  it("makes the poster itself the link to the manga's chapter list", () => {
     // The cover is the entry point, not decoration: demoting it to a thumbnail
     // beside a text link would undo the reason this design was chosen.
     renderCard(
       makeBookmark({
         title: "One Piece",
+        manga_url: "https://example.test/manga/one-piece",
         latest_chapter_num: 1120,
-        latest_chapter_url: "https://example.test/one-piece/1120",
+        latest_chapter_url: "https://example.test/manga/one-piece/chapter-1120",
       }),
     );
 
-    const link = screen.getByRole("link", { name: /Leer One Piece, capítulo 1120/i });
-    expect(link).toHaveAttribute("href", "https://example.test/one-piece/1120");
+    const link = screen.getByRole("link", { name: /Ver capítulos de One Piece/i });
+    expect(link).toHaveAttribute("href", "https://example.test/manga/one-piece");
     expect(link.querySelector("img.cover-image")).toBeInTheDocument();
   });
 
-  it("renders no link when nothing has been detected at the source", () => {
-    // A dead anchor reads as a broken feature; the cover still shows.
-    renderCard(makeBookmark({ latest_chapter_num: null, latest_chapter_url: null }));
+  it("never sends the owner to the latest chapter", () => {
+    // The regression this whole change exists to kill: read up to 175 with 800
+    // available, the latest chapter is 625 past where he left off. The list is
+    // the destination; the chapter url must not appear on the anchor at all.
+    renderCard(
+      makeBookmark({
+        manga_url: "https://example.test/manga/necromancer",
+        last_chapter_read: 175,
+        latest_chapter_num: 800,
+        latest_chapter_url: "https://example.test/manga/necromancer/chapter-800",
+      }),
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "https://example.test/manga/necromancer",
+    );
+  });
+
+  it("links a mapped title that has no detected chapter yet", () => {
+    // Added by hand and not yet swept. The chapter list is still a real page,
+    // so gating the link on a detection would hide it for no reason.
+    renderCard(
+      makeBookmark({
+        manga_url: "https://example.test/manga/just-added",
+        latest_chapter_num: null,
+        latest_chapter_url: null,
+        behind: null,
+      }),
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "https://example.test/manga/just-added",
+    );
+  });
+
+  it("renders no link when the manga has no source mapping", () => {
+    // A pending Kitsu entry whose url was never pasted — 59 of 229 in
+    // production. A dead anchor reads as a broken feature; the cover stays.
+    renderCard(
+      makeBookmark({ manga_url: null, latest_chapter_num: null, latest_chapter_url: null }),
+    );
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(image()).toBeInTheDocument();

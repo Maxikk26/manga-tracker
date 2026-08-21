@@ -364,7 +364,7 @@ def write_manual_add(
 
 _PANEL_BOOKMARK_SELECT = (
     "SELECT b.id, b.manga_id, m.title, b.status, b.last_chapter_read, b.progress_is_approx, "
-    "ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at, "
+    "ms.url, ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at, "
     "b.status_changed_at "
     "FROM bookmarks b JOIN mangas m ON m.id = b.manga_id "
     # LEFT, not INNER: a manga can exist without a source mapping (a pending
@@ -376,7 +376,7 @@ _PANEL_BOOKMARK_SELECT = (
 
 def _panel_bookmark_row(row) -> dict:
     (bookmark_id, manga_id, title, status, last_chapter_read, progress_is_approx,
-     latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at,
+     manga_url, latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at,
      status_changed_at) = row
     # NULL on either side means "behind is unknowable", not zero: a bookmark
     # with no recorded progress is not magically caught up.
@@ -397,6 +397,13 @@ def _panel_bookmark_row(row) -> dict:
         "status": status,
         "last_chapter_read": last_chapter_read,
         "progress_is_approx": bool(progress_is_approx),
+        # The manga's own page at the source, stored at insert time. Serialized
+        # rather than derived: stripping the trailing segment off
+        # `latest_chapter_url` would put the source's URL shape inside the
+        # panel, and assembling source URLs is client knowledge (CLAUDE.md,
+        # "the structural boundary"). Null for a bookmark with no manga_sites
+        # row -- 59 of 229 in production, pending Kitsu entries.
+        "manga_url": manga_url,
         "latest_chapter_num": latest_chapter_num,
         "latest_chapter_url": latest_chapter_url,
         "latest_chapter_at": latest_chapter_at,

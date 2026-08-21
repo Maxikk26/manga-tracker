@@ -113,6 +113,24 @@ def test_cover_url_is_written_to_mangas(conn, site_id):
     )
 
 
+def test_the_manga_page_url_is_written_to_manga_sites(conn, site_id):
+    """`manga_sites.url` holds the manga's own page, and the panel serves it as
+    `manga_url` so a cover click opens the chapter list.
+
+    It was written from the first version of this write path but nothing
+    asserted it, which made it free to drop. It must stay a stored column
+    rather than something the panel derives by cutting the tail off
+    `latest_chapter_url`: assembling source urls is client knowledge (CLAUDE.md,
+    "the structural boundary"), and the two disagree the moment the source
+    renames a slug.
+    """
+    manga_id, _ = _write(conn, site_id)
+
+    assert conn.execute(
+        "SELECT url FROM manga_sites WHERE manga_id = ?", (manga_id,)
+    ).fetchone()[0] == "https://www.manganato.gg/manga/some-manga"
+
+
 # --- zero chapters (design D5, spec.md "Zero chapters is a successful add") ---
 
 

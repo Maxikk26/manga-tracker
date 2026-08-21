@@ -15,6 +15,11 @@ export interface Bookmark {
   status: BookmarkStatus;
   last_chapter_read: number | null;
   progress_is_approx: boolean;
+  /** The manga's own page at the source — its chapter list. Comes from the
+   *  API, never derived from `latest_chapter_url`: the source's URL shape is
+   *  client knowledge and must not live in a component. Null when the manga
+   *  has no source mapping yet. */
+  manga_url: string | null;
   latest_chapter_num: number | null;
   latest_chapter_url: string | null;
   latest_chapter_at: string | null;

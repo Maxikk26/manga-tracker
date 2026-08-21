@@ -16,6 +16,7 @@ function bookmark(
     status,
     last_chapter_read: 1,
     progress_is_approx: false,
+    manga_url: null,
     latest_chapter_num: 1,
     latest_chapter_url: null,
     latest_chapter_at: null,
