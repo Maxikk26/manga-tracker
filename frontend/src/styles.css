@@ -63,6 +63,35 @@ body {
   margin: 0 0 1rem;
 }
 
+/* --- Top-level navigation (design D10) --- */
+
+.app-nav {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.app-nav-tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.app-nav-tab:hover {
+  border-color: var(--accent);
+}
+
+.app-nav-tab-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* --- Toolbar (status tabs + add-manga button) --- */
 
 .panel-toolbar {
@@ -207,17 +236,26 @@ a.cover:hover {
   color: #fff;
 }
 
+/* Seam #2 (design "Owner-Reserved", spec-panel-v1b.md fase 2): the pill's
+   tone and size are exposed as custom properties, currently set to the
+   values fase 1 shipped with. A future visual pass changes the values below
+   — never the component that renders `.behind-pill`, which never changes. */
 .behind-pill {
+  --behind-pill-bg: rgba(10, 10, 10, 0.72);
+  --behind-pill-fg: #fff;
+  --behind-pill-size: 0.75rem;
+  --behind-pill-padding: 0.15rem 0.5rem;
+
   position: absolute;
   top: 8px;
   right: 8px;
-  padding: 0.15rem 0.5rem;
+  padding: var(--behind-pill-padding);
   border-radius: 999px;
-  background: rgba(10, 10, 10, 0.72);
+  background: var(--behind-pill-bg);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
-  color: #fff;
-  font-size: 0.75rem;
+  color: var(--behind-pill-fg);
+  font-size: var(--behind-pill-size);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -342,6 +380,112 @@ a.cover:hover {
   padding: 0.5rem 0.75rem;
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
+}
+
+/* --- Reading heatmap (spec-panel-v1b.md fase 2) ---
+   Provisional: bucket count/colours are owner-reserved (design D7/D8, seam
+   #1 in domain/heatmapBuckets.ts). This scaffolding only needs to render
+   *something* legible before the visual pass lands. */
+
+.reading-heatmap {
+  margin-bottom: 1.5rem;
+}
+
+.heatmap-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.heatmap-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.heatmap-level-1 {
+  background: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.heatmap-level-2 {
+  background: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.heatmap-level-3 {
+  background: color-mix(in srgb, var(--accent) 78%, var(--border));
+}
+
+.heatmap-level-4 {
+  background: var(--accent);
+}
+
+/* --- Manga picker + per-manga timeline (spec-panel-v1b.md fase 2) --- */
+
+.history-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.history-manga-select {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.manga-timeline-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.manga-timeline-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.timeline-event {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.timeline-event-reading {
+  border-left: 3px solid var(--accent);
+}
+
+.timeline-event-publication {
+  border-left: 3px solid var(--muted);
+}
+
+.timeline-date {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Add-manga modal --- */

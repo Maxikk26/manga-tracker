@@ -52,21 +52,21 @@ Chain strategy: size-exception
 
 ## Phase 4: Frontend — Seams and Wiring
 
-- [ ] 4.1 Create `frontend/src/domain/heatmapBuckets.ts` (Seam #1, provisional bucket function, deliberately untested — owner's `/prototype` replaces it wholesale).
-- [ ] 4.2 Add `.behind-pill` tone/size hook in `frontend/src/styles.css` as a no-JSX-change seam (Seam #2), left at current values.
-- [ ] 4.3 Create `frontend/src/api/history.ts` fetchers (`ApiError` + `readDetail` pattern from `bookmarks.ts`); extend `frontend/src/domain/types.ts` with the two response shapes.
-- [ ] 4.4 Create `frontend/src/containers/HistoryContainer.tsx` (owns both fetches, load/error states).
-- [ ] 4.5 Create `frontend/src/components/ReadingHeatmap.tsx` and `MangaTimeline.tsx` — Spanish copy/aria-labels, accessible label states local date + chapter count per cell.
-- [ ] 4.6 Create `frontend/src/components/AppNav.tsx` — presentational, Spanish labels («Lista», «Historial»).
-- [ ] 4.7 Wire `useState<Screen>` + switch into `frontend/src/App.tsx`.
+- [x] 4.1 Create `frontend/src/domain/heatmapBuckets.ts` (Seam #1, provisional bucket function, deliberately untested — owner's `/prototype` replaces it wholesale).
+- [x] 4.2 Add `.behind-pill` tone/size hook in `frontend/src/styles.css` as a no-JSX-change seam (Seam #2), left at current values.
+- [x] 4.3 Create `frontend/src/api/history.ts` fetchers (`ApiError` + `readDetail` pattern from `bookmarks.ts`); extend `frontend/src/domain/types.ts` with the two response shapes.
+- [x] 4.4 Create `frontend/src/containers/HistoryContainer.tsx` (owns both fetches, load/error states).
+- [x] 4.5 Create `frontend/src/components/ReadingHeatmap.tsx` and `MangaTimeline.tsx` — Spanish copy/aria-labels, accessible label states local date + chapter count per cell.
+- [x] 4.6 Create `frontend/src/components/AppNav.tsx` — presentational, Spanish labels («Lista», «Historial»).
+- [x] 4.7 Wire `useState<Screen>` + switch into `frontend/src/App.tsx`.
 
 ## Phase 5: Frontend Tests
 
-- [ ] 5.1 RTL: `HistoryContainer` load/error states.
-- [ ] 5.2 RTL: heatmap renders one cell per active day, accessible label carries the right local date under the `TZ: "America/Caracas"` pin (`vite.config.ts:28`).
-- [ ] 5.3 RTL: `AppNav`/`App` — switching to «Historial» and back leaves the list screen unaffected.
-- [ ] 5.4 Update `frontend/src/domain/sortBookmarks.test.ts`'s hand-built `Bookmark` literal(s) if `types.ts` additions touch that shape.
-- [ ] 5.5 Run `npm test` and `npm run build` in `frontend/`; both must be green (`build` catches what vitest cannot typecheck).
+- [x] 5.1 RTL: `HistoryContainer` load/error states.
+- [x] 5.2 RTL: heatmap renders one cell per active day, accessible label carries the right local date under the `TZ: "America/Caracas"` pin (`vite.config.ts:28`).
+- [x] 5.3 RTL: `AppNav`/`App` — switching to «Historial» and back leaves the list screen unaffected.
+- [x] 5.4 N/A — `types.ts` additions (`ReadingHistoryDay`, `MangaHistoryEvent`, ...) are new interfaces, not new required fields on `Bookmark`; `sortBookmarks.test.ts`'s hand-built `Bookmark` literal is untouched and still matches the wire shape.
+- [x] 5.5 `npm test`: 108/108 passed (103 baseline + 5 new: `ReadingHeatmap.test.tsx`, `HistoryContainer.test.tsx`, `App.test.tsx`). `npm run build`: green (`tsc --noEmit` + `vite build`).
 
 ## Phase 6: Playwright Smoke (Phase-1 Debt)
 
