@@ -4,6 +4,9 @@
   --text: #1f2328;
   --muted: #6b7280;
   --border: #e2e4e8;
+  /* Hairline inside a dense grid cell. Separate from --border because it has
+     to sit ON a filled cell, not between two surfaces. */
+  --grid-line: rgba(16, 24, 40, 0.1);
   --accent: #2563eb;
   --accent-soft: #eff6ff;
   --danger: #b91c1c;
@@ -29,6 +32,7 @@
     --text: #e6e8ec;
     --muted: #939aa8;
     --border: #272c36;
+    --grid-line: rgba(255, 255, 255, 0.09);
     --accent: #6a9bff;
     --accent-soft: #172136;
     --danger: #f28b82;
@@ -72,6 +76,12 @@ body {
 }
 
 .app-nav-tab {
+  /* 44px minimum: these are the only interactive targets on the History
+     screen, and at the old 0.3rem padding they computed to ~32px, which is
+     under the touch guideline and missed often on a phone. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -310,7 +320,15 @@ a.cover:hover {
   padding: 0.15rem 0.4rem;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  outline: none;
+}
+
+/* The input is rendered already focused, so the accent border reads as the
+   focus state and killing the outline looked harmless. It is not: the rule
+   travels with the class, and the next thing to reuse it inherits a control
+   with no focus indicator at all (WCAG 2.4.7). A real ring costs nothing. */
+.progress-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .approx-marker {
@@ -462,7 +480,7 @@ a.cover:hover {
   background: var(--border);
   /* A hairline inside each cell so the quiet ones read as a grid of days
      rather than one flat slab. Inset, so it costs no layout. */
-  outline: 1px solid rgba(127, 127, 127, 0.09);
+  outline: 1px solid var(--grid-line);
   outline-offset: -1px;
 }
 

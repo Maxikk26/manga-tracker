@@ -14,9 +14,13 @@ interface Props {
 export function AppNav({ active, onSelect }: Props) {
   return (
     <nav className="app-nav" aria-label="Navegación del panel">
+      {/* `aria-current` is the only thing that tells a screen reader which
+          screen you are on. Without it the accent fill is the sole signal,
+          which is invisible to anyone not looking at it (WCAG 4.1.2). */}
       <button
         type="button"
         className={active === "list" ? "app-nav-tab app-nav-tab-active" : "app-nav-tab"}
+        aria-current={active === "list" ? "page" : undefined}
         onClick={() => onSelect("list")}
       >
         Lista
@@ -24,6 +28,7 @@ export function AppNav({ active, onSelect }: Props) {
       <button
         type="button"
         className={active === "history" ? "app-nav-tab app-nav-tab-active" : "app-nav-tab"}
+        aria-current={active === "history" ? "page" : undefined}
         onClick={() => onSelect("history")}
       >
         Historial
