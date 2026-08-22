@@ -78,9 +78,9 @@ Chain strategy: size-exception
 
 ## Phase 7: Docs
 
-- [ ] 7.1 `docs/spec-panel-v1b.md` line ~161 (fases table): correct phase-2 row to state the Playwright smoke as the only remaining test debt; note the terminal-state regression closed in PR #33 (`e22309f`, `tests/web/test_panel_api.py:357`).
-- [ ] 7.2 Add changelog entry v1.5 — 2026-08-21 documenting the two endpoints, local-day `zoneinfo` rule now implemented, downward-correction exclusion, the closed terminal-state debt, and remaining Playwright-only debt; bump the version header and any dependent pins.
-- [ ] 7.3 `docs/runbook-desarrollo-local.md`: document how and when to run the Playwright smoke (`npx playwright install chromium`, `npm run build`, `npx playwright test`), and that no CI runs it.
+- [x] 7.1 `docs/spec-panel-v1b.md` line ~161 (fases table): correct phase-2 row to state the Playwright smoke as the only remaining test debt; note the terminal-state regression closed in PR #33 (`e22309f`, `tests/web/test_panel_api.py:357`). Went further since phase 2 fully landed in this apply: row marked ✅ entregada, both endpoints marked delivered in §API, §Pantallas item 2 marked delivered, and the "Ver en «…»" pendiente closed.
+- [x] 7.2 Add changelog entry v1.5 — 2026-08-21 documenting the two endpoints, local-day `zoneinfo` rule now implemented, downward-correction exclusion, the closed terminal-state debt, and remaining Playwright-only debt; bump the version header and any dependent pins. Version bumped 1.4 → 1.5; no dependent pins changed (same `one-pager-v1a.md`/`spec-modelo-de-datos.md`/`decision-arquitectura-v1b.md` versions apply).
+- [x] 7.3 `docs/runbook-desarrollo-local.md`: document how and when to run the Playwright smoke (`npx playwright install chromium`, `npm run build`, `npx playwright test`), and that no CI runs it. New §Smoke E2E con Playwright section; version bumped 1.0 → 1.1; test counts corrected (108 frontend, 562 backend); pin to `spec-panel-v1b.md` bumped to v1.5.
 
 ## Phase 8: Final Verification
 

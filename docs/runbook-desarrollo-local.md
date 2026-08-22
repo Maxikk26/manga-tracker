@@ -1,6 +1,6 @@
 # Runbook: el ambiente de desarrollo local
 
-Versión 1.0 — 2026-08-17. Documento operativo. Depende de `spec-panel-v1b.md` (v1.3) y `runbook-deploy.md` (v1.6).
+Versión 1.1 — 2026-08-21. Documento operativo. Depende de `spec-panel-v1b.md` (v1.5) y `runbook-deploy.md` (v1.6).
 
 Cómo probar cambios en esta máquina sin tocar producción. Escrito porque el servidor se estaba usando como banco de pruebas, que es la forma conocida de perder datos que no se reconstruyen.
 
@@ -15,6 +15,7 @@ Cómo probar cambios en esta máquina sin tocar producción. Escrito porque el s
 | **Refrescar datos** | `.\scripts\dev-db-refresh.ps1` — usa la API de backup de SQLite, nunca `cp`, porque el scheduler escribe mientras se lee | §La base de datos |
 | **Qué NO hacer** | Nada bloqueado: `run` y `run-job` fallan solos aquí. Lo prohibido es apuntar `DB_PATH` a una base remota | §Los límites |
 | **Costo** | Cero requests a la fuente, cero mensajes, ~2 MB de base. El scheduler **no corre** localmente | §Los límites |
+| **Smoke E2E (fase 2)** | `npx playwright test` — manual, nunca en `npm test`. Levanta su propio servidor sobre una base **temporal** (`tests/e2e/fixture_server.py`), nunca `data/dev.db` ni producción | §Smoke E2E con Playwright |
 
 Lo que este documento **no** cubre: desplegar (`runbook-deploy.md`), operar lo desplegado (`runbook-mantenimiento.md`), ni un ambiente de pruebas *en el servidor* — eso sigue sin decidirse (§Pendientes abiertos).
 
@@ -74,9 +75,36 @@ El 8000 sirve la UI también, pero la versión compilada de `frontend/dist/` —
 Los tests, que no necesitan nada corriendo:
 
 ```
-cd frontend; npm test          21 tests de componente
-.\.venv\Scripts\python.exe -m pytest -q     387 del backend
+cd frontend; npm test          108 tests de componente
+.\.venv\Scripts\python.exe -m pytest -q     562 del backend
 ```
+
+## Smoke E2E con Playwright
+
+Cierra la última deuda de tests de la fase 2 (`spec-panel-v1b.md` §Fases): un cover automatizado para el rechazo por duplicado/terminal → "Ver en «…»" → salto de pestaña, más la navegación a Historial. Manual, no automático: no existe `.github/workflows/` en este repo y esta fase no inventa CI aquí.
+
+**La primera vez, o si el navegador nunca se descargó en esta máquina:**
+
+```
+cd frontend
+npx playwright install chromium
+```
+
+Es una descarga de red (~190 MB), no una instalación de paquete; puede fallar por conectividad y no tiene nada que ver con el código. Verifícala antes de confiar en el resultado del smoke.
+
+**Para correrlo:**
+
+```
+cd frontend
+npm run build
+npx playwright test
+```
+
+`npm run build` primero: el smoke navega contra la build de producción (`frontend/dist/`), no contra el servidor de recarga en caliente de `npm run dev`. `npx playwright test` levanta su propio servidor — `tests/e2e/fixture_server.py`, configurado en `playwright.config.ts` — sobre una base SQLite **temporal** con un `MangaIntake` de mentira que nunca toca la red ni el disco de producción; `check_not_production_db()` se niega a arrancar si alguna vez apunta a la base configurada de producción.
+
+**Por qué no vive en `npm test`**: una descarga de navegador que falla por red no debe bloquear el ciclo ordinario de tests, que sí corre en cada commit revisado a mano. `vite.config.ts` excluye además `e2e/**` de vitest — sin eso, vitest intentaba correr el `test()` de Playwright como si fuera propio y fallaba con un error de sintaxis ajeno.
+
+**Ningún CI corre esto.** Es una brecha de proceso registrada, no cerrada aquí (`spec-panel-v1b.md`, diseño de la fase 2): el smoke solo se ejecuta cuando un humano lo corre a mano, antes de un despliegue de fase.
 
 ## Los límites
 
@@ -91,4 +119,5 @@ cd frontend; npm test          21 tests de componente
 
 ## Changelog
 
+- **1.1 — 2026-08-21.** Documenta el smoke E2E con Playwright que la fase 2 entrega (`spec-panel-v1b.md` v1.5): cuándo correr `npx playwright install chromium`, por qué corre contra `npm run build` y `tests/e2e/fixture_server.py` (nunca `data/dev.db` ni producción), y por qué se queda fuera de `npm test`. Cuenta de tests actualizada: 108 de componente (antes 21), 562 de backend (antes 387). Pin actualizado: `spec-panel-v1b.md` v1.3 → v1.5.
 - **1.0 — 2026-08-17.** Documento inicial. Nace de una decisión del dueño: dejar de usar producción como ambiente de pruebas, empezando por el panel de V1b, y con la condición explícita de que nada de lo local pueda mandar mensajes a Telegram.
