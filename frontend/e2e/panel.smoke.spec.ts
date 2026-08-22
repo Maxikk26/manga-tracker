@@ -36,9 +36,21 @@ test("duplicate add jumps to the existing tab, then Historial shows the heatmap"
     /tab-active/,
   );
 
-  // Navigate to the History screen and confirm the heatmap is present with
-  // the one seeded reading day.
+  // Navigate to the History screen and confirm the heatmap rendered.
   await page.getByRole("button", { name: "Historial" }).click();
   await expect(page.getByLabel("Mapa de lecturas")).toBeVisible();
-  await expect(page.locator(".heatmap-cell")).toHaveCount(1);
+
+  // The seeded reading day is present as an active cell. This is the
+  // assertion that carries meaning: it survives the grid changing shape,
+  // because it names the day rather than counting the container.
+  await expect(page.locator(".heatmap-cell[aria-label*='capítulos leídos']")).toHaveCount(1);
+
+  // And the grid is a calendar rather than a strip of active days. Bounded,
+  // not exact, on purpose: this used to assert `toHaveCount(1)` on every
+  // `.heatmap-cell`, written when the component drew only days that had
+  // readings. The full-year rewrite made it 370 and nothing caught it for a
+  // day, because the smoke sits outside `npm test` by design and there is no
+  // CI. An exact count would have been wrong again tomorrow anyway: the
+  // window trails the current date, so the cell total moves on its own.
+  expect(await page.locator(".heatmap-cell").count()).toBeGreaterThan(300);
 });
