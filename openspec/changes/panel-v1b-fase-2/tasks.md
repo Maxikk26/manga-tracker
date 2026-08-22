@@ -84,10 +84,10 @@ Chain strategy: size-exception
 
 ## Phase 8: Final Verification
 
-- [ ] 8.1 Full backend suite: `./.venv/Scripts/python.exe -m pytest -q` green.
-- [ ] 8.2 Frontend: `npm test` and `npm run build` green.
-- [ ] 8.3 Playwright smoke passes locally (manual run, recorded).
-- [ ] 8.4 Break one guard on purpose (e.g. flip the hard-bar timestamp) and confirm it fails, per the owner's "siempre hacer testing" rule.
+- [x] 8.1 Full backend suite: `./.venv/Scripts/python.exe -m pytest -q` green. **562/562 passed.**
+- [x] 8.2 Frontend: `npm test` and `npm run build` green. **108/108 passed**; build (`tsc --noEmit` + `vite build`) green.
+- [x] 8.3 Playwright smoke passes locally (manual run, recorded). **`1 passed (1.9s)`**, chromium, against `npm run build` output and `tests/e2e/fixture_server.py`.
+- [x] 8.4 Break one guard on purpose (e.g. flip the hard-bar timestamp) and confirm it fails, per the owner's "siempre hacer testing" rule. **Done**: removed the `.astimezone(tz)` shift in `reading_days`'s grouping key — `test_hard_bar_midnight_crossing_only_in_local_time` failed exactly as expected (`AssertionError: assert '2026-08-19' in {'2026-08-20'}`), confirming the guard actually catches the bug class it exists for. Restored; full suite re-run green (562/562), `git status` clean.
 
 ## Owner-Reserved — Not Planned Here
 
