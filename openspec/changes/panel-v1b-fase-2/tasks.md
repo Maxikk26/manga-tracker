@@ -70,11 +70,11 @@ Chain strategy: size-exception
 
 ## Phase 6: Playwright Smoke (Phase-1 Debt)
 
-- [ ] 6.1 Verify `npx playwright install chromium` succeeds on this machine BEFORE writing smoke assertions — record the result.
-- [ ] 6.2 Create `tests/e2e/fixture_server.py`: temp SQLite DB + stub intake, fixed non-production port; RED test that it refuses to start against a path equal to the configured production DB.
-- [ ] 6.3 Add `@playwright/test` devDependency, `frontend/playwright.config.ts`, `test:e2e` script kept OUT of `npm test`.
-- [ ] 6.4 Write `frontend/e2e/panel.smoke.spec.ts`: load panel → trigger 409 duplicate/terminal add → "Ver en «…»" tab jump → nav to «Historial» → heatmap present.
-- [ ] 6.5 Run the smoke locally against `npm run build` output; record pass/fail.
+- [x] 6.1 Verify `npx playwright install chromium` succeeds on this machine BEFORE writing smoke assertions — record the result. **Succeeded**: Chrome for Testing 151.0.7922.34, FFmpeg, Chrome Headless Shell and Winldd all downloaded to `C:\Users\Maximiliano\AppData\Local\ms-playwright\` without error.
+- [x] 6.2 Create `tests/e2e/fixture_server.py`: temp SQLite DB + stub intake, fixed non-production port; RED test that it refuses to start against a path equal to the configured production DB. `tests/e2e/test_fixture_server.py` — 2 tests, both passing (562/562 full backend suite).
+- [x] 6.3 Add `@playwright/test` devDependency, `frontend/playwright.config.ts`, `test:e2e` script kept OUT of `npm test`. `vite.config.ts` also excludes `e2e/**` from vitest's own glob (it was picking the Playwright spec up and failing on its async `test.describe`).
+- [x] 6.4 Write `frontend/e2e/panel.smoke.spec.ts`: load panel → trigger 409 duplicate/terminal add → "Ver en «…»" tab jump → nav to «Historial» → heatmap present.
+- [x] 6.5 Run the smoke locally against `npm run build` output; record pass/fail. **PASSED**: `1 passed (1.9s)`, chromium, against `tests/e2e/fixture_server.py`'s stub intake and the built `frontend/dist`.
 
 ## Phase 7: Docs
 
