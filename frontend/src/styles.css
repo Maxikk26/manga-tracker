@@ -388,8 +388,30 @@ a.cover:hover {
    an absence instead of collapsing away. Bucket count and boundaries remain
    owner-tunable through seam #1 in domain/heatmapBuckets.ts. */
 
+.history-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+.history-summary {
+  margin: 0 0 1.25rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+/* The grid needs a surface under it. Floating on the page background it read
+   as unfinished scaffolding rather than a panel. */
+.history-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
 .reading-heatmap {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
 }
 
 /* A year of weeks overflows a narrow viewport; the page itself must never
@@ -438,6 +460,10 @@ a.cover:hover {
   height: 11px;
   border-radius: 3px;
   background: var(--border);
+  /* A hairline inside each cell so the quiet ones read as a grid of days
+     rather than one flat slab. Inset, so it costs no layout. */
+  outline: 1px solid rgba(127, 127, 127, 0.09);
+  outline-offset: -1px;
 }
 
 /* Days before the window starts: they exist only to align the first column. */
@@ -477,26 +503,8 @@ a.cover:hover {
   background: var(--accent);
 }
 
-/* --- Manga picker + per-manga timeline (spec-panel-v1b.md fase 2) --- */
-
-.history-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.88rem;
-  color: var(--muted);
-}
-
-.history-manga-select {
-  font: inherit;
-  font-size: 0.88rem;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-}
+/* --- Per-manga timeline (spec-panel-v1b.md fase 2) ---
+   Styled but not reachable: the owner removed the way in on 2026-08-21. */
 
 .manga-timeline-title {
   margin: 0 0 0.5rem;

@@ -1,48 +1,36 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchBookmarks } from "../api/bookmarks";
-import { fetchMangaHistory, fetchReadingHistory } from "../api/history";
+import { fetchReadingHistory } from "../api/history";
 import { ApiError } from "../api/http";
-import type { Bookmark, MangaHistoryResponse, ReadingHistoryResponse } from "../domain/types";
+import type { ReadingHistoryResponse } from "../domain/types";
 import { ReadingHeatmap } from "../components/ReadingHeatmap";
-import { MangaTimeline } from "../components/MangaTimeline";
 
 type LoadState = "loading" | "ready" | "error";
 
 /**
- * Container for the History screen (spec-panel-v1b.md fase 2): owns the
- * heatmap fetch and, once a manga is picked, its timeline fetch.
+ * Container for the History screen (spec-panel-v1b.md fase 2).
  *
- * The manga picker reuses `fetchBookmarks` — the same list the primary
- * screen already fetches — rather than a new "which mangas exist" endpoint.
- * Design leaves the exact reachability of the per-manga timeline an open
- * question (card on the list screen vs. a picker here); this is the minimal
- * functional answer, not the visual one.
+ * Scope note: this screen shows the reading heatmap and nothing else. The
+ * per-manga timeline the phase also built is deliberately not reachable from
+ * here — the owner said on 2026-08-21 he has no interest in reading a single
+ * manga's publications against his own reads. Its endpoint and component
+ * still exist; only the way in was removed.
  */
 export function HistoryContainer() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reading, setReading] = useState<ReadingHistoryResponse | null>(null);
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [selectedMangaId, setSelectedMangaId] = useState<number | null>(null);
-  const [timeline, setTimeline] = useState<MangaHistoryResponse | null>(null);
-  const [timelineError, setTimelineError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoadState("loading");
     try {
-      const [readingResult, bookmarksResult] = await Promise.all([
-        fetchReadingHistory(),
-        fetchBookmarks(),
-      ]);
-      setReading(readingResult);
-      setBookmarks(bookmarksResult);
+      setReading(await fetchReadingHistory());
       setLoadState("ready");
     } catch (error) {
-      setErrorMessage(
-        error instanceof ApiError
-          ? error.message
-          : "Ocurrió un error inesperado al cargar el historial.",
-      );
+      // Kept for parity with the list screen: an ApiError carries a message
+      // worth showing, anything else does not.
+      if (!(error instanceof ApiError)) {
+        // eslint-disable-next-line no-console
+        console.error(error);
+      }
       setLoadState("error");
     }
   }, []);
@@ -50,21 +38,6 @@ export function HistoryContainer() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const handleSelectManga = useCallback((mangaId: number) => {
-    setSelectedMangaId(mangaId);
-    setTimeline(null);
-    setTimelineError(null);
-    fetchMangaHistory(mangaId)
-      .then(setTimeline)
-      .catch((error: unknown) => {
-        setTimelineError(
-          error instanceof ApiError
-            ? error.message
-            : "Ocurrió un error inesperado al cargar la línea de tiempo.",
-        );
-      });
-  }, []);
 
   if (loadState === "loading") {
     return <p className="empty-state">Cargando…</p>;
@@ -81,41 +54,20 @@ export function HistoryContainer() {
     );
   }
 
+  const data = reading!;
+  const chapters = data.days.reduce((total, day) => total + day.chapters, 0);
+  // Rounded for display for the same reason the behind-pill is: chapter
+  // numbers are REAL, so a sum of halves reaches here as 36.999999999999996.
+  const summary = `${data.days.length} ${data.days.length === 1 ? "día" : "días"} con lecturas · ${Math.round(chapters)} capítulos · zona ${data.timezone}`;
+
   return (
-    <div className="history-screen">
-      {errorMessage && (
-        <p className="error-banner" role="alert">
-          {errorMessage}
-        </p>
-      )}
-      <ReadingHeatmap data={reading!} />
+    <section className="history-screen">
+      <h2 className="history-title">Historial de lecturas</h2>
+      <p className="history-summary">{summary}</p>
 
-      <div className="history-picker">
-        <label htmlFor="history-manga-picker">Ver la línea de tiempo de:</label>
-        <select
-          id="history-manga-picker"
-          className="history-manga-select"
-          value={selectedMangaId ?? ""}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (value) handleSelectManga(Number(value));
-          }}
-        >
-          <option value="">Elige un manga…</option>
-          {bookmarks.map((bookmark) => (
-            <option key={bookmark.manga_id} value={bookmark.manga_id}>
-              {bookmark.title}
-            </option>
-          ))}
-        </select>
+      <div className="history-card">
+        <ReadingHeatmap data={data} />
       </div>
-
-      {timelineError && (
-        <p className="error-banner" role="alert">
-          {timelineError}
-        </p>
-      )}
-      {timeline && <MangaTimeline data={timeline} />}
-    </div>
+    </section>
   );
 }
