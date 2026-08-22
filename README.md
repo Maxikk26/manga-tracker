@@ -22,7 +22,7 @@ Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está termi
 | Fase de V1b | Estado |
 |---|---|
 | Fase 1 — lista, editar progreso y estado | ✅ desplegada el 2026-08-18, en su propio contenedor, sirviendo en la LAN |
-| Fase 2 — historial y heatmap | 🔨 implementada el 2026-08-21, **sin desplegar** (rama `feat/panel-v1b-fase-2`). Heatmap de calendario anual, una columna por semana, con los días vacíos visibles; la agregación por día aplica `America/Caracas` antes de agrupar. La línea de tiempo por manga se construyó pero no se expone |
+| Fase 2 — historial y heatmap | ✅ desplegada el 2026-08-21 (PR #35). Heatmap de calendario anual, una columna por semana, con los días vacíos visibles; la agregación por día aplica `America/Caracas` antes de agrupar. La línea de tiempo por manga se construyó pero no se expone |
 | Fase 3 — alta y baja de mangas | ✅ desplegada el 2026-08-20, en tres PRs encadenados (#27, #28, #29). Pegar la URL, `extract_slug` sin red, vista previa sin escribir, confirmar, y recién ahí escribir. La baja sigue siendo `status='dropped'`: no hay `DELETE` |
 | Fase 4 — portadas + `my_score` | 🟨 **las portadas se adelantaron** y se entregaron el 2026-08-18; `my_score` y su migración 3 siguen pendientes |
 

@@ -34,7 +34,7 @@ The client MUST issue all requests sequentially with zero concurrency, MUST wait
 
 ### Requirement: Error taxonomy
 
-The client MUST classify every failure into exactly one of three categories: not-found (404 or a false-success response), transient (timeout, connection error, 5xx, Cloudflare block), or unexpected (well-formed response with the wrong shape) (spec-cliente-fuente-descubrimiento.md §"Taxonomía de errores").
+The client MUST classify every failure into exactly one of three categories: not-found (404 or a false-success response), transient (timeout, connection error, 5xx, Cloudflare block — for `fetch_manga_details` this includes a 403 or 429 response, per spec-cliente-fuente-descubrimiento.md:65), or unexpected (well-formed response with the wrong shape, or a `fetch_manga_details` response with any other non-200 status) (spec-cliente-fuente-descubrimiento.md §"Taxonomía de errores").
 
 #### Scenario: 404 classified as not-found
 
@@ -47,6 +47,18 @@ The client MUST classify every failure into exactly one of three categories: not
 - GIVEN a response parses without a transport error but is missing an expected field
 - WHEN the client classifies the failure
 - THEN it returns unexpected and logs the relevant response fragment
+
+#### Scenario: Details response with 403, 429, or 5xx is transient
+
+- GIVEN `fetch_manga_details` receives a response whose status is 403, 429, or in the 5xx range
+- WHEN the client classifies the response
+- THEN it raises `Transient`, matching spec-cliente-fuente-descubrimiento.md:65 ("transitorio": timeout, conexión, 5xx, bloqueo de Cloudflare) — the two out-of-scope causes of a 403 (source throttling vs. Cloudflare) remain undistinguished, per the open item at spec-cliente-fuente-descubrimiento.md:301
+
+#### Scenario: Details response with any other non-200, non-404 status is unexpected
+
+- GIVEN `fetch_manga_details` receives a response whose status is neither 200, 404, nor a transient status (403, 429, or 5xx)
+- WHEN the client classifies the response
+- THEN it raises `Unexpected`
 
 ### Requirement: Ad filter runs first, always
 
@@ -76,13 +88,19 @@ The client MUST classify every failure into exactly one of three categories: not
 
 ### Requirement: fetch_manga_details is fallback-only
 
-`fetch_manga_details` MUST be implemented per the §8 contract but MUST NOT be called by any detection mechanism; it exists solely as a cover-URL fallback (spec-cliente-fuente-descubrimiento.md §"Operación 3").
+`fetch_manga_details` MUST be implemented per the §8 contract but MUST NOT be called by any detection mechanism; it exists solely as a cover-URL fallback (spec-cliente-fuente-descubrimiento.md §"Operación 3"). It MUST raise `NotFound` on a 404 response, `Transient` on a 403, 429, or 5xx response, and `Unexpected` on any other non-200 response, and MUST NOT return a `MangaDetails` built from a non-200 response body.
 
 #### Scenario: Never invoked during detection
 
 - GIVEN a `feed_check` or `active_sweep` run in progress
 - WHEN detection executes
 - THEN `fetch_manga_details` is not called
+
+#### Scenario: A details 403 never produces a 200 preview
+
+- GIVEN `POST /api/mangas/preview` calls `fetch_manga_details` and the source responds 403
+- WHEN the intake layer receives the raised `Transient`
+- THEN `/api/mangas/preview` answers 503 via `_source_error` ("La fuente no respondió. Espera un momento y vuelve a intentar."), never 200 with an empty title
 
 ### Requirement: Chapter URL construction is a client operation, no request
 
@@ -156,10 +174,27 @@ The `SourceClient` Protocol (`manga_tracker/sources/contracts.py`) MUST declare 
 - WHEN `fetch_cover` is called through a Protocol-typed reference
 - THEN it raises `Transient`, the same category the rest of the client uses
 
+### Requirement: An empty or whitespace-only title is unwritable
+
+The manga-add write path MUST reject a `title` that is empty or contains only whitespace before any row is written to `mangas`, so a title lost to a details failure (or any other cause) cannot reach production data. `confirm()` does not re-fetch the ficha and trusts the `title` `preview()` already echoed, so this gate MUST sit at validation, not rely on a successful `fetch_manga_details` call happening again.
+
+#### Scenario: Confirm rejects an empty title
+
+- GIVEN a `POST /api/mangas` request whose `title` is empty or only whitespace
+- WHEN the request is validated
+- THEN it is rejected and no row is written to `mangas`
+
+#### Scenario: A well-formed title is unaffected
+
+- GIVEN a `POST /api/mangas` request whose `title` is a normal non-empty string
+- WHEN the request is validated
+- THEN validation passes and the existing write path proceeds unchanged
+
 ## References
 
-- spec-cliente-fuente-descubrimiento.md v1.4, v1.8
+- spec-cliente-fuente-descubrimiento.md v1.4, v1.9
 - manganato-fuente-actual.md v1.2
 - docs/spec-importador-kitsu.md v1.3
 - openspec/changes/importador-kitsu/specs/source-client/spec.md (ADDED delta 1)
 - openspec/changes/panel-v1b-fase-3/specs/source-client/spec.md (ADDED delta 2)
+- openspec/changes/failure-visibility/specs/source-client/spec.md (ADDED delta 3)
