@@ -64,3 +64,58 @@ export interface ExistingManga {
   status: BookmarkStatus;
   terminal: boolean;
 }
+
+// --- panel-reading-history (spec-panel-v1b.md fase 2) --------------------
+
+/** One local calendar day's aggregate. `chapters` is already the sum of
+ *  positive deltas (downward corrections excluded) computed server-side —
+ *  the frontend never re-derives it. */
+export interface ReadingHistoryDay {
+  date: string;
+  chapters: number;
+  edits: number;
+}
+
+/** Wire shape of `GET /api/history/reading`. Sparse: only days with
+ *  activity appear in `days`. */
+export interface ReadingHistoryResponse {
+  timezone: string;
+  from: string;
+  to: string;
+  days: ReadingHistoryDay[];
+}
+
+/** A recorded reading edit, in the per-manga timeline. Visible here with its
+ *  (possibly negative) `delta` even when it is a downward correction — the
+ *  heatmap excludes those, the timeline does not (design D6). */
+export interface ReadingTimelineEvent {
+  kind: "reading";
+  at: string;
+  chapter_num: number;
+  previous_chapter_num: number | null;
+  delta: number | null;
+  origin: string;
+}
+
+/** A detected publication, in the per-manga timeline. */
+export interface PublicationTimelineEvent {
+  kind: "publication";
+  at: string;
+  chapter_num: number;
+  chapter_url: string | null;
+  source_published_at: string | null;
+  detected_via: string;
+}
+
+export type MangaHistoryEvent = ReadingTimelineEvent | PublicationTimelineEvent;
+
+/** Wire shape of `GET /api/mangas/{id}/history`. `publications_since` is
+ *  null when no publication has ever been detected for this manga; when
+ *  present it states the timeline is complete only from that point on
+ *  (design D9) — `CHAPTER_HISTORY_LIMIT` caps only the one-time backfill. */
+export interface MangaHistoryResponse {
+  manga_id: number;
+  title: string;
+  publications_since: string | null;
+  events: MangaHistoryEvent[];
+}

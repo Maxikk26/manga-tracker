@@ -22,11 +22,11 @@ Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está termi
 | Fase de V1b | Estado |
 |---|---|
 | Fase 1 — lista, editar progreso y estado | ✅ desplegada el 2026-08-18, en su propio contenedor, sirviendo en la LAN |
-| Fase 2 — historial y heatmap | ⬜ no empezada |
+| Fase 2 — historial y heatmap | 🔨 implementada el 2026-08-21, **sin desplegar** (rama `feat/panel-v1b-fase-2`). Heatmap de calendario anual, una columna por semana, con los días vacíos visibles; la agregación por día aplica `America/Caracas` antes de agrupar. La línea de tiempo por manga se construyó pero no se expone |
 | Fase 3 — alta y baja de mangas | ✅ desplegada el 2026-08-20, en tres PRs encadenados (#27, #28, #29). Pegar la URL, `extract_slug` sin red, vista previa sin escribir, confirmar, y recién ahí escribir. La baja sigue siendo `status='dropped'`: no hay `DELETE` |
 | Fase 4 — portadas + `my_score` | 🟨 **las portadas se adelantaron** y se entregaron el 2026-08-18; `my_score` y su migración 3 siguen pendientes |
 
-Las portadas se adelantaron porque el dueño no reconocía sus propios títulos en la lista: son 18 mangas del mismo género cuyos nombres colisionan (*Genius* aparece en tres, *Regressed* en dos). Con eso la lista dejó de ser una tabla y pasó a ser una **grilla de portadas**, donde el póster es el enlace al capítulo siguiente. Las imágenes se **cachean en disco** y las sirve el propio panel: guardar la URL no alcanza, porque los hosts de imágenes de la fuente responden 403 a una petición sin su propio `Referer` (medido el 2026-08-18).
+Las portadas se adelantaron porque el dueño no reconocía sus propios títulos en la lista: son 18 mangas del mismo género cuyos nombres colisionan (*Genius* aparece en tres, *Regressed* en dos). Con eso la lista dejó de ser una tabla y pasó a ser una **grilla de portadas**, donde el póster es el enlace al **listado de capítulos** del manga — no al último capítulo, que en el caso normal está cientos de capítulos por delante de donde el dueño quedó (PR #34, desplegado el 2026-08-21). Las imágenes se **cachean en disco** y las sirve el propio panel: guardar la URL no alcanza, porque los hosts de imágenes de la fuente responden 403 a una petición sin su propio `Referer` (medido el 2026-08-18).
 
 ## Cómo funciona (resumen)
 

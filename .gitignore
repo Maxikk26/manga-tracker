@@ -97,6 +97,9 @@ wheels/
 
 # Test, coverage and type-check caches
 .pytest_cache/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
 .tox/
 .nox/
 .mypy_cache/
@@ -147,3 +150,10 @@ $RECYCLE.BIN/
 *~
 Session.vim
 .netrwhist
+
+# impeccable's generated design context. Ignored by decision (2026-08-21):
+# PRODUCT.md would be a second source of product truth competing with docs/,
+# which is Spanish and authoritative. A tool-generated English doc nobody owns
+# drifts, and stale documents are this repo's most expensive recurring defect.
+PRODUCT.md
+.impeccable/

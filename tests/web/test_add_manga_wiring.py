@@ -59,7 +59,9 @@ def test_a_real_client_403_reaches_the_panel_as_a_503(db_path, tmp_path):
     changed) and never 200 with a fabricated empty title."""
     transport = FakeTransport(Response(status=403, text="", headers={}))
     intake = PastedUrlIntake(ManganatoClient(transport), 1, cache_dir_for(db_path))
-    client = TestClient(create_app(db_path, intake, frontend_dist=tmp_path / "no-dist"))
+    client = TestClient(
+        create_app(db_path, intake, frontend_dist=tmp_path / "no-dist", timezone_name="America/Caracas")
+    )
 
     response = client.post("/api/mangas/preview", json={"url": URL})
 

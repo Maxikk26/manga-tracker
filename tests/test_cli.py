@@ -172,7 +172,9 @@ def test_panel_hands_uvicorn_the_app_for_the_configured_db_and_port(tmp_path, mo
     monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: "the-client")
     monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
     monkeypatch.setattr(
-        cli, "create_app", lambda db_path, intake: {"db_path": db_path, "intake": intake}
+        cli,
+        "create_app",
+        lambda db_path, intake, *, timezone_name: {"db_path": db_path, "intake": intake},
     )
     monkeypatch.setattr(
         cli.uvicorn, "run", lambda app, *, host, port: captured.update(app=app, host=host, port=port)
@@ -208,7 +210,7 @@ def test_the_panel_is_the_one_command_on_the_interactive_request_policy(tmp_path
     monkeypatch.setenv("DB_PATH", str(tmp_path / "panel.db"))
     policies = _capture_transport_policies(cli, monkeypatch)
     monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: "the-client")
-    monkeypatch.setattr(cli, "create_app", lambda db_path, intake: object())
+    monkeypatch.setattr(cli, "create_app", lambda db_path, intake, *, timezone_name: object())
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, *, host, port: None)
 
     assert cli.main(["panel"]) == 0

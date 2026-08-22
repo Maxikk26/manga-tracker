@@ -15,6 +15,8 @@ edit per transaction, correcting the trigger-captured row to
 
 import json
 import sqlite3
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from manga_tracker.storage.db import transaction
 
@@ -497,6 +499,151 @@ def update_panel_bookmark(
                 (PANEL_ORIGIN, ceiling, manga_id),
             )
     return True
+
+
+# --- history family (spec-panel-v1b.md fase 2) --------------------------------
+
+# The fixed width `read_at`/`detected_at`/`source_published_at` are always
+# stored in (`%Y-%m-%dT%H:%M:%SZ`, e.g. `_utc_now()` in web/app.py). Text
+# comparison against a string in this same shape is exact and uses the
+# `read_at` index — no SQL date function is trusted (CLAUDE.md: the
+# production SQLite build lacks `chr()`, so its function set is untrusted).
+_UTC_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _parse_utc(value: str) -> datetime:
+    return datetime.strptime(value, _UTC_FORMAT).replace(tzinfo=timezone.utc)
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime(_UTC_FORMAT)
+
+
+def reading_days(conn: sqlite3.Connection, *, days: int, timezone_name: str, now: str) -> dict:
+    """Aggregate `reading_history` by LOCAL calendar day over the trailing
+    `days` days ending today (design D2/D3).
+
+    The window boundary and the grouping key both go through the same
+    `ZoneInfo(timezone_name)` shift, applied to the row's UTC `read_at`
+    BEFORE any grouping happens (spec "Local-Day Grouping Happens In The
+    Backend, Before Aggregation, Via zoneinfo") — never a SQL date function.
+
+    A day's `chapters` value sums only the POSITIVE deltas
+    (`chapter_num - previous_chapter_num`); a downward correction
+    (`chapter_num <= previous_chapter_num`) contributes zero to `chapters`
+    but the row still counts toward that day's `edits` (design D5/D6) — the
+    correction happened, it is just not "reading". A NULL
+    `previous_chapter_num` (progress was unknown before this edit) is the
+    same: `chapters` gets 0, `edits` still gets 1 (design D5) — a bookmark
+    whose progress became known is bookkeeping, not a reading marathon.
+
+    Rounded to two decimals for the same reason `_panel_bookmark_row`
+    rounds `behind`: chapter numbers are REAL and IEEE 754 subtraction
+    produces artifacts like `21.200000000000003`.
+
+    Sparse output (design D8): only days with at least one row appear.
+    """
+    tz = ZoneInfo(timezone_name)
+    now_utc = _parse_utc(now)
+    local_today = now_utc.astimezone(tz).date()
+    window_start_local_date = local_today - timedelta(days=days - 1)
+    window_start_utc = _format_utc(datetime.combine(window_start_local_date, time.min, tzinfo=tz))
+
+    rows = conn.execute(
+        "SELECT chapter_num, previous_chapter_num, read_at FROM reading_history WHERE read_at >= ?",
+        (window_start_utc,),
+    ).fetchall()
+
+    buckets: dict[str, list] = {}
+    for chapter_num, previous_chapter_num, read_at in rows:
+        local_date = _parse_utc(read_at).astimezone(tz).date().isoformat()
+        bucket = buckets.setdefault(local_date, [0.0, 0])
+        bucket[1] += 1
+        if previous_chapter_num is not None and chapter_num > previous_chapter_num:
+            bucket[0] += chapter_num - previous_chapter_num
+
+    return {
+        "timezone": timezone_name,
+        "from": window_start_local_date.isoformat(),
+        "to": local_today.isoformat(),
+        "days": [
+            {"date": local_date, "chapters": round(chapters, 2), "edits": edits}
+            for local_date, (chapters, edits) in sorted(buckets.items())
+        ],
+    }
+
+
+def manga_history(conn: sqlite3.Connection, manga_id: int) -> dict | None:
+    """Interleave `reading_history` with `chapter_history` publications for one
+    manga, chronological descending, tagged by `kind`. Returns `None` when the
+    manga row itself does not exist — the caller turns that into a 404,
+    distinguishing "no such manga" from "manga exists, nothing happened yet"
+    (spec.md "404 for absent manga vs 200 + events: [] for a manga with
+    none").
+
+    A downward correction stays VISIBLE here with a negative `delta`
+    (design D6) — the heatmap measures reading and excludes it, but this is
+    history, and hiding a correction would misrepresent what happened.
+
+    `publications_since` is the earliest `detected_at` across this manga's
+    `chapter_history` rows, or `None` when there are none yet (design D9):
+    `CHAPTER_HISTORY_LIMIT` only caps the one-time backfill, so completeness
+    is bounded by when the mapping was learned, and a timestamp states that
+    where a constant `is_partial` flag would carry no information.
+    """
+    row = conn.execute("SELECT title FROM mangas WHERE id = ?", (manga_id,)).fetchone()
+    if row is None:
+        return None
+    title = row[0]
+
+    events = []
+    for chapter_num, previous_chapter_num, read_at, origin in conn.execute(
+        "SELECT chapter_num, previous_chapter_num, read_at, origin "
+        "FROM reading_history WHERE manga_id = ?",
+        (manga_id,),
+    ):
+        delta = round(chapter_num - previous_chapter_num, 2) if previous_chapter_num is not None else None
+        events.append(
+            {
+                "kind": "reading",
+                "at": read_at,
+                "chapter_num": chapter_num,
+                "previous_chapter_num": previous_chapter_num,
+                "delta": delta,
+                "origin": origin,
+            }
+        )
+
+    for chapter_num, chapter_url, source_published_at, detected_at, detected_via in conn.execute(
+        "SELECT ch.chapter_num, ch.chapter_url, ch.source_published_at, ch.detected_at, ch.detected_via "
+        "FROM chapter_history ch JOIN manga_sites ms ON ms.id = ch.manga_site_id WHERE ms.manga_id = ?",
+        (manga_id,),
+    ):
+        events.append(
+            {
+                "kind": "publication",
+                "at": source_published_at or detected_at,
+                "chapter_num": chapter_num,
+                "chapter_url": chapter_url,
+                "source_published_at": source_published_at,
+                "detected_via": detected_via,
+            }
+        )
+
+    events.sort(key=lambda event: event["at"], reverse=True)
+
+    publications_since = conn.execute(
+        "SELECT MIN(ch.detected_at) FROM chapter_history ch JOIN manga_sites ms ON ms.id = ch.manga_site_id "
+        "WHERE ms.manga_id = ?",
+        (manga_id,),
+    ).fetchone()[0]
+
+    return {
+        "manga_id": manga_id,
+        "title": title,
+        "publications_since": publications_since,
+        "events": events,
+    }
 
 
 # --- cover family (one-off maintenance) ----------------------------------------

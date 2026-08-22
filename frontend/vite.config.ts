@@ -19,6 +19,10 @@ export default defineConfig({
     // describe/it/expect explicitly.
     globals: true,
     setupFiles: ["src/test/setup.ts"],
+    // `e2e/*.spec.ts` are Playwright tests (their own `test()`, not
+    // vitest's) and must stay out of the ordinary `npm test` loop — see
+    // `playwright.config.ts` and docs/runbook-desarrollo-local.md.
+    exclude: ["e2e/**", "node_modules/**"],
     // Date formatting goes through Intl with no explicit timeZone, so it
     // follows the machine. Pinned to the deployment zone: without this a
     // date assertion passes in Caracas and fails everywhere else, which

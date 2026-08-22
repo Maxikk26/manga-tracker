@@ -48,7 +48,9 @@ class _UnusedIntake:
 def client(db_path, tmp_path):
     # An explicit nonexistent dist: the API must work without a frontend
     # build, and the real frontend/dist must not leak into these tests.
-    return TestClient(create_app(db_path, _UnusedIntake(), frontend_dist=tmp_path / "no-dist"))
+    return TestClient(
+        create_app(db_path, _UnusedIntake(), frontend_dist=tmp_path / "no-dist", timezone_name="America/Caracas")
+    )
 
 
 def _site(conn) -> int:
@@ -423,7 +425,7 @@ def test_statics_serve_index_and_fall_back_to_it_for_client_routes(db_path, tmp_
     dist.mkdir()
     (dist / "index.html").write_text("<html>panel</html>", encoding="utf-8")
     (dist / "app.js").write_text("console.log('panel')", encoding="utf-8")
-    client = TestClient(create_app(db_path, _UnusedIntake(), frontend_dist=dist))
+    client = TestClient(create_app(db_path, _UnusedIntake(), frontend_dist=dist, timezone_name="America/Caracas"))
 
     assert "panel" in client.get("/").text
     assert client.get("/app.js").text == "console.log('panel')"
