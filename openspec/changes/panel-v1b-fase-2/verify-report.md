@@ -1,71 +1,73 @@
 # Verification Report: panel-v1b-fase-2
 
-**Mode**: Full artifact verification (proposal/spec/design/tasks + apply-progress, all superseded by 8 post-apply commits inspected directly against the working tree).
-**Branch**: `feat/panel-v1b-fase-2`, 12 commits off `main` @ `6ed2c38` (35 files changed, +2132/-29).
-**Verdict**: **FAIL** -- one CRITICAL, two WARNINGs, zero SUGGESTIONs.
+**Mode**: Full artifact verification (spec/design/tasks; apply-progress #368 treated as stale per instructions, verified directly against the working tree instead).
+**Branch**: `feat/panel-v1b-fase-2`, 16 commits off `main` @ `6ed2c38`.
+**Pass**: SECOND (re-verify after remediation).
+**Verdict**: **PASS WITH WARNINGS** -- zero CRITICAL, three WARNINGs, zero SUGGESTIONs.
 
-## Completeness (tasks.md)
+## First-Pass Record (for continuity, not re-scored)
 
-40/40 tasks checked. Task completion matches code state for the 5 commits apply-progress recorded. Tasks.md was not re-opened for the 8 post-apply commits (heatmap rewrite, timeline removal, a11y fixes) -- that is expected; those are owner-directed refinements, not task-plan work, and are separately recorded in commit messages and `docs/spec-panel-v1b.md`.
+The first verification pass found one CRITICAL: `frontend/e2e/panel.smoke.spec.ts` asserted `toHaveCount(1)` on `.heatmap-cell`, written before the full-year calendar rewrite; it received 370 on the rewritten tree and failed twice, consistently. It also found two WARNINGs: a docs sync gap at `docs/spec-panel-v1b.md` line 99 (still said Entregada, still described the timeline as part of the screen, still called the heatmap format undecided), and a since-self-corrected test-comment overclaim (no action needed, already fixed before pass 1). Full detail in Engram observation 376.
 
-## Test / Build Evidence (re-run by this verification, not copied from prior claims)
+## What This Pass Re-Verified (not assumed from the fix commit)
+
+Both fixes landed in a single commit, `78aad69`. I did not take the commit message's claims at face value -- I re-ran every check independently.
+
+- **Playwright**: ran `npx playwright test` from `frontend/` twice, independently, in this session. 1 passed both times (~2.0s each). Read the new assertion in `panel.smoke.spec.ts`: it now locates the seeded day via `.heatmap-cell[aria-label*='capitulos leidos']` (`toHaveCount(1)`) plus a bounded `expect(await page.locator(".heatmap-cell").count()).toBeGreaterThan(300)`. This is a real fix, not a relaxation to a tautology -- it still asserts a specific seeded day's presence by name, and the bound (>300) is deliberately not exact because the trailing window moves with the current date, which is documented inline in the test's own comment.
+- **Doc sync (line 99)**: read `docs/spec-panel-v1b.md` line 99 directly. It now reads "Historial (fase 2): el heatmap de lecturas por dia. Implementada el 2026-08-21, sin desplegar" and correctly states the per-manga timeline "no es alcanzable desde la pantalla (ver Pendientes abiertos)" and that the heatmap format is no longer pending (closed via /prototype). This matches the phase table (line 161: "implementada... sin desplegar... no esta entregada hasta que se mergee y se despliegue") and Pendientes abiertos (line 201). The specific contradiction from pass 1 is gone.
+
+## Test / Build Evidence (re-run by this pass, not copied)
 
 | Command | Result |
 |---|---|
-| `./.venv/Scripts/python.exe -m pytest -q` | **562 passed** |
-| `npm test` (frontend) | **116 passed** (14 files) |
-| `npm run build` (frontend) | clean (`tsc --noEmit` + `vite build`) |
-| `npx playwright test` (frontend, manual, twice) | **1 failed**, both runs, same assertion |
+| `./.venv/Scripts/python.exe -m pytest -q` | 562 passed |
+| `npm test` (frontend) | 116 passed (14 files) |
+| `npm run build` (frontend) | clean (tsc --noEmit + vite build) |
+| `npx playwright test` (frontend, run twice) | 1 passed, 1 passed -- no flake observed |
+
+No regression in backend/frontend counts since pass 1 (562/116, unchanged).
 
 ## Spec Compliance Matrix
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Reading History Aggregation Endpoint | **MET** | `repositories.reading_days`; `test_multiple_edits_same_day_sum_deltas` (17 not 2), `test_downward_correction_contributes_zero_but_null_previous_counts_as_edit` (0.0 chapters, edits still incremented) |
-| Local-Day Grouping Before Aggregation, Via zoneinfo | **MET -- hard bar confirmed** | `test_hard_bar_midnight_crossing_only_in_local_time`: `2026-08-20T03:30:00Z` asserted under `2026-08-19`. Zero SQL date functions in `repositories.py` -- confirmed by searching for strftime/julianday/date()/datetime(); only matches are Python `.strftime`/`.astimezone` method calls, not SQL. `_UTC_FORMAT` text-comparison window design (D2) verified via `test_window_boundary_local_midnight_included_one_second_earlier_excluded`, a genuine timezone-shift boundary test (04:00 UTC = local midnight in Caracas) -- not an overclaim. |
-| Per-Manga History Endpoint | **MET at API level; UI reachability is a DECLARED DEVIATION, not a defect** | `manga_history()` interleaves and sorts correctly (`test_manga_history_interleaves_readings_and_publications_chronologically`), 404 vs 200-empty distinguished (`test_manga_history_404_for_absent_manga_vs_empty_events_for_no_history`). `CHAPTER_HISTORY_LIMIT=50` confirmed to cap only the one-time backfill insert paths (`repositories.py:187,345`) -- `manga_history()`'s own SELECT carries no LIMIT. `MangaTimeline.tsx` correctly renders `publications_since` as a "may be missing earlier" note, never claims completeness. Owner removed the UI entry point (the select picker) on 2026-08-21 (commit `2266d44`); recorded in `docs/spec-panel-v1b.md` section "Pendientes abiertos" line 201 as built-but-not-exposed, with rationale and the reopening cost. This is a legitimate recorded deviation -- not scored as a spec failure. |
-| History Screen Reachable From Primary Screen | **MET** | `AppNav.tsx` switch + `App.tsx` state; the Playwright trace itself proves the switch works in a real browser (it clicked "Historial" and the heatmap section became visible before the unrelated failing assertion below). |
-| E2E Smoke Coverage For The Last Phase-1 Debt | **CRITICAL -- FAILING at runtime** | See below. |
-| Spec Documentation Reflects One Remaining Test Debt | **MET, with a WARNING** | Phase table (line 161) correctly states phase 2 is "implementada ... sin desplegar" (not delivered) and the terminal-state debt closure (PR #33) is not relisted; only the Playwright smoke remains open per the doc's own words. See WARNING below for an unsynced sentence elsewhere in the same document. |
+| Reading History Aggregation Endpoint | MET | `repositories.reading_days` sums only positive deltas; downward corrections (`chapter_num <= previous_chapter_num`) contribute 0 to `chapters` but still increment `edits`; covered by `test_multiple_edits_same_day_sum_deltas`, `test_downward_correction_contributes_zero_but_null_previous_counts_as_edit`. |
+| Local-Day Grouping Before Aggregation, Via zoneinfo | MET -- hard bar re-confirmed | `test_hard_bar_midnight_crossing_only_in_local_time`: `_set_read_at(..., "2026-08-20T03:30:00Z")` then `reading_days(...)` asserts `"2026-08-19" in dates` and `"2026-08-20" not in dates`. Re-ran this test as part of the full suite (passing). Searched `manga_tracker/storage/repositories.py` for strftime/julianday/date(/datetime( -- the only matches are Python method calls (`.astimezone(...).strftime(_UTC_FORMAT)`, `.astimezone(tz).date()`), not SQL functions. Grouping key is computed via `ZoneInfo(timezone_name)` shift applied to the parsed UTC value before grouping (D3), confirmed in code. |
+| Per-Manga History Endpoint | MET at API/component level; UI reachability is a DECLARED DEVIATION | `manga_history()` interleaves chronologically (`test_manga_history_interleaves_readings_and_publications_chronologically`), downward correction visible with negative delta in the timeline test fixture. `MangaTimeline.tsx` and the endpoint both exist and are tested. The owner removed the UI entry point (`2266d44`, 2026-08-21); recorded in `docs/spec-panel-v1b.md` Pendientes abiertos line 201 with rationale ("no le interesa verla") and reopening cost. Confirmed as a legitimate recorded deviation, not scored as a defect. Not recommending restoration, per instructions. |
+| History Screen Reachable From Primary Screen | MET | `AppNav.tsx` + `App.tsx` switch; the Playwright trace itself proves it works end-to-end in a real browser -- the test clicks "Historial" and asserts the heatmap's aria-label becomes visible. |
+| E2E Smoke Coverage For The Last Phase-1 Debt | MET -- was the pass-1 CRITICAL, now closed | See "What This Pass Re-Verified" above. Ran twice, passed twice. |
+| Spec Documentation Reflects One Remaining Test Debt | MET | Line 161 states the smoke was the only remaining test debt and that it is now closed; the terminal-state debt (PR #33) is correctly not relisted. |
 
-## CRITICAL
+## New Findings This Pass
 
-**1. The required Playwright smoke does not pass -- a regression introduced by later commits, never caught because it is excluded from `npm test` and there is no CI.**
-
-`frontend/e2e/panel.smoke.spec.ts` was written in commit `a31cfb3`, before the heatmap was rewritten as a full-year calendar (`4e8e388`, later the same day) and before the per-manga timeline picker was removed (`2266d44`). It was never touched again (`git log` on the file shows exactly one commit). Its final assertion:
-
-    await expect(page.locator(".heatmap-cell")).toHaveCount(1);
-
-assumed the old sparse rendering (one `.heatmap-cell` per day with data). The full-year calendar now renders a `.heatmap-cell` for every in-window day -- confirmed failing twice, consistently:
-
-    Locator:  locator('.heatmap-cell')
-    Expected: 1
-    Received: 370
-
-The tab-jump interaction itself (the actual phase-1 debt this test exists to close) does pass -- the trace shows the test reaching the "Historial" click and the heatmap becoming visible before failing on the stale cell-count line. So the regression is narrow and the fix is a one-line assertion change (e.g. count only cells carrying `aria-label`, or assert on the seeded day's specific `aria-label` instead of a raw count) -- but as written, the spec's own acceptance scenario ("WHEN the Playwright smoke suite runs THEN ... the suite passes") is not met on the current tree. `apply-progress`'s claim of "1 passed (1.9s), run twice" is stale -- true only before the calendar rewrite that landed afterward in the same session.
-
-This blocks archive under the sdd-verify hard rule: a spec scenario with no passing covering test is CRITICAL, and this scenario is not merely untested but actively failing.
+No new CRITICAL. Two new WARNING-level doc-staleness findings surfaced by the requested sweep of `docs/spec-panel-v1b.md` and `README.md` -- neither was caught by pass 1, and neither blocks archive on its own, but per CLAUDE.md's own standing rule ("a stale statement here is expensive -- it is read at the start of every session and believed"), both are worth a follow-up line-fix.
 
 ## WARNING
 
-**2. `docs/spec-panel-v1b.md` section "Pantallas" (line 99) was not updated when the timeline picker was removed and the delivery status was corrected, leaving an internal contradiction.**
+**1. `README.md` line 25 states phase 2 is "no empezada" (not started) -- flatly false on the current tree.**
 
-Line 99 still reads: "Historial (fase 2): el heatmap de lecturas por dia y, por manga, la linea de tiempo de lecturas contra publicaciones. Entregada el 2026-08-21..." -- this both (a) describes the per-manga timeline as part of the Historial screen, which commit `2266d44` removed the same day, and (b) says "Entregada", contradicting the phase table three lines below the fold (line 161: "implementada... sin desplegar... no esta entregada hasta que se mergee y se despliegue") and the later correction commit `b9db4cb` ("phase 2 is implemented, not delivered"). The correct information exists elsewhere in the same file (section "Pendientes abiertos" line 201), so this is a sync gap inside one document, not a missing decision -- but CLAUDE.md is explicit that a stale statement in exactly this kind of "read at the start of every session and believed" document is expensive. Does not block archive on its own; recommend a one-line fix to line 99 before or alongside the E2E fix.
+The V1b phase table at line 25 reads: `Fase 2 -- historial y heatmap | no empezada`. Sixteen commits, two new endpoints, a full history screen, 562+116 passing tests and a green Playwright smoke later, "not started" is not merely stale but actively wrong -- line 184 of the same file is closer ("falta la fase 2", i.e. still missing/not deployed) but line 25's status marker was never touched when phase 2 landed. `README.md` is outside this change's own file-changes table in `design.md` (only `docs/spec-panel-v1b.md` and `docs/runbook-desarrollo-local.md` were planned for edits), so this is not a spec-scenario failure -- but the sweep explicitly asked for a fourth stale claim, and this is it. Recommend a one-line fix (e.g. "implementada, sin desplegar") alongside whichever commit next touches this branch or its follow-up.
 
-**3. (Confirmed, not a new finding) One frontend test comment previously overclaimed timezone coverage; it has already self-corrected -- no other test in this change repeats the pattern.**
+**2. `docs/spec-panel-v1b.md` API table (lines 86-87) marks both phase-2 endpoints "Entregado el 2026-08-21", using the same word the same table uses elsewhere to mean "deployed to production" -- which phase 2 explicitly is not.**
 
-`frontend/src/components/ReadingHeatmap.test.tsx`, test "spans exactly from `from` to `to`, inclusive on both ends" (lines 43-63): the comment explicitly states this test does NOT prove timezone-safe date arithmetic, and explains why (a date-only string parses as UTC by spec, and the TZ=America/Caracas UTC-4 pin never crosses the UTC date boundary at local midnight, so both `new Date(from)` and `new Date(\`${from}T00:00:00\`)` would leave the suite green). I independently re-derived this by inspection of `ReadingHeatmap.tsx`'s `buildCalendar()` -- the component's actual defense is the explicit `Z` suffix plus `getUTC*` accessors, not this test. I checked every other test file this change touches for the same overclaim pattern (searched for `new Date`, `timezone`, `TZ`, `America/Caracas` across `App.test.tsx`, `HistoryContainer.test.tsx`, `AppNav.test.tsx`, and the backend `test_history_api.py`) and found none -- the backend's `test_window_boundary_local_midnight_included_one_second_earlier_excluded` genuinely depends on the UTC-4 shift (04:00 UTC = local midnight) and is not an overclaim. This finding is CONFIRMED, already fixed in the code, and needs no further action.
+Lines 88-92 use "Entregado el 2026-08-20" / "Entregado el 2026-08-18" for the phase-3 and phase-4 endpoints, and those phases genuinely are deployed (checked off in the phase table, lines 160-163). Lines 86-87 apply the identical word to `GET /api/history/reading` and `GET /api/mangas/{id}/history`, but the phase-2 row three lines below (line 161) explicitly says phase 2 is "implementada... sin desplegar... no esta entregada hasta que se mergee y se despliegue" (implemented, not delivered, not delivered until merged and deployed). Within one document, "Entregado" carries two different meanings depending on which table you are reading -- for phase 3/4 it means "shipped to users", for phase 2 it apparently means "the code landed in this branch." This is the same kind of self-contradiction line 99 had before the `78aad69` fix, just in a different table. Does not block archive (it does not misstate what the endpoints do, only when they became reachable in production) but should be corrected -- e.g. "Implementado el 2026-08-21, sin desplegar" -- for consistency with line 99's own corrected wording.
+
+**3. (Confirmed carried over, not a new finding) One frontend test comment previously overclaimed timezone coverage; already self-corrected before pass 1, no action needed.** See pass-1 record above.
 
 ## Deviations From Spec (declared, not scored as defects)
 
-- Per-manga timeline built, tested, and functionally complete but not reachable from the UI -- owner decision 2026-08-21, recorded in `docs/spec-panel-v1b.md` section "Pendientes abiertos" with rationale and reopening cost. Per verification instructions, **not** recommended for restoration.
-- Heatmap visual format resolved by the owner via `/prototype` to a full-year 53-week calendar, closing design decision D8 (was open at apply time). This is a design evolution, not a deviation from the spec's text -- the spec explicitly left visual format owner-reserved and out of scope.
-- `/impeccable audit` findings closed post-apply: `aria-current` (WCAG 4.1.2), 44px touch targets, `:focus-visible` ring on `.progress-input`, `--grid-line` token. All confirmed present in `styles.css`/`AppNav.tsx`.
+- Per-manga timeline built, tested, and functionally complete but not reachable from the UI -- owner decision 2026-08-21, recorded in `docs/spec-panel-v1b.md` Pendientes abiertos with rationale and reopening cost. Not recommended for restoration.
+- Heatmap visual format resolved by the owner via /prototype to a full-year 53-week calendar, closing design decision D8 -- a design evolution, not a spec deviation (the spec left visual format owner-reserved).
+- 0->175 upward-correction outlier (D7, no server cap) and NULL-`previous_chapter_num` counting as an edit with 0 chapters (D5) remain explicitly flagged-not-resolved in both the design and `docs/spec-panel-v1b.md` Pendientes abiertos line 204 -- matches the spec's own Known Limitation section verbatim. Not a defect.
 
 ## Design Coherence
 
-D1-D11 all confirmed against code: required `timezone_name` kwarg with no default (`create_app` raises `TypeError` without it -- `test_create_app_without_timezone_name_raises_type_error` passes); fixed-width UTC string window (D2); shift-before-group (D3); chapters-not-edits with rounding (D4); NULL-previous and downward-correction both zero-chapters-but-count-as-edit (D5); downward correction visible-with-negative-delta in timeline only (D6); no backend cap on `chapters` (D7, confirmed absent); D8 closed by owner as noted; `publications_since` timestamp not a boolean flag (D9, confirmed in `manga_history()` and `MangaTimeline.tsx`); `useState<Screen>` + presentational `AppNav`, no router (D10); E2E fixture server builds its own temp DB with a `check_not_production_db()` guard, never the real CLI (D11) -- confirmed by reading `playwright.config.ts` and the design; not independently re-verified for correctness of the guard itself in this pass, but `tests/e2e/test_fixture_server.py` is part of the passing 562.
+D1-D11 re-spot-checked against the current tree (not re-deriving every line from pass 1, since no design-relevant code changed between passes -- only the E2E assertion and one doc line changed in `78aad69`): D1 (`create_app(..., *, timezone_name)` required kwarg) unchanged and still enforced by `test_create_app_without_timezone_name_raises_type_error`; D2/D3 (fixed-width UTC window, shift-before-group) re-confirmed directly this pass via the hard-bar test and the source read above; D6 (downward correction visible with negative delta in the timeline, excluded from the heatmap) re-confirmed via the timeline test fixture. No design decision was touched by the remediation commit.
+
+## Task Completion
+
+40/40 tasks in `tasks.md` remain checked; the remediation commits (`78aad69`, `04ae855`) are outside the task list by design (owner-directed post-apply fixes responding to sdd-verify findings, not task-plan work) -- consistent with how pass 1 already treated the earlier post-apply commits.
 
 ## Recommendation
 
-Do not archive yet. Fix the Playwright smoke assertion (narrow, one-line-class fix) and re-run it green before proceeding. Optionally fix the line-99 doc sync gap in the same pass. Recommended next phase: **sdd-apply** for a small follow-up commit (fix E2E assertion + optional doc line), then re-run **sdd-verify**.
+Archive is unblocked. Optionally fold the two new WARNING doc-line fixes (`README.md:25`, `docs/spec-panel-v1b.md:86-87`) into the same follow-up commit if one is opened before merge; neither is a re-verification blocker. Recommended next phase: sdd-archive.
