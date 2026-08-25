@@ -15,14 +15,14 @@ This file covers what the README does not: the architectural rules that are easy
 Real commands — do not invent others:
 
 ```
-uv run pytest -q                 the suite; 330 tests as of 2026-08-04
+uv run pytest -q                 the suite; 562 tests as of 2026-08-25
 docker compose build             required when manga_tracker/, frontend/, pyproject.toml or the Dockerfile change
 docker compose up -d             the ONLY redeploy verb; `restart` does not recreate and silently keeps the old image
 ```
 
-What exists: `manga_tracker/` with `sources/manganato/`, `storage/`, `seed/`, `discovery/`, `notifier/`, `catalogue/`, `importer/`, plus `scheduler.py` and `cli.py`. Python 3.12 under `uv` with a committed lockfile, SQLite in a Docker volume, curl-cffi, APScheduler in-process, one container.
+What exists: `manga_tracker/` with `sources/manganato/`, `storage/`, `seed/`, `discovery/`, `notifier/`, `catalogue/`, `importer/`, `intake/`, `web/`, plus `scheduler.py` and `cli.py`; and `frontend/` for the panel's React build. Python 3.12 under `uv` with a committed lockfile, SQLite in a Docker volume, curl-cffi, APScheduler in-process, **two containers** off one image — detection and the panel, so a hung panel cannot take detection down.
 
-**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The database holds 229 mangas and 229 bookmarks (227 from the Kitsu import plus two added by hand on 08-05). **The V1b spec opened on 2026-08-17** (`spec-panel-v1b.md`), after the week of real use that gated it: a web panel in four delivery phases, with reading-progress editing as the core. FastAPI, no auth, same container.
+**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The database held 229 mangas and 229 bookmarks then; **236 bookmarks as of 2026-08-25**, the panel's add form accounting for the difference. **The V1b spec opened on 2026-08-17** (`spec-panel-v1b.md`), after the week of real use that gated it: a web panel with reading-progress editing as the core. FastAPI, no auth, **its own container**. Phases 1, 2 and 3 are deployed; `spec-panel-v1b.md` v1.6 added a **fifth** phase — the design pass — so "four phases" is retired wording.
 
 Two things this section got wrong for a week, because nobody updated it: it claimed there was no application code and no test tooling, long after both existed. **A stale statement here is expensive** — it is read at the start of every session and believed. When behaviour changes, this file changes with it.
 

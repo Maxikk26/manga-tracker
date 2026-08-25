@@ -17,7 +17,7 @@ Reemplaza los bookmarks del navegador (que se pierden cuando el sitio cambia de 
 | Fase 2 — aviso de slug muerto + `onhold_sweep` | ✅ completa. El aviso lleva desplegado desde el arranque, y el barrido semanal corrió su primer ciclo completo sin intervención el domingo 2026-08-09 (141 mapeos, 6 actualizaciones silenciosas, 0 mensajes). Su población la dejó el import: 72 bookmarks en `on_hold` donde había cero |
 | Fase 3 — import de Kitsu | ✅ corrió contra la base real |
 
-Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. La semana de uso real corrió del 08-10 al 08-17 y ese día abrió **la spec de V1b** (`spec-panel-v1b.md`): el panel web, en cuatro fases, con la edición del progreso de lectura como corazón.
+Criterio de terminado de V1a: los cuatro puntos del one-pager. **V1a está terminado: los cuatro se cumplen desde el 2026-08-10**, el último (los tres jobs corriendo solos) verificado ese día contra `job_runs`. La semana de uso real corrió del 08-10 al 08-17 y ese día abrió **la spec de V1b** (`spec-panel-v1b.md`): el panel web, con la edición del progreso de lectura como corazón. Abrió con cuatro fases de entrega y **desde la v1.6 son cinco**, con el pase de diseño como la quinta; las fases 1, 2 y 3 están desplegadas.
 
 | Fase de V1b | Estado |
 |---|---|
@@ -134,7 +134,7 @@ Documentos de apoyo:
 - **`medicion-ventana-feed.md`** — el experimento que fijó el intervalo del feed y degradó su rol a oportunista.
 - **`referencia-repo-viejo.md`** — rescate del intento anterior en Go (2025) y, sobre todo, la lista de antipatrones que lo mataron.
 - **`decision-arquitectura-v1b.md`** — dónde vive el panel de V1b y con qué se monta: mismo repositorio, React + Vite, API en Python. No es la spec del panel.
-- **`spec-panel-v1b.md`** — la spec del panel: FastAPI sin autenticación, los endpoints, las tres pantallas y las cuatro fases de entrega, con la edición del progreso de lectura como corazón.
+- **`spec-panel-v1b.md`** — la spec del panel: FastAPI sin autenticación, los endpoints, las superficies (dos pantallas y un modal) y las **cinco** fases de entrega, con la edición del progreso de lectura como corazón.
 
 El paquete está completo: no falta ninguna spec por escribir.
 
