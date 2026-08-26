@@ -77,6 +77,6 @@ Unlike `last_chapter_read`, which the panel forbids re-nulling because it would 
 - THEN both rows carry `my_score`, one as an integer and one as null
 
 ## References
-- docs/spec-panel-v1b.md v1.6 §171-175 (`my_score`), §195 (data vs. form)
+- docs/spec-panel-v1b.md v1.7 §`my_score` (fase 4), §Fases y criterios de terminado ("El orden entre la 4 y la 5" — the data, not its form)
 - docs/spec-modelo-de-datos.md v1.9 §Versionado del esquema
 - openspec/changes/panel-v1b-fase-4/proposal.md

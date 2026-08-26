@@ -64,5 +64,5 @@ An export entry whose resolved `kitsu_id` matches no existing `mangas` row MUST 
 
 ## References
 - docs/spec-importador-kitsu.md (decision 5, reversed by this change)
-- docs/spec-panel-v1b.md v1.6 §171-175
+- docs/spec-panel-v1b.md v1.7 §`my_score` (fase 4)
 - openspec/changes/panel-v1b-fase-4/proposal.md
