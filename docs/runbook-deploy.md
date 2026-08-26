@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.6 — 2026-08-17. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4), `spec-cliente-fuente-descubrimiento.md` (v1.9) y `spec-panel-v1b.md` (v1.3).
+Versión 1.7 — 2026-08-26. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4), `spec-cliente-fuente-descubrimiento.md` (v1.9) y `spec-panel-v1b.md` (v1.7).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
@@ -15,7 +15,7 @@ Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tra
 | **Arranque** | 6 pasos en orden: `test-telegram` → `--dry-run` → seed → `run-job active_sweep` → `run-job heartbeat` → `up -d`. **El seed va antes del `up -d`** o el barrido de arranque se gasta contra cero títulos | §5 |
 | **Build** | ~4 minutos la primera vez; verificar tzdata, usuario `appuser` y que `pytest` **no** viaje. Desde V1b hay una etapa de Node que compila el frontend — Node tampoco viaja. Inspección con `--entrypoint` y el nombre del **servicio**, nunca un tag | §4 |
 | **Qué esperar** | **Silencio en Telegram**, y es lo normal: `feed_check` cada 30 minutos, `active_sweep` a las 22:00 locales, domingo tres jobs encolados. Lee `items_checked`, no solo `status`. El panel responde en `http://<servidor>:8000` desde el arranque | §6 |
-| **Respaldo** | `cp` de un archivo, más el `seed.csv` aparte. Sin dump ni credenciales — la contrapartida de SQLite | §7 |
+| **Respaldo** | `cp` de un archivo a `pre-<motivo>-<YYYYMMDD>-<HHMM>.db` **junto a la base**, más el `seed.csv` aparte. Obligatorio antes de cada migración de esquema. Vive en el mismo volumen que la base: cubre un error de migración, **no** la pérdida del disco | §7 |
 | **Si algo falla** | Tabla de 11 síntomas del primer arranque, en orden de probabilidad | §Fallos del primer arranque |
 
 Lo que este documento **no** cubre: subir un cambio y operar lo ya desplegado (`runbook-mantenimiento.md`), ni qué hace el sistema (las specs).
@@ -249,10 +249,25 @@ docker compose run --rm --entrypoint python manga-tracker -c "import sqlite3;[pr
 El respaldo es **copiar un archivo**:
 
 ```
-cp ~/manga-tracker-data/manga-tracker.db ~/backups/manga-tracker-$(date +%F).db
+cp ~/manga-tracker-data/manga-tracker.db \
+   ~/manga-tracker-data/pre-<motivo>-$(date +%Y%m%d-%H%M).db
 ```
 
 Eso es todo. Sin dump, sin credenciales de base, sin segundo contenedor — es la contrapartida de haber elegido SQLite sobre Postgres.
+
+**Respalda antes de cada migración de esquema.** Es la razón por la que la convención existe: `user_version` sube, el esquema cambia y eso no se deshace solo.
+
+**El nombre no es decorativo, y hasta la v1.6 este runbook mandaba uno peor.** Decía `~/backups/manga-tracker-$(date +%F).db`, y ese directorio **no existe en el servidor**: nadie respaldó nunca así. Lo que sí hay son trece respaldos junto a la base, todos con la forma `pre-<motivo>-<YYYYMMDD>-<HHMM>.db`:
+
+```
+pre-migration1-20260810-2337.db
+pre-migracion2-20260819-0059.db
+pre-dedupe-20260819-0144.db
+```
+
+Se corrige el documento hacia la práctica y no al revés, por dos razones. La primera es que el nombre dice **de qué te protege**, que es lo único que importa el día que toca restaurar; `manga-tracker-2026-08-19.db` no dice ni eso ni a qué hora se tomó. La segunda es que sin la hora **dos respaldos del mismo día se pisan**, y eso no es hipotético: los dos últimos de esa lista están separados por 45 minutos y con el nombre viejo habrían sido el mismo archivo, con el segundo borrando al primero justo cuando más falta hacía.
+
+**Un límite que conviene decir en voz alta: el respaldo vive en el mismo volumen que la base.** Te cubre de una migración que salió mal o de un borrado tonto; **no** te cubre de perder el disco. Es una decisión asumida —un servidor, un volumen, cero infraestructura— y se escribe aquí para que nadie la descubra el día malo.
 
 Y respalda tu `seed.csv` en otro lado. Un `.gitignore` evita que lo commitees; **no** evita que lo pierdas.
 

@@ -12,7 +12,7 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 # Bump this with every migration added below, and never renumber an existing one:
 # the number is recorded in each deployed database's PRAGMA user_version.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -66,9 +66,22 @@ def _migration_2_bookmarks_status_changed_at(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE bookmarks ADD COLUMN status_changed_at TEXT")
 
 
+def _migration_3_bookmarks_my_score(conn: sqlite3.Connection) -> None:
+    """bookmarks gains my_score.
+
+    Deliberately NOT backfilled, same as migration 2: NULL means unscored, and
+    there is no candidate column to copy a score from anyway. PRAGMA table_info
+    guard, one ALTER TABLE - identical shape to migration 2.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(bookmarks)")}
+    if "my_score" not in columns:
+        conn.execute("ALTER TABLE bookmarks ADD COLUMN my_score INTEGER")
+
+
 MIGRATIONS = {
     1: _migration_1_job_runs_prefilter_split,
     2: _migration_2_bookmarks_status_changed_at,
+    3: _migration_3_bookmarks_my_score,
 }
 
 
