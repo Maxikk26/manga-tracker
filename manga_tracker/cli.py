@@ -28,7 +28,7 @@ from manga_tracker.catalogue.kitsu import KitsuCatalogue
 from manga_tracker.catalogue.transport import UrllibJsonTransport
 from manga_tracker.config import AppConfig, load_config, require_telegram
 from manga_tracker.discovery.active_sweep import JOB_NAME as ACTIVE_SWEEP_JOB
-from manga_tracker.discovery.covers import DEFAULT_STATUSES, backfill_covers
+from manga_tracker.discovery.covers import DEFAULT_STATUSES, backfill_covers, backfill_stored_url_covers
 from manga_tracker.discovery.feed_check import JOB_NAME as FEED_CHECK_JOB
 from manga_tracker.discovery.heartbeat import JOB_NAME as HEARTBEAT_JOB
 from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
@@ -50,7 +50,12 @@ from manga_tracker.sources.manganato.transport import (
 )
 from manga_tracker.storage.cover_cache import cache_dir_for, find_cached
 from manga_tracker.storage.db import connect, ensure_site
-from manga_tracker.storage.repositories import BOOKMARK_STATUSES, list_cover_candidates
+from manga_tracker.storage.repositories import (
+    BOOKMARK_STATUSES,
+    TERMINAL_STATUSES,
+    list_cover_candidates,
+    list_stored_url_cover_candidates,
+)
 from manga_tracker.web.app import create_app
 
 
@@ -171,65 +176,51 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
-    """One-off: give every mapped manga a cover FILE, not just a cover URL.
-
-    Storing the address is not storing the image — manganato's image hosts
-    answer 403 without a manganato Referer, so a panel pointing at a stored URL
-    renders a broken image. The cache lives beside the database, inside the
-    persisted data volume.
-
-    Sequential and slow by construction — up to two requests per manga with the
-    transport's 5-15s delay — so the run is announced up front rather than
-    looking hung. `--dry-run` exists because the cheapest way to be sure of the
-    population is to see it before spending a single request on it.
-    """
-    statuses = tuple(args.statuses) if args.statuses else DEFAULT_STATUSES
-    cache_dir = cache_dir_for(config.db_path)
-
+def _cache_covers_mapped_route(
+    cache_dir: Path, config: AppConfig, statuses: tuple[str, ...], *, limit: int | None, dry_run: bool
+) -> tuple[int, bool]:
+    """The existing (fase 1) route: mapped, non-terminal manga, up to two
+    requests each. Returns `(files_written, any_failure)`."""
     conn = connect(config.db_path)
     try:
         candidates = list_cover_candidates(conn, statuses=statuses)
     finally:
         conn.close()
-    pending = [
-        row for row in candidates if not row[3] or find_cached(cache_dir, row[0]) is None
-    ]
-    if args.limit is not None:
-        pending = pending[: args.limit]
+    pending = [row for row in candidates if not row[3] or find_cached(cache_dir, row[0]) is None]
+    if limit is not None:
+        pending = pending[:limit]
 
-    print(f"Cache directory: {cache_dir}")
+    print(f"\nMapped route ({', '.join(statuses)}):")
     if not pending:
-        print(f"All {len(candidates)} mapped manga(s) in those statuses are already cached.")
-        return 0
+        print(f"  all {len(candidates)} manga(s) already cached.")
+        return 0, False
 
     needs_url = sum(1 for row in pending if not row[3])
     print(
-        f"{len(pending)} of {len(candidates)} manga(s) need work, in statuses: "
-        f"{', '.join(statuses)}  ({needs_url} also need their cover_url looked up)"
+        f"  {len(pending)} of {len(candidates)} manga(s) need work "
+        f"({needs_url} also need their cover_url looked up)"
     )
     for _, title, source_key, cover_url in pending:
-        print(f"  - {title}  [{source_key}]{'' if cover_url else '  (no cover_url yet)'}")
+        print(f"    - {title}  [{source_key}]{'' if cover_url else '  (no cover_url yet)'}")
 
-    if args.dry_run:
-        print("\nDry run: no request was made.")
-        return 0
+    if dry_run:
+        print("  Dry run: no request was made.")
+        return 0, False
 
     # 10s is the midpoint of the 5-15s policy delay; the first request has none.
     requests = len(pending) + needs_url
-    print(f"\nFetching {requests} request(s), sequentially. Rough estimate: "
+    print(f"  Fetching {requests} request(s), sequentially. Rough estimate: "
           f"{(requests - 1) * 10 // 60 + 1} minute(s).")
     report = backfill_covers(
         db_path=config.db_path,
         client=ManganatoClient(CurlCffiTransport()),
         cache_dir=cache_dir,
         statuses=statuses,
-        limit=args.limit,
+        limit=limit,
         now_fn=_utc_now,
     )
-
     print(
-        f"\nCached {report.files_written} image(s); learned {report.urls_learned} cover_url(s); "
+        f"  Cached {report.files_written} image(s); learned {report.urls_learned} cover_url(s); "
         f"{report.already_cached} were already done."
     )
     for label, titles in (
@@ -238,12 +229,117 @@ def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
         ("unexpected response, the source may have changed", report.unexpected),
     ):
         if titles:
-            print(f"{len(titles)} {label}:")
+            print(f"  {len(titles)} {label}:")
             for title in titles:
-                print(f"  - {title}")
+                print(f"    - {title}")
+    return report.files_written, bool(report.failed)
+
+
+def _cache_covers_terminal_route(
+    cache_dir: Path, config: AppConfig, statuses: tuple[str, ...], *, limit: int | None, dry_run: bool
+) -> tuple[int, bool]:
+    """The new (fase 4) route: stored-url, terminal manga, at most one
+    request each and never to manganato (design D5). Returns
+    `(files_written, any_failure)`."""
+    conn = connect(config.db_path)
+    try:
+        candidates = list_stored_url_cover_candidates(conn, statuses=statuses)
+    finally:
+        conn.close()
+    no_url = [title for _, title, cover_url in candidates if not cover_url]
+    downloadable = [row for row in candidates if row[2]]
+    pending = [row for row in downloadable if find_cached(cache_dir, row[0]) is None]
+    if limit is not None:
+        pending = pending[:limit]
+
+    print(f"\nStored-url route ({', '.join(statuses)}):")
+    if not pending and not no_url:
+        print(f"  all {len(candidates)} manga(s) already cached.")
+        return 0, False
+
+    print(
+        f"  {len(pending)} of {len(candidates)} manga(s) need downloading "
+        f"({len(no_url)} have no cover_url yet - skipped, no source lookup)"
+    )
+    for _, title, cover_url in pending:
+        print(f"    - {title}")
+    for title in no_url:
+        print(f"    - {title}  (no cover_url yet, skipped)")
+
+    if not pending:
+        return 0, False
+    if dry_run:
+        print("  Dry run: no request was made.")
+        return 0, False
+
+    print(f"  Fetching {len(pending)} request(s), sequentially. Rough estimate: "
+          f"{(len(pending) - 1) * 10 // 60 + 1} minute(s).")
+    report = backfill_stored_url_covers(
+        db_path=config.db_path,
+        client=ManganatoClient(CurlCffiTransport()),
+        cache_dir=cache_dir,
+        statuses=statuses,
+        limit=limit,
+        now_fn=_utc_now,
+    )
+    print(f"  Cached {report.files_written} image(s); {len(report.no_url)} had no cover_url.")
+    for label, titles in (
+        ("not found at the source", report.not_found),
+        ("transient failure, safe to rerun", report.transient),
+        ("unexpected response, the source may have changed", report.unexpected),
+    ):
+        if titles:
+            print(f"  {len(titles)} {label}:")
+            for title in titles:
+                print(f"    - {title}")
+    return report.files_written, bool(report.failed)
+
+
+def _cmd_cache_covers(args: argparse.Namespace, config: AppConfig) -> int:
+    """One-off: give every bookmark in the requested statuses a cover FILE,
+    not just a cover URL.
+
+    Storing the address is not storing the image — manganato's image hosts
+    answer 403 without a manganato Referer, so a panel pointing at a stored URL
+    renders a broken image. The cache lives beside the database, inside the
+    persisted data volume.
+
+    Two independent routes, split by `TERMINAL_STATUSES` (design D5,
+    panel-v1b-fase-4): the mapped route costs up to two requests per manga and
+    is what this command always did; the stored-url route costs at most one,
+    never to manganato, and only runs for the terminal statuses actually
+    requested — a bare `cache-covers` still costs ~0 requests, because its
+    default population is entirely non-terminal. `--limit` applies to EACH
+    route separately, never to their combined total, so its cost cannot depend
+    on which statuses happen to sort first; `--dry-run` prints both
+    populations and issues neither route's requests.
+    """
+    requested = tuple(args.statuses) if args.statuses else DEFAULT_STATUSES
+    mapped_statuses = tuple(status for status in requested if status not in TERMINAL_STATUSES)
+    terminal_statuses = tuple(status for status in requested if status in TERMINAL_STATUSES)
+    cache_dir = cache_dir_for(config.db_path)
+    print(f"Cache directory: {cache_dir}")
+
+    total_written = 0
+    any_failed = False
+    if mapped_statuses:
+        written, failed = _cache_covers_mapped_route(
+            cache_dir, config, mapped_statuses, limit=args.limit, dry_run=args.dry_run
+        )
+        total_written += written
+        any_failed = any_failed or failed
+    if terminal_statuses:
+        written, failed = _cache_covers_terminal_route(
+            cache_dir, config, terminal_statuses, limit=args.limit, dry_run=args.dry_run
+        )
+        total_written += written
+        any_failed = any_failed or failed
+
+    if mapped_statuses and terminal_statuses:
+        print(f"\n{total_written} file(s) cached in total across both routes.")
     # A partial run is not a failed run: the covers already written are kept,
     # and a rerun costs only what is still missing.
-    return 0 if report.files_written or not report.failed else 1
+    return 0 if total_written or not any_failed else 1
 
 
 def _bootstrap(
@@ -392,15 +488,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     cache_covers = subparsers.add_parser(
         "cache-covers",
-        help="Fetch and store the cover of every mapped manga that has none; one-off maintenance, never scheduled",
+        help="Fetch and store the cover of every bookmark that has none; one-off maintenance, never scheduled",
     )
     cache_covers.add_argument(
         "--status", action="append", dest="statuses", choices=list(BOOKMARK_STATUSES),
-        help="Restrict to these bookmark statuses (repeatable). Default: reading, want_to_read, on_hold.",
+        help="Restrict to these bookmark statuses (repeatable). Default: reading, want_to_read, on_hold. "
+             "Terminal statuses (completed, dropped) run through a separate route that never asks manganato.",
     )
     cache_covers.add_argument(
         "--limit", type=int, default=None,
-        help="Stop after this many mangas. Useful for a 1-item smoke test before spending the full run.",
+        help="Stop after this many mangas, PER ROUTE (mapped and stored-url are limited independently, "
+             "never combined). Useful for a 1-item smoke test before spending the full run.",
     )
     cache_covers.add_argument(
         "--dry-run", action="store_true",
