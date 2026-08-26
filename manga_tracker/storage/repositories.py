@@ -36,6 +36,15 @@ MANUAL_ORIGIN = "manual"
 # status is a 422 to the caller, never an IntegrityError from the database.
 BOOKMARK_STATUSES = ("reading", "want_to_read", "completed", "on_hold", "dropped")
 
+# The two statuses that receive zero source requests, ever (CLAUDE.md). Also
+# lives, by construction, as `web/app.py:TERMINAL_STATUSES` and
+# `importer/export.py:TERMINAL_STATUSES` — those two copies predate this one
+# and stay where they are (pulling `storage`, and `sqlite3` with it, into the
+# XML parser is the worse trade); this copy is what `cli.py` and
+# `discovery/covers.py` import, and a parity test keeps all three equal
+# (design D8, panel-v1b-fase-4).
+TERMINAL_STATUSES = frozenset({"completed", "dropped"})
+
 # "The PATCH did not carry this field". None cannot play that role because it
 # is a real value for last_chapter_read, so absence gets its own marker.
 UNSET = object()
@@ -404,7 +413,12 @@ def _panel_bookmark_row(row) -> dict:
         # `latest_chapter_url` would put the source's URL shape inside the
         # panel, and assembling source URLs is client knowledge (CLAUDE.md,
         # "the structural boundary"). Null for a bookmark with no manga_sites
-        # row -- 59 of 229 in production, pending Kitsu entries.
+        # row -- 66 of 236 in production, measured 2026-08-25. Today that
+        # population is exactly the 66 terminal bookmarks (no sweep ever
+        # visits one to learn a slug), but that is how these rows got here,
+        # not a property of the terminal states themselves (panel-v1b-fase-4
+        # design D5) -- a mapped `reading` manga marked `completed` from the
+        # panel keeps its manga_sites row and this column stays non-null.
         "manga_url": manga_url,
         "latest_chapter_num": latest_chapter_num,
         "latest_chapter_url": latest_chapter_url,
@@ -679,6 +693,32 @@ def list_cover_candidates(
         sql += f"WHERE b.status IN ({', '.join('?' * len(statuses))}) "
         params = statuses
     return [tuple(row) for row in conn.execute(sql + "ORDER BY m.title", params)]
+
+
+def list_stored_url_cover_candidates(
+    conn: sqlite3.Connection, *, statuses: tuple[str, ...]
+) -> list[tuple[int, str, str | None]]:
+    """(manga_id, title, cover_url) for every bookmark in these statuses.
+
+    No `manga_sites` join, structurally: this route (panel-v1b-fase-4 design
+    D5) may never ask the source anything, so it must never even hold a
+    `source_key` in scope, not as a defensive check but because the query
+    cannot produce one. Selects by `bookmarks.status` alone -- never by
+    whether a mapping exists, so a bookmark that is both terminal and mapped
+    (D5's "not an invariant" case) is still returned here, exactly once.
+
+    Not filtered on `cover_url`: knowing whether a row is downloadable is a
+    cost decision the caller makes per row, this helper only reports the
+    population (mirrors `list_cover_candidates`'s same choice above).
+    """
+    sql = (
+        "SELECT m.id, m.title, m.cover_url "
+        "FROM mangas m "
+        "JOIN bookmarks b ON b.manga_id = m.id "
+        f"WHERE b.status IN ({', '.join('?' * len(statuses))}) "
+        "ORDER BY m.title"
+    )
+    return [tuple(row) for row in conn.execute(sql, statuses)]
 
 
 def set_manga_cover(conn: sqlite3.Connection, manga_id: int, cover_url: str, *, now: str) -> None:

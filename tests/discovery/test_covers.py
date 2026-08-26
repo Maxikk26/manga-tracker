@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from manga_tracker.discovery.covers import backfill_covers
+from manga_tracker.discovery.covers import backfill_covers, backfill_stored_url_covers
 from manga_tracker.storage.cover_cache import cache_path, find_cached
 from manga_tracker.sources.contracts import NotFound, Response, Transient, Unexpected
 from manga_tracker.sources.manganato.client import BASE_URL, ManganatoClient
@@ -423,6 +423,130 @@ def test_find_cached_matches_whichever_extension_landed(tmp_path):
     assert find_cached(tmp_path, 5) is None
     (tmp_path / "5.png").write_bytes(IMAGE)
     assert find_cached(tmp_path, 5) == tmp_path / "5.png"
+
+
+def _terminal_db(tmp_path, rows) -> str:
+    """`rows`: dicts with `id`, `title`, `cover_url`, `status`, `mapped`.
+
+    A row's `mapped` flag only decides whether a `manga_sites` row exists --
+    the stored-url route (design D5) must behave identically either way,
+    since its query never joins that table.
+    """
+    path = str(tmp_path / "terminal.db")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO sites (id, name, base_url, created_at, updated_at) "
+        "VALUES (1, 'manganato', ?, ?, ?)", (BASE_URL, NOW, NOW),
+    )
+    for row in rows:
+        conn.execute(
+            "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (row["id"], row["title"], row.get("cover_url"), NOW, NOW),
+        )
+        if row.get("mapped"):
+            conn.execute(
+                "INSERT INTO manga_sites (manga_id, site_id, source_key, created_at, updated_at) "
+                "VALUES (?, 1, ?, ?, ?)", (row["id"], f"slug-{row['id']}", NOW, NOW),
+            )
+        conn.execute(
+            "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+            "VALUES (?, ?, 'seed', ?, ?)", (row["id"], row["status"], NOW, NOW),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_the_stored_url_route_downloads_with_zero_fetch_manga_details_calls(tmp_path):
+    """The structural guarantee (design D5): the candidate query has no
+    `manga_sites` join, so `fetch_manga_details` is never even callable
+    here, not merely unused."""
+    db_path = _terminal_db(
+        tmp_path,
+        [{"id": 1, "title": "X", "cover_url": "https://media.kitsu.app/x.webp",
+          "status": "completed", "mapped": True}],
+    )
+    client = FakeClient()
+
+    report = backfill_stored_url_covers(
+        db_path=db_path, client=client, cache_dir=tmp_path / "covers",
+        statuses=("completed", "dropped"), now_fn=_now,
+    )
+
+    assert client.details_calls == []
+    assert client.cover_calls == ["https://media.kitsu.app/x.webp"]
+    assert report.files_written == 1
+    assert (tmp_path / "covers" / "1.webp").read_bytes() == IMAGE
+
+
+def test_a_null_cover_url_is_counted_and_never_fetched_even_when_mapped(tmp_path):
+    """D5's predicate, executable: status is the permission, `cover_url` is
+    the cost. A mapped terminal with no known `cover_url` is still skipped —
+    owning a slug does not authorize a source lookup on this route."""
+    db_path = _terminal_db(
+        tmp_path,
+        [
+            {"id": 1, "title": "Known", "cover_url": "https://media.kitsu.app/x.webp",
+             "status": "completed", "mapped": True},
+            {"id": 2, "title": "Unknown", "cover_url": None, "status": "dropped", "mapped": True},
+        ],
+    )
+    client = FakeClient()
+
+    report = backfill_stored_url_covers(
+        db_path=db_path, client=client, cache_dir=tmp_path / "covers",
+        statuses=("completed", "dropped"), now_fn=_now,
+    )
+
+    assert client.details_calls == []
+    assert client.cover_calls == ["https://media.kitsu.app/x.webp"]
+    assert report.files_written == 1
+    assert report.no_url == ["Unknown"]
+
+
+def test_an_unmapped_terminal_downloads_from_its_stored_url(tmp_path):
+    """Today's common case: no `manga_sites` row at all, and the route works
+    all the same, because it never needed one."""
+    db_path = _terminal_db(
+        tmp_path,
+        [{"id": 1, "title": "X", "cover_url": "https://media.kitsu.app/x.webp",
+          "status": "dropped", "mapped": False}],
+    )
+    client = FakeClient()
+
+    report = backfill_stored_url_covers(
+        db_path=db_path, client=client, cache_dir=tmp_path / "covers",
+        statuses=("completed", "dropped"), now_fn=_now,
+    )
+
+    assert client.details_calls == []
+    assert report.files_written == 1
+
+
+def test_a_second_run_of_the_stored_url_route_asks_for_nothing(tmp_path):
+    """Idempotent, same as the mapped route: a rerun costs only what is
+    still missing."""
+    db_path = _terminal_db(
+        tmp_path,
+        [{"id": 1, "title": "X", "cover_url": "https://media.kitsu.app/x.webp",
+          "status": "completed", "mapped": False}],
+    )
+    cache = tmp_path / "covers"
+    backfill_stored_url_covers(
+        db_path=db_path, client=FakeClient(), cache_dir=cache,
+        statuses=("completed", "dropped"), now_fn=_now,
+    )
+
+    client = FakeClient()
+    report = backfill_stored_url_covers(
+        db_path=db_path, client=client, cache_dir=cache,
+        statuses=("completed", "dropped"), now_fn=_now,
+    )
+
+    assert client.details_calls == []
+    assert client.cover_calls == []
+    assert report.considered == 0
+    assert report.already_cached == 1
 
 
 def test_a_manga_with_no_source_mapping_is_not_a_candidate(tmp_path):
