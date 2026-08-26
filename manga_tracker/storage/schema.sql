@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     -- history is not reconstructible, and `updated_at` is not a substitute for
     -- it (it moves on any edit, so it cannot say when a manga was paused).
     status_changed_at TEXT,
+    -- NULL means unscored. No range CHECK here: validation lives in Pydantic
+    -- only, matching last_chapter_read, and one added later would force a
+    -- table rebuild on a populated database (design D7).
+    my_score INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
