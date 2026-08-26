@@ -57,5 +57,5 @@ Both routes MUST write to a `.part` file and rename on completion, so an interru
 - THEN 28 files are cached and the report reflects real downloads, not the previous zero-row success
 
 ## References
-- docs/spec-panel-v1b.md v1.6 §Portadas (fase 4), §Portadas de los terminales (fase 4)
+- docs/spec-panel-v1b.md v1.7 §Portadas (fase 4), §Portadas de los terminales (fase 4)
 - openspec/changes/panel-v1b-fase-4/proposal.md

@@ -13,12 +13,15 @@ import csv
 
 import io
 
+from types import SimpleNamespace
+
 import pytest
 
 from manga_tracker.catalogue.contracts import CatalogueEntry, CatalogueTransient
 from manga_tracker.cli import build_parser, main
 from manga_tracker.sources.contracts import Chapter
 from manga_tracker.sources.manganato.client import build_manga_url, extract_slug
+from manga_tracker.storage.cover_cache import cache_dir_for, find_cached
 from manga_tracker.storage.db import connect
 
 
@@ -483,6 +486,181 @@ def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_w
     out = capsys.readouterr().out
     assert "'Ryuusa no Ori' (reading, read 5)" in out
     assert "COULD NOT write the pending list" in out
+
+
+# --- cache-covers (mapped/terminal dispatch) ------------------------------------
+#
+# `_cmd_cache_covers` splits the requested `--status` values across two routes
+# by `TERMINAL_STATUSES` (design D5, panel-v1b-fase-4). Every other verb in
+# this file gets a `main()`-level test; these four close that gap for
+# `cache-covers`, following the `import-kitsu` `_explode` idiom for "must
+# never be reached" and the wiring-point substitution idiom (`ManganatoClient`,
+# `CurlCffiTransport`) the `panel`/`run` tests above already use.
+
+NOW = "2026-08-25T12:00:00Z"
+
+
+class FakeCoverClient:
+    """Records what `cache-covers` asked the source for. `fetch_manga_details`
+    is only reachable through the mapped route; a call landing here proves
+    that route ran, not the terminal one."""
+
+    def __init__(self, cover_url="https://media.kitsu.app/learned.webp", image=b"fake-bytes"):
+        self._cover_url = cover_url
+        self._image = image
+        self.details_calls: list[str] = []
+        self.cover_calls: list[str] = []
+
+    def fetch_manga_details(self, slug):
+        self.details_calls.append(slug)
+        return SimpleNamespace(cover_url=self._cover_url)
+
+    def fetch_cover(self, url):
+        self.cover_calls.append(url)
+        return self._image
+
+
+def _cover_fixture_db(tmp_path, rows) -> str:
+    """`rows`: dicts with `id`, `title`, `status`, `cover_url`, `mapped`. Mirrors
+    `tests/discovery/test_covers.py::_terminal_db` — its own copy because this
+    file drives everything through `main()`, not the discovery layer directly."""
+    path = str(tmp_path / "db.sqlite3")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO sites (id, name, base_url, created_at, updated_at) "
+        "VALUES (1, 'manganato', 'https://www.manganato.gg', ?, ?)", (NOW, NOW),
+    )
+    for row in rows:
+        conn.execute(
+            "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (row["id"], row["title"], row.get("cover_url"), NOW, NOW),
+        )
+        if row.get("mapped"):
+            conn.execute(
+                "INSERT INTO manga_sites (manga_id, site_id, source_key, created_at, updated_at) "
+                "VALUES (?, 1, ?, ?, ?)", (row["id"], f"slug-{row['id']}", NOW, NOW),
+            )
+        conn.execute(
+            "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+            "VALUES (?, ?, 'seed', ?, ?)", (row["id"], row["status"], NOW, NOW),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_cache_covers_terminal_only_status_never_reaches_the_mapped_route(tmp_path, monkeypatch):
+    """`--status completed` sits entirely inside `TERMINAL_STATUSES`. If the
+    split sent it through the mapped route instead — the exact bug this
+    slice's dispatch exists to prevent — `_cache_covers_mapped_route` would be
+    called and this test would blow up on that call."""
+    from manga_tracker import cli
+
+    db_path = _cover_fixture_db(
+        tmp_path,
+        [{"id": 1, "title": "X", "status": "completed", "mapped": False,
+          "cover_url": "https://media.kitsu.app/x.webp"}],
+    )
+    monkeypatch.setenv("DB_PATH", db_path)
+    monkeypatch.setattr(cli, "_cache_covers_mapped_route", _explode)
+    client = FakeCoverClient()
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: client)
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+
+    assert cli.main(["cache-covers", "--status", "completed"]) == 0
+
+    assert client.details_calls == []
+    assert client.cover_calls == ["https://media.kitsu.app/x.webp"]
+    assert find_cached(cache_dir_for(db_path), 1) is not None
+
+
+def test_cache_covers_non_terminal_status_never_reaches_the_terminal_route(tmp_path, monkeypatch):
+    """`--status reading` sits entirely outside `TERMINAL_STATUSES`. The row
+    has no known `cover_url`, so only the mapped route — the one that can call
+    `fetch_manga_details` to learn it — can finish it at all; misrouted to the
+    terminal side it would only ever be silently skipped as `no_url`.
+    `_cache_covers_terminal_route` explodes if reached."""
+    from manga_tracker import cli
+
+    db_path = _cover_fixture_db(
+        tmp_path,
+        [{"id": 1, "title": "X", "status": "reading", "mapped": True, "cover_url": None}],
+    )
+    monkeypatch.setenv("DB_PATH", db_path)
+    monkeypatch.setattr(cli, "_cache_covers_terminal_route", _explode)
+    client = FakeCoverClient(cover_url="https://media.kitsu.app/learned.webp")
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: client)
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+
+    assert cli.main(["cache-covers", "--status", "reading"]) == 0
+
+    assert client.details_calls == ["slug-1"]
+    assert client.cover_calls == ["https://media.kitsu.app/learned.webp"]
+    assert find_cached(cache_dir_for(db_path), 1) is not None
+
+
+def test_cache_covers_mixed_status_partitions_each_row_to_its_own_route(tmp_path, monkeypatch):
+    """One row of each kind, chosen so a swapped split is observable instead of
+    accidentally still working: the `reading` row has no known `cover_url` (only
+    the mapped route's `fetch_manga_details` can resolve it — misrouted to the
+    terminal side it is silently skipped as `no_url`), and the `dropped` row is
+    unmapped (the mapped route's `manga_sites` INNER JOIN cannot even see it —
+    misrouted there it is silently absent from that population)."""
+    from manga_tracker import cli
+
+    db_path = _cover_fixture_db(
+        tmp_path,
+        [
+            {"id": 1, "title": "Reading", "status": "reading", "mapped": True, "cover_url": None},
+            {"id": 2, "title": "Dropped", "status": "dropped", "mapped": False,
+             "cover_url": "https://media.kitsu.app/dropped.webp"},
+        ],
+    )
+    monkeypatch.setenv("DB_PATH", db_path)
+    client = FakeCoverClient(cover_url="https://media.kitsu.app/learned.webp")
+    monkeypatch.setattr(cli, "ManganatoClient", lambda *a, **k: client)
+    monkeypatch.setattr(cli, "CurlCffiTransport", lambda *a, **k: object())
+
+    assert cli.main(["cache-covers", "--status", "reading", "--status", "dropped"]) == 0
+
+    assert client.details_calls == ["slug-1"]  # only the mapped row ever needs a slug lookup
+    assert set(client.cover_calls) == {
+        "https://media.kitsu.app/learned.webp",
+        "https://media.kitsu.app/dropped.webp",
+    }
+    cache_dir = cache_dir_for(db_path)
+    assert find_cached(cache_dir, 1) is not None
+    assert find_cached(cache_dir, 2) is not None
+
+
+def test_cache_covers_dry_run_reports_both_populations_and_requests_nothing(tmp_path, monkeypatch, capsys):
+    """`--dry-run` must reach the real route bodies (unlike the three tests
+    above, which replace them) and still cost zero requests: wiring the client
+    constructors to `_explode` proves neither route ever builds one, while the
+    report still names both populations before exiting 0."""
+    from manga_tracker import cli
+
+    db_path = _cover_fixture_db(
+        tmp_path,
+        [
+            {"id": 1, "title": "Reading", "status": "reading", "mapped": True, "cover_url": None},
+            {"id": 2, "title": "Dropped", "status": "dropped", "mapped": False,
+             "cover_url": "https://media.kitsu.app/dropped.webp"},
+        ],
+    )
+    monkeypatch.setenv("DB_PATH", db_path)
+    monkeypatch.setattr(cli, "ManganatoClient", _explode)
+    monkeypatch.setattr(cli, "CurlCffiTransport", _explode)
+
+    assert cli.main(["cache-covers", "--status", "reading", "--status", "dropped", "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Mapped route (reading):" in out
+    assert "Stored-url route (dropped):" in out
+    assert out.count("Dry run: no request was made.") == 2
+    cache_dir = cache_dir_for(db_path)
+    assert find_cached(cache_dir, 1) is None
+    assert find_cached(cache_dir, 2) is None
 
 
 # --- console encoding ----------------------------------------------------------
