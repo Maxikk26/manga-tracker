@@ -1,6 +1,6 @@
 # Runbook: desplegar en un servidor nuevo
 
-Versión 1.7 — 2026-08-26. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4), `spec-cliente-fuente-descubrimiento.md` (v1.9) y `spec-panel-v1b.md` (v1.7).
+Versión 1.8 — 2026-08-26. Documento operativo. Depende de `one-pager-v1a.md` (v1.14), `spec-seed-manual.md` (v2.4), `spec-cliente-fuente-descubrimiento.md` (v1.9) y `spec-panel-v1b.md` (v1.7).
 
 Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tras el primer despliegue real; cada trampa listada aquí costó tiempo de verdad.
 
@@ -15,7 +15,7 @@ Qué hacer para poner manga-tracker a correr en una máquina limpia. Escrito tra
 | **Arranque** | 6 pasos en orden: `test-telegram` → `--dry-run` → seed → `run-job active_sweep` → `run-job heartbeat` → `up -d`. **El seed va antes del `up -d`** o el barrido de arranque se gasta contra cero títulos | §5 |
 | **Build** | ~4 minutos la primera vez; verificar tzdata, usuario `appuser` y que `pytest` **no** viaje. Desde V1b hay una etapa de Node que compila el frontend — Node tampoco viaja. Inspección con `--entrypoint` y el nombre del **servicio**, nunca un tag | §4 |
 | **Qué esperar** | **Silencio en Telegram**, y es lo normal: `feed_check` cada 30 minutos, `active_sweep` a las 22:00 locales, domingo tres jobs encolados. Lee `items_checked`, no solo `status`. El panel responde en `http://<servidor>:8000` desde el arranque | §6 |
-| **Respaldo** | `cp` de un archivo a `pre-<motivo>-<YYYYMMDD>-<HHMM>.db` **junto a la base**, más el `seed.csv` aparte. Obligatorio antes de cada migración de esquema. Vive en el mismo volumen que la base: cubre un error de migración, **no** la pérdida del disco | §7 |
+| **Respaldo** | **No es un `cp`**: la base corre en WAL, así que va por `backup()` de SQLite a `pre-<motivo>-<YYYYMMDD>-<HHMM>.db` **junto a la base**, más el `seed.csv` aparte. Obligatorio antes de cada migración de esquema, y se verifica con `integrity_check`. Vive en el mismo volumen que la base: cubre un error de migración, **no** la pérdida del disco | §7 |
 | **Si algo falla** | Tabla de 11 síntomas del primer arranque, en orden de probabilidad | §Fallos del primer arranque |
 
 Lo que este documento **no** cubre: subir un cambio y operar lo ya desplegado (`runbook-mantenimiento.md`), ni qué hace el sistema (las specs).
@@ -246,18 +246,42 @@ docker compose run --rm --entrypoint python manga-tracker -c "import sqlite3;[pr
 
 ## 7. Respaldo
 
-El respaldo es **copiar un archivo**:
+Sigue sin haber dump ni credenciales de base ni segundo contenedor — esa parte es la contrapartida de haber elegido SQLite sobre Postgres. Pero **no es un `cp`**, y la razón está más abajo:
 
 ```
-cp ~/manga-tracker-data/manga-tracker.db \
-   ~/manga-tracker-data/pre-<motivo>-$(date +%Y%m%d-%H%M).db
+TS=$(date +%Y%m%d-%H%M)
+docker exec manga-tracker python -c "
+import sqlite3, sys
+src = sqlite3.connect('file:/app/data/manga-tracker.db?mode=ro', uri=True)
+dst = sqlite3.connect('/app/data/pre-<motivo>-' + sys.argv[1] + '.db')
+src.backup(dst)
+dst.close(); src.close()" $TS
 ```
 
-Eso es todo. Sin dump, sin credenciales de base, sin segundo contenedor — es la contrapartida de haber elegido SQLite sobre Postgres.
+Ojo con las rutas: el volumen de datos se monta en **`/app/data`** dentro del contenedor, no en `/data`, y `DB_PATH` es relativo a `/app`. Apuntar a `/data` falla con `unable to open database file`.
+
+**Por qué `cp` no alcanza.** `PRAGMA journal_mode` devuelve `wal`. En WAL las transacciones recientes viven en un archivo `-wal` aparte hasta que alguien checkpointea, así que copiar solo el `.db` produce un archivo que **abre perfecto y está desactualizado**: le faltan las últimas escrituras y no hay un solo error que te avise. Un respaldo que falla en silencio es peor que no tener ninguno, porque te hace creer que estás cubierto. `backup()` de SQLite es atómico contra una base viva y se lleva el WAL incluido.
+
+Hasta la v1.7 este documento mandaba `cp`, y los respaldos anteriores a esta versión probablemente estén sanos **por suerte**: se tomaron sin `-wal` en el directorio, o sea con la última conexión ya cerrada y checkpointeada. Un runbook no puede depender de eso.
+
+**Si no puedes usar el contenedor**, apágalo primero y entonces sí `cp` sirve: un cierre limpio checkpointea el WAL y deja el `.db` completo. Es la única alternativa sin Python, porque **`sqlite3` no está instalado en el servidor**.
+
+**Verifica el respaldo en vez de asumirlo.** Son tres preguntas y tarda un segundo:
+
+```
+docker exec manga-tracker python -c "
+import sqlite3
+c = sqlite3.connect('file:/app/data/pre-<motivo>-<TS>.db?mode=ro', uri=True)
+print('user_version =', c.execute('PRAGMA user_version').fetchone()[0])
+print('bookmarks    =', c.execute('SELECT COUNT(*) FROM bookmarks').fetchone()[0])
+print('integrity    =', c.execute('PRAGMA integrity_check').fetchone()[0])"
+```
+
+`user_version` te dice de qué esquema es la foto, el conteo te dice que no está vacía y `integrity_check` tiene que decir `ok`.
 
 **Respalda antes de cada migración de esquema.** Es la razón por la que la convención existe: `user_version` sube, el esquema cambia y eso no se deshace solo.
 
-**El nombre no es decorativo, y hasta la v1.6 este runbook mandaba uno peor.** Decía `~/backups/manga-tracker-$(date +%F).db`, y ese directorio **no existe en el servidor**: nadie respaldó nunca así. Lo que sí hay son trece respaldos junto a la base, todos con la forma `pre-<motivo>-<YYYYMMDD>-<HHMM>.db`:
+**El nombre no es decorativo, y hasta la v1.6 este runbook mandaba uno peor.** Decía `~/backups/manga-tracker-$(date +%F).db`, y ese directorio **no existe en el servidor**: nadie respaldó nunca así. Lo que sí hay es una pila de respaldos junto a la base, todos con la forma `pre-<motivo>-<YYYYMMDD>-<HHMM>.db`:
 
 ```
 pre-migration1-20260810-2337.db
