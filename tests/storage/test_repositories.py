@@ -1,0 +1,112 @@
+"""Direct repository-function tests that don't fit the higher-level suites:
+the stored-url cover candidate query (panel-v1b-fase-4 design D5) and the
+`TERMINAL_STATUSES` parity guard (design D8).
+"""
+
+from manga_tracker.importer.export import TERMINAL_STATUSES as EXPORT_TERMINAL_STATUSES
+from manga_tracker.storage.db import connect
+from manga_tracker.storage.repositories import TERMINAL_STATUSES, list_stored_url_cover_candidates
+from manga_tracker.web.app import TERMINAL_STATUSES as APP_TERMINAL_STATUSES
+
+NOW = "2026-08-25T00:00:00Z"
+
+
+def test_the_three_terminal_statuses_copies_are_equal():
+    """`web/app.py`, `importer/export.py` and `storage/repositories.py` each
+    carry their own copy (design D8) — kept separate on purpose (pulling
+    `storage`, and `sqlite3` with it, into the pure XML parser is the worse
+    trade), pinned equal here instead of by convention."""
+    assert TERMINAL_STATUSES == APP_TERMINAL_STATUSES == EXPORT_TERMINAL_STATUSES
+
+
+def test_list_stored_url_cover_candidates_sees_unmapped_rows(tmp_path):
+    """`list_cover_candidates`'s INNER JOIN cannot return this row at all —
+    this query must, because most of today's terminals have no `manga_sites`
+    row (design D5)."""
+    path = str(tmp_path / "unmapped.db")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) "
+        "VALUES (1, 'Orphan', 'https://media.kitsu.app/x.webp', ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+        "VALUES (1, 'completed', 'seed', ?, ?)", (NOW, NOW),
+    )
+    conn.commit()
+
+    rows = list_stored_url_cover_candidates(conn, statuses=("completed", "dropped"))
+    conn.close()
+
+    assert rows == [(1, "Orphan", "https://media.kitsu.app/x.webp")]
+
+
+def test_list_stored_url_cover_candidates_never_carries_a_source_key(tmp_path):
+    """Structural, not incidental: the SELECT has no `manga_sites` column at
+    all, so even a MAPPED terminal's row carries no `source_key` (design D5
+    — "no hay slug con el que hacerlas aunque alguien quisiera", made
+    mechanical)."""
+    path = str(tmp_path / "mapped.db")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO sites (id, name, base_url, created_at, updated_at) "
+        "VALUES (1, 'manganato', 'https://manganato.example', ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) "
+        "VALUES (1, 'Mapped', 'https://media.kitsu.app/x.webp', ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO manga_sites (manga_id, site_id, source_key, created_at, updated_at) "
+        "VALUES (1, 1, 'a-slug', ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+        "VALUES (1, 'dropped', 'seed', ?, ?)", (NOW, NOW),
+    )
+    conn.commit()
+
+    row = list_stored_url_cover_candidates(conn, statuses=("completed", "dropped"))[0]
+    conn.close()
+
+    assert row == (1, "Mapped", "https://media.kitsu.app/x.webp")
+    assert len(row) == 3  # (manga_id, title, cover_url) -- no fourth column for a slug
+
+
+def test_list_stored_url_cover_candidates_is_not_filtered_on_cover_url(tmp_path):
+    """Reports the whole population; the caller decides what a NULL costs."""
+    path = str(tmp_path / "nulls.db")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) "
+        "VALUES (1, 'No Cover', NULL, ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+        "VALUES (1, 'dropped', 'seed', ?, ?)", (NOW, NOW),
+    )
+    conn.commit()
+
+    rows = list_stored_url_cover_candidates(conn, statuses=("completed", "dropped"))
+    conn.close()
+
+    assert rows == [(1, "No Cover", None)]
+
+
+def test_list_stored_url_cover_candidates_excludes_non_terminal_statuses(tmp_path):
+    path = str(tmp_path / "mixed.db")
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO mangas (id, title, cover_url, created_at, updated_at) "
+        "VALUES (1, 'Reading', 'https://media.kitsu.app/x.webp', ?, ?)", (NOW, NOW),
+    )
+    conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) "
+        "VALUES (1, 'reading', 'seed', ?, ?)", (NOW, NOW),
+    )
+    conn.commit()
+
+    rows = list_stored_url_cover_candidates(conn, statuses=("completed", "dropped"))
+    conn.close()
+
+    assert rows == []
