@@ -29,7 +29,11 @@ from pathlib import Path
 from manga_tracker.sources.contracts import NotFound, Transient, Unexpected
 from manga_tracker.storage.cover_cache import find_cached, write_cover
 from manga_tracker.storage.db import connect
-from manga_tracker.storage.repositories import list_cover_candidates, set_manga_cover
+from manga_tracker.storage.repositories import (
+    list_cover_candidates,
+    list_stored_url_cover_candidates,
+    set_manga_cover,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,11 @@ class CoverBackfillReport:
     transient: list[str] = field(default_factory=list)
     #: Well-formed response of the wrong shape, or details carrying no cover.
     unexpected: list[str] = field(default_factory=list)
+    #: Stored-url route only: a terminal bookmark with no known cover_url.
+    #: Owns a slug or not, this is a skip, never escalated to the mapped
+    #: route -- that route may spend a source lookup and this row's status
+    #: says it may not (design D5, panel-v1b-fase-4).
+    no_url: list[str] = field(default_factory=list)
 
     @property
     def failed(self) -> int:
@@ -127,6 +136,77 @@ def backfill_covers(
             if find_cached(cache_dir, manga_id) is not None:
                 continue
 
+            try:
+                image = client.fetch_cover(cover_url)
+            except NotFound:
+                logger.warning("covers: image gone for %r (%s)", title, cover_url)
+                report.not_found.append(title)
+                continue
+            except Transient as exc:
+                logger.warning("covers: transient failure on image for %r: %s", title, exc)
+                report.transient.append(title)
+                continue
+            except Unexpected as exc:
+                logger.error("covers: unexpected image response for %r: %s", title, exc)
+                report.unexpected.append(title)
+                continue
+
+            destination = write_cover(cache_dir, manga_id, cover_url, image)
+            report.files_written += 1
+            logger.info("covers: cached %s for %r", destination.name, title)
+
+        return report
+    finally:
+        conn.close()
+
+
+def backfill_stored_url_covers(
+    *,
+    db_path: str,
+    client,
+    cache_dir: Path,
+    statuses: tuple[str, ...],
+    limit: int | None = None,
+    now_fn,
+) -> CoverBackfillReport:
+    """Give every terminal bookmark in these statuses a cover file on disk,
+    from a `cover_url` already stored on the `mangas` row.
+
+    Sibling of `backfill_covers`, not a branch inside it, and never calls
+    `fetch_manga_details`: `list_stored_url_cover_candidates` has no
+    `manga_sites` join, so `source_key` is never in this function's scope
+    and there is no slug to call it with, even by mistake (design D5,
+    panel-v1b-fase-4 -- the zero-manganato guarantee is structural).
+
+    One request per manga at most, the image itself, and only when a
+    `cover_url` is already known: a NULL one costs nothing and is counted in
+    `report.no_url`, never routed to `backfill_covers` to look one up --
+    status is the permission that route needs, and this route's candidates
+    are terminal by construction.
+
+    `consecutive_failures` is left alone, exactly as `backfill_covers`
+    leaves it.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    conn = connect(db_path)
+    try:
+        candidates = list_stored_url_cover_candidates(conn, statuses=statuses)
+        no_url = [title for _, title, cover_url in candidates if not cover_url]
+        for title in no_url:
+            logger.info("covers: %r has no cover_url; skipped, no source lookup permitted", title)
+
+        downloadable = [row for row in candidates if row[2]]
+        pending = [row for row in downloadable if find_cached(cache_dir, row[0]) is None]
+        if limit is not None:
+            pending = pending[:limit]
+
+        report = CoverBackfillReport(
+            considered=len(pending),
+            already_cached=len(downloadable) - len(pending),
+            no_url=no_url,
+        )
+
+        for manga_id, title, cover_url in pending:
             try:
                 image = client.fetch_cover(cover_url)
             except NotFound:
