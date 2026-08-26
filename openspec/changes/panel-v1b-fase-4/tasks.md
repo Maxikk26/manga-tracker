@@ -65,11 +65,11 @@ main
 
 ## Slice 2 — Migration 3 (~130 lines), branch `feat/panel-v1b-fase-4-migration-3`, base PR1 branch
 
-- [ ] 2.1 `storage/schema.sql`: add `my_score INTEGER,` on `bookmarks`, on its own line, no trailing comment (fixture trap, D7)
-- [ ] 2.2 `storage/db.py`: `SCHEMA_VERSION = 3`, `_migration_3_bookmarks_my_score` mirroring migration 2 (`PRAGMA table_info` guard, one `ALTER TABLE`, no backfill), `MIGRATIONS[3]`
-- [ ] 2.3 RED/GREEN `tests/storage/test_migrations.py`: third block mirroring migration 2's — literal-line strip fixture, pre-migration-3 builder at `user_version 2`, "gains the column and keeps rows", "does not invent a score" (NULL stays NULL), fresh DB stamped 3 directly, re-run is a no-op
-- [ ] 2.4 Update `test_migrating_from_zero_applies_all_three_migrations_in_order`: strip the migration-3 line too (today it strips only 1 and 2) and assert **three** migrations — the exact trap: skipping this builds a `user_version 0` DB that already carries the column
-- [ ] 2.5 Confirm the production backup (`docs/runbook-deploy.md` §7) is taken before this slice deploys — manual operator step, not automated
+- [x] 2.1 `storage/schema.sql`: add `my_score INTEGER,` on `bookmarks`, on its own line, no trailing comment (fixture trap, D7)
+- [x] 2.2 `storage/db.py`: `SCHEMA_VERSION = 3`, `_migration_3_bookmarks_my_score` mirroring migration 2 (`PRAGMA table_info` guard, one `ALTER TABLE`, no backfill), `MIGRATIONS[3]`
+- [x] 2.3 RED/GREEN `tests/storage/test_migrations.py`: third block mirroring migration 2's — literal-line strip fixture, pre-migration-3 builder at `user_version 2`, "gains the column and keeps rows", "does not invent a score" (NULL stays NULL), fresh DB stamped 3 directly, re-run is a no-op
+- [x] 2.4 Update `test_migrating_from_zero_applies_all_three_migrations_in_order`: strip the migration-3 line too (today it strips only 1 and 2) and assert **three** migrations — the exact trap: skipping this builds a `user_version 0` DB that already carries the column
+- [ ] 2.5 Confirm the production backup (`docs/runbook-deploy.md` §7) is taken before this slice deploys — manual operator step, not automated (left unchecked: this is a deploy-time operator action, not something `sdd-apply` can perform or verify; `docs/runbook-deploy.md` §7 already documents the required `pre-<motivo>-<timestamp>.db` convention as an uncommitted, pre-existing change on this branch that this batch did not author and left untouched)
 
 ## Slice 3 — `my_score` end to end (~430 lines), branch `feat/panel-v1b-fase-4-my-score`, base PR2 branch
 
