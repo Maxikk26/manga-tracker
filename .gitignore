@@ -140,6 +140,13 @@ $RECYCLE.BIN/
 # Regenerate with: gentle-ai skill-registry refresh --force
 .atl/
 
+# Personal Claude Code settings for this checkout. Holds the Stop hook that
+# pushes this project's memories to a self-hosted Engram cloud — one owner's
+# infrastructure and token, useless and confusing to anyone else, so it is
+# ignored by name rather than by ignoring the whole directory: a shared
+# `.claude/settings.json` remains versionable if one is ever needed.
+.claude/settings.local.json
+
 # =============================================================
 # Editors and IDEs
 # =============================================================
