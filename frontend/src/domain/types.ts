@@ -28,12 +28,20 @@ export interface Bookmark {
   /** When `status` last actually changed. Null for every row that predates the
    *  column — that history is not reconstructible. */
   status_changed_at: string | null;
+  /** 0-10, carried from Kitsu or typed in the panel. Null means unscored — an
+   *  ordinary state, never a zero. */
+  my_score: number | null;
 }
 
 /** Fields the panel is allowed to edit; sent one at a time. */
 export type BookmarkPatch =
   | { last_chapter_read: number }
-  | { status: BookmarkStatus };
+  | { status: BookmarkStatus }
+  /** `null` clears the score (design D1). NOT `my_score?: number`:
+   *  `JSON.stringify` DROPS keys whose value is `undefined`, so an optional
+   *  property would send `{}` and earn a 422 instead of clearing anything.
+   *  `null` survives serialization. */
+  | { my_score: number | null };
 
 /** Wire shape of `POST /api/mangas/preview`'s 200 response (design's
  *  Interfaces block, `AddPreview` echoed as JSON). No write happened yet. */
