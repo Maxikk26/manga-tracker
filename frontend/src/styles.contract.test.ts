@@ -42,4 +42,16 @@ describe("styles.css contract", () => {
     // compound selector above -- only a reintroduced bare rule can match.
     expect(withoutComments).not.toMatch(/(?<!\.card)\.card-saving\s*\{/);
   });
+
+  it("keeps the popover below the add-manga modal (design D2 z-index correction)", () => {
+    // PROTO ports verbatim at z-index 30; `.modal-backdrop` here is 20
+    // (verified at the selector below), so a popover above the add modal
+    // would be a defect, not a detail.
+    const body = ruleBody(/(?:^|[\s,}])\.pop\s*\{([^}]*)\}/);
+    expect(body).toMatch(/z-index:\s*10\b/);
+    expect(body).not.toMatch(/z-index:\s*30\b/);
+
+    const backdropBody = ruleBody(/(?:^|[\s,}])\.modal-backdrop\s*\{([^}]*)\}/);
+    expect(backdropBody).toMatch(/z-index:\s*20\b/);
+  });
 });

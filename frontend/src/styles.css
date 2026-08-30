@@ -364,6 +364,206 @@ body {
   white-space: nowrap;
 }
 
+/* --- Chapter trigger (fase 5 slice 2a) ---
+   Opens the chapter popover; the score trigger still uses the pre-existing
+   inline editor below until slice 2b builds `ScoreEditor`. */
+
+.edit {
+  position: relative;
+  border: 1px dashed transparent;
+  background: none;
+  color: #fff;
+  font: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  /* Horizontal padding is tight on purpose: the widest real pair,
+     "798 / 1181" next to "No puntuado", fitted with zero margin at 0.3rem
+     (measured on PROTO). */
+  padding: 0.16rem 0.22rem;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* >=44px touch target without a 44px-looking control. */
+.edit::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 100%;
+  min-width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.edit:hover {
+  border-color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.edit:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+/* "Approximate" used to be a free-standing "~" glyph, competing for width
+   with the chapter and the score in the one-line meta row (design D13). It
+   is now carried by the number it qualifies, at no extra width. */
+.edit[data-approx] {
+  text-decoration: underline dotted rgba(255, 255, 255, 0.55);
+  text-underline-offset: 3px;
+}
+
+/* Rest label at idle; the full "N / total" ratio on hover/focus, so the
+   total is reachable without a permanent width cost. */
+.chapter-rest {
+  display: inline;
+}
+
+.chapter-full {
+  display: none;
+}
+
+.card:hover .has-total .chapter-rest,
+.card:focus-within .has-total .chapter-rest {
+  display: none;
+}
+
+.card:hover .has-total .chapter-full,
+.card:focus-within .has-total .chapter-full {
+  display: inline;
+}
+
+/* No hover on a phone: show the total permanently there instead of making
+   it unreachable. */
+@media (hover: none) {
+  .has-total .chapter-rest {
+    display: none;
+  }
+  .has-total .chapter-full {
+    display: inline;
+  }
+}
+
+/* ============================================================
+   THE POPOVER (fase 5 slice 2a, design D2) -- one shell for both editors.
+   ============================================================ */
+
+.pop {
+  /* 10, not PROTO's 30 (correction): `.modal-backdrop` is z-index 20
+     (below, "Add-manga modal") -- a popover that outranks the add modal
+     would be a defect. */
+  z-index: 10;
+  min-width: 178px;
+  padding: 0.7rem;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.16);
+  animation: pop 140ms var(--ease-out);
+  transform-origin: top center;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop {
+    animation: none;
+  }
+}
+
+.pop-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.45rem;
+}
+
+.pop-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pop input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 0.34rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.pop input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Stepper: the common edit is "I read one more", and that should not
+   require typing. Commits immediately (design D11) -- there is no save
+   button anywhere in the popover. */
+.pop-step {
+  position: relative;
+  width: 34px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pop-step::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.pop-step:hover {
+  border-color: var(--accent);
+}
+
+.pop-step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pop-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pop-hint {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 /* --- Inline progress edit --- */
 
 .progress-display {
