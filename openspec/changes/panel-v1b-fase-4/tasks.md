@@ -94,20 +94,20 @@ main
 ## Slice 4 — `import-scores` (~430 lines), branch `feat/panel-v1b-fase-4-import-scores`, base PR3 branch
 
 **Parse-time fix + doc, same commit**
-- [ ] 4.1 `importer/export.py`: `ExportEntry.my_score: int | None`; `_entry()` parses `<my_score>`, converts `0` → `None` at parse time
-- [ ] 4.2 Rewrite `tests/importer/test_export.py:160-165` (was `test_the_score_is_not_carried_into_the_domain`): assert `my_score` is now carried and `0` becomes `None`
-- [ ] 4.3 `docs/spec-importador-kitsu.md`: changelog note — V1b reversed decision 5 — in the same commit as 4.1/4.2
+- [x] 4.1 `importer/export.py`: `ExportEntry.my_score: int | None`; `_entry()` parses `<my_score>`, converts `0` → `None` at parse time
+- [x] 4.2 Rewrite `tests/importer/test_export.py:160-165` (was `test_the_score_is_not_carried_into_the_domain`): assert `my_score` is now carried and `0` becomes `None`
+- [x] 4.3 `docs/spec-importador-kitsu.md`: changelog note — V1b reversed decision 5 — in the same commit as 4.1/4.2
 
 **Repository + module**
-- [ ] 4.4 `storage/repositories.py`: `set_bookmark_score(conn, manga_id, my_score, *, now)` — one statement, `UPDATE bookmarks SET my_score=?, updated_at=? WHERE manga_id=? AND my_score IS NULL`, returns `cursor.rowcount`; fill-only-NULL enforced in the WHERE clause, never a Python read-then-write (D6, TOCTOU)
-- [ ] 4.5 Create `importer/scores.py`: `ScoreImportReport` dataclass + `import_scores(export_path, conn, catalogue)` — resolves every id in one chunked-at-12 catalogue call, then fills NULLs; never creates a row
+- [x] 4.4 `storage/repositories.py`: `set_bookmark_score(conn, manga_id, my_score, *, now)` — one statement, `UPDATE bookmarks SET my_score=?, updated_at=? WHERE manga_id=? AND my_score IS NULL`, returns `cursor.rowcount`; fill-only-NULL enforced in the WHERE clause, never a Python read-then-write (D6, TOCTOU)
+- [x] 4.5 Create `importer/scores.py`: `ScoreImportReport` dataclass + `import_scores(export_path, conn, catalogue)` — resolves every id in one chunked-at-12 catalogue call, then fills NULLs; never creates a row
 
 **CLI**
-- [ ] 4.6 `cli.py`: `import-scores` verb mirroring `_cmd_import_kitsu` — read/report the file before a connection or the network; constructs `KitsuCatalogue(UrllibJsonTransport())` directly, never `_bootstrap`; `--dry-run` returns file-only counts and states so explicitly
+- [x] 4.6 `cli.py`: `import-scores` verb mirroring `_cmd_import_kitsu` — read/report the file before a connection or the network; constructs `KitsuCatalogue(UrllibJsonTransport())` directly, never `_bootstrap`; `--dry-run` returns file-only counts and states so explicitly
 
 **Tests — traps first**
-- [ ] 4.7 RED/GREEN `tests/storage/`: `set_bookmark_score` returns `False` and changes nothing on an already-scored row — written to fail if the guard moves into Python
-- [ ] 4.8 `tests/importer/test_scores.py` (new): `0` in file → `NULL`; non-NULL score skipped, not overwritten; unresolved id and manga absent from DB are ordinary skips with distinct counters; second run fills zero; catalogue failure writes nothing
+- [x] 4.7 RED/GREEN `tests/storage/`: `set_bookmark_score` returns `False` and changes nothing on an already-scored row — written to fail if the guard moves into Python
+- [x] 4.8 `tests/importer/test_scores.py` (new): `0` in file → `NULL`; non-NULL score skipped, not overwritten; unresolved id and manga absent from DB are ordinary skips with distinct counters; second run fills zero; catalogue failure writes nothing
 
 ## Final
 - [ ] 5.1 After every slice merges: `uv run pytest -q` and (`cd frontend && npm test && npm run build`) green

@@ -488,6 +488,150 @@ def test_import_kitsu_keeps_the_pending_rows_on_screen_when_the_file_cannot_be_w
     assert "COULD NOT write the pending list" in out
 
 
+# --- import-scores -------------------------------------------------------------
+#
+# Corrective pass (sdd-verify FAIL, panel-v1b-fase-4 slice 4): the CRITICAL gap
+# was the dry-run guarantee having zero covering test at any layer -- verify
+# proved it empirically by moving `connect()` / `KitsuCatalogue(...)` above
+# `read_export` in `_cmd_import_scores` and watching the entire suite stay
+# green. These tests mirror the `import-kitsu` battery above at the same
+# wiring point.
+
+
+def _score_export(tmp_path, *entries):
+    """`entries`: `(external_id, status, score)` triples. `score=None` omits
+    the `<my_score>` tag entirely, matching a real, never-rated entry -- not
+    the export's own zero, which `_score()` folds to `None` at parse time."""
+    body = "".join(
+        "<manga>"
+        f"<manga_mangadb_id>{external_id}</manga_mangadb_id>"
+        f"<my_read_chapters>0</my_read_chapters>"
+        f"<my_status>{status}</my_status>"
+        + (f"<my_score>{score}</my_score>" if score is not None else "")
+        + "</manga>"
+        for external_id, status, score in entries
+    )
+    path = tmp_path / "kitsu-manga.xml"
+    path.write_text(f"<myanimelist><myinfo/>{body}</myanimelist>", encoding="utf-8")
+    return path
+
+
+def test_import_scores_defaults_to_the_mounted_volume_path():
+    """Same default `--file` as `import-kitsu`: the same export feeds both."""
+    args = build_parser().parse_args(["import-scores"])
+
+    assert args.file == "data/kitsu-manga.xml"
+    assert args.dry_run is False
+
+
+def test_import_scores_dry_run_reports_file_counts_and_builds_nothing(tmp_path, monkeypatch, capsys):
+    """THE test that closes the CRITICAL. Resolving costs the same ~38 Kitsu
+    requests as the real run, so validating the file must not open a
+    connection, construct the catalogue, or call `import_scores` -- or nobody
+    will ever validate first. `import_scores` itself is exploded too, not just
+    its two dependencies, so a dry-run that slipped past the early return and
+    called it anyway would be caught here as well."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "KitsuCatalogue", _explode)
+    monkeypatch.setattr(cli, "connect", _explode)
+    monkeypatch.setattr(cli, "import_scores", _explode)
+    export = _score_export(tmp_path, ("1", "Reading", 8), ("2", "Completed", 0), ("3", "On Hold", 6))
+
+    assert main(["import-scores", "--file", str(export), "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert "3 entr(ies) in the export; 2 carry a score." in out
+    assert "Dry run: these are file counts, not resolved matches. Nothing requested, nothing written." in out
+    assert not (tmp_path / "db.sqlite3").exists()
+
+
+def test_import_scores_reads_the_export_before_opening_anything(tmp_path, monkeypatch):
+    """Design D6's ordering guarantee, pinned directly rather than inferred
+    from a failure path: the file is read and reported on FIRST, before a
+    connection is opened or the catalogue is constructed. This is the exact
+    regression `sdd-verify` reproduced by moving `connect()` /
+    `KitsuCatalogue(...)` above `read_export` -- recorded via a shared
+    call-order list so this test goes red if that ordering ever breaks again."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    order: list[str] = []
+    real_read_export = cli.read_export
+
+    def _tracking_read_export(path):
+        order.append("read_export")
+        return real_read_export(path)
+
+    def _tracking_connect(path):
+        order.append("connect")
+        return object()
+
+    def _tracking_catalogue(transport):
+        order.append("KitsuCatalogue")
+        return object()
+
+    monkeypatch.setattr(cli, "read_export", _tracking_read_export)
+    monkeypatch.setattr(cli, "connect", _tracking_connect)
+    monkeypatch.setattr(cli, "KitsuCatalogue", _tracking_catalogue)
+    monkeypatch.setattr(cli, "import_scores", lambda *a, **k: None)
+    export = _score_export(tmp_path, ("1", "Reading", 8))
+
+    assert cli.main(["import-scores", "--file", str(export)]) == 0
+
+    assert order[0] == "read_export"
+    assert order.index("read_export") < order.index("connect")
+    assert order.index("read_export") < order.index("KitsuCatalogue")
+
+
+def test_import_scores_rejects_a_missing_export_before_creating_anything(tmp_path, monkeypatch, capsys):
+    """Half a run is worse than no run: a missing export must leave no
+    database behind to wonder about."""
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "KitsuCatalogue", _explode)
+    monkeypatch.setattr(cli, "connect", _explode)
+    missing = tmp_path / "nope.xml"
+
+    assert main(["import-scores", "--file", str(missing)]) == 1
+
+    out = capsys.readouterr().out
+    assert "Cannot read the export" in out and str(missing) in out
+    assert not (tmp_path / "db.sqlite3").exists()
+
+
+def test_import_scores_reports_a_malformed_export_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
+    from manga_tracker import cli
+
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    monkeypatch.setattr(cli, "connect", _explode)
+    empty = tmp_path / "kitsu-manga.xml"
+    empty.write_text("<myanimelist><myinfo/></myanimelist>", encoding="utf-8")
+
+    assert main(["import-scores", "--file", str(empty)]) == 1
+    assert "zero <manga> entries" in capsys.readouterr().out
+
+
+def test_import_scores_reports_an_unreachable_catalogue_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    """Resolution happens before the first write (design D6, mirroring KIT
+    "Lo primero"), so an unreachable catalogue must leave the database exactly
+    as it found it -- an empty one, never a half-filled one."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite3"))
+    _wire(monkeypatch, FakeCatalogue(error=CatalogueTransient("kitsu.io timed out")), FakeSource())
+    export = _score_export(tmp_path, ("1", "Reading", 8))
+
+    assert main(["import-scores", "--file", str(export)]) == 1
+
+    out = capsys.readouterr().out
+    assert "Import aborted before any score was written" in out
+    assert "kitsu.io timed out" in out
+    conn = connect(str(tmp_path / "db.sqlite3"))
+    assert conn.execute("SELECT COUNT(*) FROM mangas").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0] == 0
+
+
 # --- cache-covers (mapped/terminal dispatch) ------------------------------------
 #
 # `_cmd_cache_covers` splits the requested `--status` values across two routes
