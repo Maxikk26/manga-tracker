@@ -140,3 +140,102 @@ FAIL (blocked by 1 CRITICAL; the WARNING is the same underlying gap and is disch
 Slice 4 (tasks 4.1-4.8) is functionally complete and correctly implements design D6 end to end: the fill-only-NULL guard is genuinely SQL-only (independently reproduced, not taken on the apply agents word), import_scores never inserts, the doc pins are genuinely current, no test reaches the real network, and the language/domain-term contract holds throughout. The backend suite is green at 600/600 (+9 over baseline), and four of five injected breaks were caught cleanly by existing tests.
 
 The one CRITICAL is narrow and mechanical to close: the CLI-level dry-run-costs-nothing guarantee - the same class of guarantee import-kitsu --dry-run already has a dedicated test for - has no covering test for import-scores, and a real ordering regression (exactly the kind task 4.6 own docstring warns about) would ship undetected. This is a missing test, not a code defect; the recommended next step is sdd-apply to add the CLI-level test(s) described in the WARNING (which also discharges the CRITICAL), not to redesign or rewrite any shipped behavior.
+
+---
+
+## Fix Validation - Scoped Correction (commit 388d309)
+
+**Scope**: single bounded validation of the corrective pass that closed the CRITICAL and WARNING from the FAIL verdict above. Not a fresh full review; the settled findings above (D6 read-then-write, export 0 to None, never-overwrites, never-inserts, the four doc pins) were not re-litigated.
+
+```yaml
+schema: gentle-ai.verify-result/v1
+verdict: pass
+blockers: 0
+critical_findings: 0
+warnings: 0
+suggestions: 1
+requirements: 5/5
+scenarios: 8/8
+test_command: ./.venv/Scripts/python.exe -m pytest -q
+test_exit_code: 0
+```
+
+**Corrective commit**: 388d309 - "test(cli): add import-scores battery, closing the dry-run coverage gap", on top of b88f501 (this report). Test-only diff (see item 3).
+
+### 1. CRITICAL - closed
+
+Reproduced the injected break independently on the corrected tree, not taken on trust: moved connect(config.db_path) and KitsuCatalogue(UrllibJsonTransport()) construction in _cmd_import_scores to BEFORE read_export / _report_score_composition / the dry-run check - the exact same break as injected-break #5 above.
+
+Command: ./.venv/Scripts/python.exe -m pytest -q tests/test_cli.py
+
+Result: 4 failed, 25 passed (previously 0 failed against this same break, per injected-break #5 above). Failing tests:
+- test_import_scores_dry_run_reports_file_counts_and_builds_nothing
+- test_import_scores_reads_the_export_before_opening_anything
+- test_import_scores_rejects_a_missing_export_before_creating_anything
+- test_import_scores_reports_a_malformed_export_instead_of_a_traceback
+
+Representative failure (the exploding double, raised from inside _cmd_import_scores at the relocated connect(...) call):
+```
+tests\test_cli.py:598: in test_import_scores_rejects_a_missing_export_before_creating_anything
+    assert main(["import-scores", "--file", str(missing)]) == 1
+manga_tracker\cli.py:190: in _cmd_import_scores
+    conn = connect(config.db_path)
+tests\test_cli.py:332: in _explode
+    raise AssertionError("this run must construct nothing and open nothing")
+```
+
+Reverted with git checkout -- manga_tracker/cli.py; full suite re-confirmed green: 606 passed, 1 warning.
+
+Verdict: CLOSED. The dry-run/ordering guarantee now has a covering test that fails when the guarantee is violated.
+
+### 2. WARNING - closed, with one residual SUGGESTION
+
+The battery covers the four CLI wiring shapes the FAIL report named and mirrors import-kitsu's battery at each: default --file path, missing file, malformed file, unreachable-catalogue-writes-nothing. It adds a fifth test (a direct ordering pin via a shared call-order list) that import-kitsu's own battery does not have as a direct test - only as an injected-break finding.
+
+One gap remains relative to import-kitsu: import-kitsu's battery includes a CLI-level happy-path test (test_import_kitsu_loads_what_it_can_and_writes_the_rest_to_the_pending_list) exercising the real success path end-to-end through the CLI. import-scores's new battery has no analogous test where a real, unmocked import_scores() reaches a temp database and writes a score through main(["import-scores", ...]) - every one of the 6 new tests either mocks import_scores itself, returns before it is called, or exercises only the abort path.
+
+This is not a coverage hole in the sense that matters for regressions: the underlying import_scores() function already has 5 passing tests at the module level (tests/importer/test_scores.py, task 4.8, COMPLIANT in the Spec Compliance Matrix above), including the fill/success case, and the CLI wiring for the success path is a single "report = import_scores(...); return 0" with no further logic to protect. Recorded as a SUGGESTION, not a blocker.
+
+Verdict: CLOSED (the WARNING as stated in the FAIL report is discharged). One SUGGESTION recorded for a future pass.
+
+### 3. Production behaviour unchanged
+
+git diff b88f501 388d309 --stat:
+```
+ tests/test_cli.py | 144 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 144 insertions(+)
+```
+Only tests/test_cli.py changed: 144 insertions, 0 deletions, 0 files under manga_tracker/. No production code touched.
+
+### 4. No real network reachable from the new tests
+
+All 6 new tests inspected individually:
+- test_import_scores_defaults_to_the_mounted_volume_path never calls main().
+- test_import_scores_dry_run_reports_file_counts_and_builds_nothing, ..._reads_the_export_before_opening_anything, ..._rejects_a_missing_export_before_creating_anything, ..._reports_a_malformed_export_instead_of_a_traceback: connect / KitsuCatalogue / import_scores are monkeypatched to exploding or tracking doubles, or the code returns before either is constructed.
+- test_import_scores_reports_an_unreachable_catalogue_and_writes_nothing: KitsuCatalogue is wired to a FakeCatalogue via _wire; the real KitsuCatalogue / UrllibJsonTransport classes are never instantiated.
+
+tests/conftest.py's autouse block_network_sockets fixture (patches socket.socket.connect to raise) is also active across the whole suite as a structural backstop.
+
+Verdict: no test reaches, or can reach, kitsu.io.
+
+### 5. Hollow-test check - the two tests that stay green under the break
+
+test_import_scores_defaults_to_the_mounted_volume_path never calls main(); it only exercises build_parser().parse_args(...), so it cannot be sensitive to _cmd_import_scores's internal ordering by construction. Not hollow - it targets a different layer (argparse defaults) and was never meant to catch this break.
+
+test_import_scores_reports_an_unreachable_catalogue_and_writes_nothing wires a FakeCatalogue(error=CatalogueTransient(...)) and does not mock connect. Re-run against the injected break confirmed it still passes: with the break, connect() and the (faked) KitsuCatalogue are both constructed earlier, but the outcome is identical either way - catalogue.resolve() still raises before any write, the temp database still ends up empty, and the abort message is still printed. The break moves WHEN the real sqlite file is opened, not WHETHER a write happens, so this test's assertions (exit code 1, abort message, empty mangas/bookmarks tables) hold regardless of ordering. That is a legitimate reason, not decoration: this test targets the catalogue-abort behaviour, not the ordering guarantee, and the ordering guarantee is now separately and directly pinned by test_import_scores_reads_the_export_before_opening_anything (which DOES fail under the break, per item 1).
+
+Verdict: the stated reason for the 2 non-discriminating tests is legitimate; not decoration.
+
+### 6. Regression check
+
+Full suite: ./.venv/Scripts/python.exe -m pytest -q -> 606 passed, 1 warning (600 baseline + 6 new import-scores CLI tests).
+tests/test_architecture.py: 6 passed.
+Tree clean after every revert except the pre-existing, out-of-scope " M .gitignore".
+
+Verdict: no regression.
+
+### Fix-Validation Verdict
+
+PASS. Both the CRITICAL and the WARNING from the original FAIL verdict above are closed by commit 388d309. Production behaviour is unchanged (tests-only diff, 144 insertions in tests/test_cli.py, 0 deletions). No test reaches the real network. The two tests that stay green under the injected break have a legitimate, independently verified reason to do so. One non-blocking SUGGESTION recorded: add a CLI-level happy-path test exercising a real import_scores() write through main(["import-scores", ...]), mirroring import-kitsu's ..._loads_what_it_can_and_writes_the_rest_to_the_pending_list.
+
+Recommended next step: sdd-archive.
