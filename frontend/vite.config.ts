@@ -18,6 +18,7 @@ export default defineConfig({
     // automatic DOM cleanup between tests; test files still import
     // describe/it/expect explicitly.
     globals: true,
+    css: true,
     setupFiles: ["src/test/setup.ts"],
     // `e2e/*.spec.ts` are Playwright tests (their own `test()`, not
     // vitest's) and must stay out of the ordinary `npm test` loop — see

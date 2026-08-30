@@ -126,38 +126,52 @@ describe("the cover", () => {
   });
 });
 
-describe("the behind pill", () => {
-  it("shows the count compactly instead of as a sentence", () => {
-    // It fires on 18 of 18 reading rows in production, so as prose it carried
-    // no information and competed with the title.
-    renderCard(makeBookmark({ behind: 7 }));
+describe("the backlog-count pill", () => {
+  // Retired on purpose (design decision 4): it fired on 18 of 18 reading rows
+  // in production, so as a signal it carried no information. This guard
+  // exists so nobody restores it later thinking its absence is a regression
+  // -- recoverable only from git history if it is ever reconsidered.
+  it("never renders, at any backlog size", () => {
+    renderCard(makeBookmark({ behind: 50 }));
 
-    expect(screen.getByText("+7")).toBeInTheDocument();
-    expect(screen.queryByText(/atrasado/i)).not.toBeInTheDocument();
+    expect(document.querySelector(".behind-pill")).not.toBeInTheDocument();
   });
+});
 
-  it("never shows a floating point tail", () => {
-    // Real production value: chapter 32.2 minus 11 is 21.200000000000003 in
-    // IEEE 754, and it reached the panel verbatim.
-    renderCard(makeBookmark({ behind: 21.200000000000003 }));
-
-    expect(screen.getByText("+21")).toBeInTheDocument();
-    expect(screen.queryByText(/\.\d/)).not.toBeInTheDocument();
-  });
-
-  it("keeps the exact value one hover away", () => {
-    renderCard(makeBookmark({ behind: 21.5 }));
-    expect(screen.getByTitle("21.5 sin leer")).toBeInTheDocument();
-  });
-
-  it("is absent when behind is 0", () => {
+describe("the caught-up fade and its chip", () => {
+  it("marks a caught-up card done and shows the Al día chip outside Todo", () => {
     renderCard(makeBookmark({ behind: 0 }));
-    expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();
+
+    expect(document.querySelector(".card")).toHaveAttribute("data-done");
+    expect(screen.getByText("Al día")).toBeInTheDocument();
   });
 
-  it("is absent when behind is null", () => {
-    renderCard(makeBookmark({ behind: null }));
-    expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();
+  it("shows neither the fade nor the chip while behind", () => {
+    renderCard(makeBookmark({ behind: 5 }));
+
+    expect(document.querySelector(".card")).not.toHaveAttribute("data-done");
+    expect(screen.queryByText("Al día")).not.toBeInTheDocument();
+  });
+
+  it("shows the status pill instead of Al día when showStatus is set, even caught up", () => {
+    const onChangeProgress = vi.fn();
+    const onChangeStatus = vi.fn();
+    const onChangeScore = vi.fn();
+    render(
+      <BookmarkCard
+        bookmark={makeBookmark({ behind: 0, status: "dropped" })}
+        saving={false}
+        showStatus
+        onChangeProgress={onChangeProgress}
+        onChangeStatus={onChangeStatus}
+        onChangeScore={onChangeScore}
+      />,
+    );
+
+    // Not `getByText`: the status `<select>` (task 1.4) also renders an
+    // "Abandonado" option, so the chip is asserted by its own selector.
+    expect(document.querySelector(".chip-status")).toHaveTextContent("Abandonado");
+    expect(screen.queryByText("Al día")).not.toBeInTheDocument();
   });
 });
 
