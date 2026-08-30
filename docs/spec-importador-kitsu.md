@@ -1,6 +1,8 @@
 # Spec: Importador de Kitsu — manga-tracker V1a
 
-Versión 1.6 — 2026-08-04. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.9), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.9), de `spec-seed-manual.md` (v2.4) y de `manganato-fuente-actual.md` (v1.4).
+Versión 1.7 — 2026-08-30. Documento 6 del paquete SDD. Depende de `spec-modelo-de-datos.md` (v1.9), de la operación `fetch_chapters` de `spec-cliente-fuente-descubrimiento.md` (v1.9), de `spec-seed-manual.md` (v2.4) y de `manganato-fuente-actual.md` (v1.4). Pines revisados contra sus versiones vigentes al cerrar esta revisión — los cuatro siguen exactos, ninguno quedó atrasado.
+
+Cambios vs 1.6: **la decisión 5 queda revertida** (`docs/spec-panel-v1b.md` §171-175, `panel-v1b-fase-4`, slice `import-scores`). V1b agregó `bookmarks.my_score` (migración 3) para que el panel muestre y edite la puntuación, y el dato ya estaba en este mismo export sin usarse — dejarlo descartado dejaba de tener sentido en cuanto existió la columna. `ExportEntry.my_score` ahora se llena desde `<my_score>`, con el `0` del export (que Kitsu escribe para "sin puntuar") traducido a `None` en el parseo: el cero del archivo y el cero que el panel sí permite guardar significan cosas distintas, y el importador no puede dejar pasar el primero como si fuera el segundo. La carga corre aparte, en el subcomando `import-scores` (`docs/spec-panel-v1b.md`, `design.md` de `panel-v1b-fase-4` D6): resuelve cada id contra el catálogo, igual que este import, y llena solo los bookmarks con `my_score` todavía nulo — nunca pisa una puntuación que ya exista, ahí haya llegado por este importador o por el panel. La sección "El archivo" y "Pendientes abiertos" quedan corregidas más abajo; el resto de este documento, incluida la carga que describe `_cmd_import_kitsu`, no cambia.
 
 Cambios vs 1.5: pin actualizado a la v1.4 de `manganato-fuente-actual.md`, y **la fila de corrección que apuntaba a ese documento queda cerrada**: la afirmación que corregía ya no existe allá, y la fuente resultó dar más metadata de la que ese documento decía, no menos. Ninguna decisión de este spec cambia.
 
@@ -28,7 +30,8 @@ Si solo lees esta sección, ya sabes qué hace el importador y qué te va a cost
 | **Cómo se encuentra el slug** | Por **membresía en el sitemap** de manganato, no sondeando. **149/152 (98%)** | §Matching |
 | **Cuánto trabajo manual te queda** | **3 URLs a pegar a mano**, más 2 entradas sin mapping en Kitsu | §La lista de pendientes |
 | **Cuánto tarda** | ~13 a 37 minutos, y **casi todo es el delay de cortesía**: `fetch_chapters` más los 10 shards del sitemap, que tampoco están exentos | §Costo total |
-| **Qué se guarda de menos** | `my_score` y el id de MAL: no tienen columna y agregarla obliga a migrar. **Reversible**, el XML se conserva | Decisiones 1 y 5 |
+| **Qué se guarda de menos** | El id de MAL: no tiene columna propia y agregarla obliga a migrar una tabla poblada. **Reversible**, el XML se conserva | Decisión 1 |
+| **`my_score`** | **Se carga desde v1.7** (decisión 5, revertida): `bookmarks.my_score`, NULL = sin puntuar, el `0` del export se traduce a `None`. La carga es un subcomando aparte, `import-scores`, que solo llena bookmarks todavía sin puntuar | §El archivo, `spec-panel-v1b.md` §171-175 |
 | **Qué queda nulo** | `last_read_at` salvo en 28 terminados, donde se escribe a **medianoche UTC**. El export no tiene fecha de última lectura y `my_start_date` es otra cosa | §El archivo |
 | **Cómo no duplica lo ya cargado** | Reconcilia por **tres llaves en orden**: `kitsu_id`, slug, título exacto. La v1.0 usaba solo `kitsu_id`, que el seed nunca escribe — habría duplicado tus 16 títulos | §Reconciliación |
 | **Qué título guarda** | El primer candidato **legible** de la lista ordenada del catálogo, no el canónico: ese es romaji y dejó un tercio del primer import ilegible | §Qué título se guarda |
@@ -61,7 +64,7 @@ Esto corrige tres afirmaciones vigentes en el paquete, que asumían que la metad
 2. **El progreso de Kitsu nunca pisa un bookmark del seed.** No es decisión nueva: es la regla dura de `bookmarks.origin` del modelo de datos. Se repite aquí porque es lo que hace seguro re-correr el import con la base ya poblada.
 3. **El match de slug se resuelve por membresía en el sitemap, no sondeando la fuente.** Ver la sección de resolución. Cambia 152 requests con delay por 10.
 4. **Un match encontrado se verifica antes de aceptarse.** La membresía prueba que el slug existe, no que sea el manga correcto. La verificación sale casi gratis porque el import ya tiene que llamar a `fetch_chapters`.
-5. **`my_score` se descarta en V1a.** No tiene columna, y agregarla es el mismo problema de migración del punto 1. Reversible por la misma razón: el XML se conserva.
+5. **`my_score` se descarta en V1a — SUPERADO en v1.7, por `panel-v1b-fase-4`.** Razonamiento original, conservado por contexto: no tenía columna, y agregarla era el mismo problema de migración del punto 1; reversible porque el XML se conserva. Eso es exactamente lo que pasó — V1b abrió la migración 3, agregó `bookmarks.my_score` y el dato pasó de descartarse a cargarse por un subcomando aparte (`import-scores`), sin tocar `_cmd_import_kitsu` ni esta decisión sobre el id de MAL.
 6. **El catálogo va detrás de un contrato, igual que la fuente.** Kitsu es la implementación de hoy, no una dependencia estructural. Ver la sección siguiente.
 7. **La reconciliación con el seed se resuelve por tres llaves en orden, no por `kitsu_id` solo.** Ver la sección siguiente a esa. Es la decisión que evita duplicar los 16 títulos que ya están cargados.
 
@@ -207,7 +210,7 @@ Estructura, medida sobre el export real (218 entradas):
 | `my_status` | 218/218 | `bookmarks.status`, por la tabla de mapeo |
 | `my_start_date` | 214/218 | **No se usa.** Es fecha de inicio, no de última lectura |
 | `my_finish_date` | 29/218 | `bookmarks.last_read_at`, solo en terminados. Ver abajo |
-| `my_score` | 20/218 | Se descarta (decisión 5) |
+| `my_score` | 20/218 | `bookmarks.my_score` (decisión 5, revertida en v1.7); el `0` del export significa "sin puntuar" y se traduce a `NULL`, nunca a un cero guardado — cargado por `import-scores`, no por `_cmd_import_kitsu` |
 | `my_read_volumes`, `my_times_read`, `update_on_import` | 218/218 | Sin uso |
 
 **`last_read_at` no se puede llenar en general, y se deja nulo.** El modelo de datos dice que "el import trae la última actividad de Kitsu como aproximación"; el export **no tiene ese campo**. `my_start_date` es cuándo empecé, que es un dato distinto y escribirlo ahí sería mentir. La única excepción honesta es `my_finish_date`: en un manga terminado, la fecha de fin **es** la de la última lectura.
@@ -376,6 +379,6 @@ Re-correr después de rellenar pendientes cuesta una llamada por entrada nueva y
 
 ## Pendientes abiertos
 
-- **`my_score` se pierde en V1a.** Recuperable desde el XML si V1b decide agregarle columna.
+- ~~**`my_score` se pierde en V1a.** Recuperable desde el XML si V1b decide agregarle columna.~~ → **Cerrado en v1.7**: V1b (`panel-v1b-fase-4`) agregó `bookmarks.my_score` (migración 3) y un subcomando aparte, `import-scores`, lo carga desde este mismo archivo — resuelve por catálogo igual que `_cmd_import_kitsu` y llena solo los bookmarks todavía sin puntuar.
 - **La verificación por conteo de capítulos no es exhaustiva.** Dos mangas parecidos con progresos parecidos pueden cruzarse. Se acepta: el barrido diario expondría el error como un contador de fallos o como un número de capítulo que no avanza.
 - **No se importa nada de anime.** El export es `user_export_type=2`, solo manga. Fuera de alcance de este producto.

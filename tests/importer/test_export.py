@@ -157,11 +157,33 @@ def test_the_start_date_is_read_by_nothing():
     assert '"my_start_date"' not in source
 
 
-def test_the_score_is_not_carried_into_the_domain():
-    """KIT decision 5: no column, and adding one to a populated table has no
-    migration path in V1a. The XML is kept, so the loss is reversible."""
-    assert not hasattr(read_export(SMALL_EXPORT)[0], "my_score")
-    assert "score" not in {field for field in ExportEntry.__dataclass_fields__}
+def test_the_score_is_now_carried_into_the_domain():
+    """KIT decision 5, reversed by panel-v1b-fase-4: `bookmarks.my_score`
+    exists now (migration 3), so the field is no longer thrown away here."""
+    assert "my_score" in ExportEntry.__dataclass_fields__
+
+    entries = _by_id(read_export(SMALL_EXPORT))
+    assert entries["146982"].my_score == 9
+    assert entries["300"].my_score == 10
+
+
+def test_an_export_zero_score_becomes_none_not_zero():
+    """The export writes 0 for "never rated"; the panel's own storable zero
+    is a different fact, so the importer must never confuse the two."""
+    entries = _by_id(read_export(SMALL_EXPORT))
+
+    for external_id in ("200", "500", "400", "600"):  # all <my_score>0</my_score> in the fixture
+        assert entries[external_id].my_score is None
+
+
+def test_a_non_numeric_score_is_a_hard_error_naming_the_value():
+    with pytest.raises(ExportError) as excinfo:
+        parse_export(
+            _one(manga_mangadb_id="9", my_read_chapters="1", my_status="Reading", my_score="great")
+        )
+
+    assert "non-numeric" in str(excinfo.value)
+    assert "great" in str(excinfo.value)
 
 
 # --- progress and the id ----------------------------------------------------

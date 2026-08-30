@@ -46,18 +46,23 @@ class ExportError(Exception):
 
 @dataclass(frozen=True)
 class ExportEntry:
-    """One `<manga>` entry, reduced to what V1a stores.
+    """One `<manga>` entry, reduced to what the importers store.
 
-    `my_score` and `my_start_date` are deliberately absent, not overlooked:
-    the score has no column (KIT decision 5) and the start date is when I
-    began reading, which is a different fact from the last read and would be
-    a lie in `bookmarks.last_read_at` (KIT Seccion "El archivo").
+    `my_start_date` is deliberately absent, not overlooked: it is when I began
+    reading, a different fact from the last read, and would be a lie in
+    `bookmarks.last_read_at` (KIT Seccion "El archivo").
+
+    `my_score` reverses KIT decision 5 (panel-v1b-fase-4, design D6): the
+    export writes `0` for "never rated", which is translated to `None` right
+    here, at parse time -- the file's zero and the panel's own storable zero
+    mean different things, and no later layer may see the file's zero at all.
     """
 
     external_id: str  # the MAL id: resolution input only, never stored
     status: str  # already mapped to the bookmarks vocabulary
     last_chapter_read: float
     last_read_at: str | None  # midnight UTC, terminal entries with a date only
+    my_score: int | None  # export scale 0-10; a 0 in the file becomes None
 
     @property
     def is_terminal(self) -> bool:
@@ -126,7 +131,24 @@ def _entry(node: ET.Element, position: int) -> ExportEntry:
             if status in TERMINAL_STATUSES
             else None
         ),
+        my_score=_score(node, position, external_id),
     )
+
+
+def _score(node: ET.Element, position: int, external_id: str) -> int | None:
+    """The export's `0` means "never rated", not a real zero (KIT decision 5,
+    reversed by panel-v1b-fase-4): translated to `None` right here, so no
+    later layer ever has to tell the two apart."""
+    raw = _text(node, "my_score")
+    if raw is None:
+        return None
+    try:
+        score = int(raw)
+    except ValueError as exc:
+        raise ExportError(
+            f"entry {position} (id {external_id}) has non-numeric <my_score> {raw!r}"
+        ) from exc
+    return score or None
 
 
 def _midnight_utc(raw: str | None, position: int, external_id: str) -> str | None:
