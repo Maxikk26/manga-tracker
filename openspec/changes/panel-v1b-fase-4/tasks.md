@@ -74,22 +74,22 @@ main
 ## Slice 3 — `my_score` end to end (~430 lines), branch `feat/panel-v1b-fase-4-my-score`, base PR2 branch
 
 **Repository**
-- [ ] 3.1 `storage/repositories.py`: add `my_score` to `_PANEL_BOOKMARK_SELECT` + `_panel_bookmark_row`
-- [ ] 3.2 `storage/repositories.py`: `update_panel_bookmark` gains `my_score=UNSET`; `if my_score is not UNSET: assignments.append("my_score = ?")` — comment stating `None` is a legal value here, never test for it (D1)
-- [ ] 3.3 RED/GREEN `tests/storage/`: `update_panel_bookmark(my_score=None)` writes SQL NULL; `my_score=UNSET` leaves the column untouched; a score-only edit writes **zero** `reading_history` rows. Write the assertion so it fails if `is not UNSET` is swapped for `is not None`
+- [x] 3.1 `storage/repositories.py`: add `my_score` to `_PANEL_BOOKMARK_SELECT` + `_panel_bookmark_row`
+- [x] 3.2 `storage/repositories.py`: `update_panel_bookmark` gains `my_score=UNSET`; `if my_score is not UNSET: assignments.append("my_score = ?")` — comment stating `None` is a legal value here, never test for it (D1)
+- [x] 3.3 RED/GREEN `tests/storage/`: `update_panel_bookmark(my_score=None)` writes SQL NULL; `my_score=UNSET` leaves the column untouched; a score-only edit writes **zero** `reading_history` rows. Write the assertion so it fails if `is not UNSET` is swapped for `is not None`
 
 **API**
-- [ ] 3.4 `web/app.py`: `BookmarkPatch.my_score: int | None = Field(default=None, ge=0, le=10)`; `_check_presence` gains **no** null-rejection clause for `my_score` (D2); fix the stale class docstring and error string, both currently implying only progress/status exist
-- [ ] 3.5 `web/app.py patch_bookmark`: `my_score=patch.my_score if "my_score" in fields else UNSET` — byte-for-byte shape of the two existing lines
-- [ ] 3.6 `tests/web/test_panel_api.py`: three-way contract — `{"my_score":7}` sets, `{"my_score":null}` clears, key absent leaves it alone; `11`, `-1`, `7.5` are 422; `{}` still 422; list payload and PATCH response both carry the field; clearing writes no `reading_history` row
+- [x] 3.4 `web/app.py`: `BookmarkPatch.my_score: int | None = Field(default=None, ge=0, le=10)`; `_check_presence` gains **no** null-rejection clause for `my_score` (D2); fix the stale class docstring and error string, both currently implying only progress/status exist
+- [x] 3.5 `web/app.py patch_bookmark`: `my_score=patch.my_score if "my_score" in fields else UNSET` — byte-for-byte shape of the two existing lines
+- [x] 3.6 `tests/web/test_panel_api.py`: three-way contract — `{"my_score":7}` sets, `{"my_score":null}` clears, key absent leaves it alone; `11`, `-1`, `7.5` are 422; `{}` still 422; list payload and PATCH response both carry the field; clearing writes no `reading_history` row
 
 **Frontend**
-- [ ] 3.7 `frontend/src/domain/types.ts`: `Bookmark.my_score: number | null`; `BookmarkPatch` third variant `{ my_score: number | null }` — **not** `my_score?: number` (D3: `JSON.stringify` drops `undefined` keys)
-- [ ] 3.8 `frontend/src/components/InlineNumberEdit.tsx`: additive `max?: number` (validated like `min`) and `onClear?: () => void` — **not** a widened `onCommit` (D4: `strictFunctionTypes` breaking-change trap); `onClear`'s absence keeps `last_chapter_read`'s blank-blur no-op unchanged
-- [ ] 3.9 `frontend/src/components/BookmarkCard.tsx`: second `InlineNumberEdit` for the score, plainly placed — no new CSS, class, size or colour decision (hard constraint)
-- [ ] 3.10 `frontend/src/containers/BookmarkListContainer.tsx`: `onChangeScore(id, value | null)` → `patchBookmark`
-- [ ] 3.11 `InlineNumberEdit.test.tsx`: `max` rejects an over-range commit; without `onClear` a blank blur stays a no-op; with it, a blank blur calls `onClear` exactly once
-- [ ] 3.12 `BookmarkCard.test.tsx`, `BookmarkListContainer.test.tsx`: score renders `—` when null; editing sends `{my_score:n}`; clearing sends `{"my_score":null}` and **not** `{}` — assert the serialized `JSON.stringify` body, not the mock call
+- [x] 3.7 `frontend/src/domain/types.ts`: `Bookmark.my_score: number | null`; `BookmarkPatch` third variant `{ my_score: number | null }` — **not** `my_score?: number` (D3: `JSON.stringify` drops `undefined` keys)
+- [x] 3.8 `frontend/src/components/InlineNumberEdit.tsx`: additive `max?: number` (validated like `min`) and `onClear?: () => void` — **not** a widened `onCommit` (D4: `strictFunctionTypes` breaking-change trap); `onClear`'s absence keeps `last_chapter_read`'s blank-blur no-op unchanged
+- [x] 3.9 `frontend/src/components/BookmarkCard.tsx`: second `InlineNumberEdit` for the score, plainly placed — no new CSS, class, size or colour decision (hard constraint)
+- [x] 3.10 `frontend/src/containers/BookmarkListContainer.tsx`: `onChangeScore(id, value | null)` → `patchBookmark`
+- [x] 3.11 `InlineNumberEdit.test.tsx`: `max` rejects an over-range commit; without `onClear` a blank blur stays a no-op; with it, a blank blur calls `onClear` exactly once
+- [x] 3.12 `BookmarkCard.test.tsx`, `BookmarkListContainer.test.tsx`: score renders `—` when null; editing sends `{my_score:n}`; clearing sends `{"my_score":null}` and **not** `{}` — assert the serialized `JSON.stringify` body, not the mock call
 
 ## Slice 4 — `import-scores` (~430 lines), branch `feat/panel-v1b-fase-4-import-scores`, base PR3 branch
 
