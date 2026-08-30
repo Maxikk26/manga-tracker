@@ -23,7 +23,7 @@ NOW = "2026-08-17T12:00:00Z"
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
     "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind",
-    "last_read_at", "status_changed_at",
+    "last_read_at", "status_changed_at", "my_score",
 }
 
 
@@ -65,7 +65,7 @@ def _site(conn) -> int:
 def _bookmark(
     conn, site_id, title, *, status="reading", last_chapter_read=None, progress_is_approx=0,
     url=None, latest_chapter_num=None, latest_chapter_url=None, latest_chapter_at=None,
-    mapped=True,
+    mapped=True, my_score=None,
 ):
     """One manga + mapping + bookmark, returning (manga_id, bookmark_id)."""
     manga_id = conn.execute(
@@ -81,9 +81,9 @@ def _bookmark(
              latest_chapter_num, latest_chapter_url, latest_chapter_at, NOW, NOW),
         )
     bookmark_id = conn.execute(
-        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, progress_is_approx, origin, "
-        "created_at, updated_at) VALUES (?, ?, ?, ?, 'seed', ?, ?)",
-        (manga_id, status, last_chapter_read, progress_is_approx, NOW, NOW),
+        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, progress_is_approx, my_score, "
+        "origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'seed', ?, ?)",
+        (manga_id, status, last_chapter_read, progress_is_approx, my_score, NOW, NOW),
     ).lastrowid
     conn.commit()
     return manga_id, bookmark_id
@@ -191,6 +191,19 @@ def test_manga_url_is_served_for_a_mapped_title_with_no_detection_yet(client, db
 
     assert body[0]["manga_url"] == "https://www.manganato.gg/manga/just-added"
     assert body[0]["latest_chapter_url"] is None
+
+
+def test_list_includes_my_score_for_scored_and_unscored_rows(client, db_path):
+    """Spec scenario "Unscored and scored rows both carry the field"."""
+    conn = connect(db_path)
+    site_id = _site(conn)
+    _bookmark(conn, site_id, "Scored", my_score=8)
+    _bookmark(conn, site_id, "Unscored", my_score=None)
+
+    body = client.get("/api/bookmarks").json()
+
+    by_title = {item["title"]: item["my_score"] for item in body}
+    assert by_title == {"Scored": 8, "Unscored": None}
 
 
 def test_list_filters_by_status(client, db_path):
@@ -381,6 +394,58 @@ def test_patch_progress_on_an_already_terminal_bookmark_still_records(client, db
     assert _history(conn, manga_id) == [(1001.0, 1000.0, "panel")]
 
 
+# --- PATCH /api/bookmarks/{id}: my_score (panel-v1b-fase-4 design D1/D2) ----------
+
+
+def test_patch_sets_the_score(client, db_path):
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece", my_score=None)
+
+    body = client.patch(f"/api/bookmarks/{bookmark_id}", json={"my_score": 7}).json()
+
+    assert body["my_score"] == 7
+    assert conn.execute(
+        "SELECT my_score FROM bookmarks WHERE id = ?", (bookmark_id,)
+    ).fetchone()[0] == 7
+
+
+def test_patch_clears_the_score(client, db_path):
+    """`null` is a legal wire value for `my_score` alone -- the field the
+    presence validator does not forbid it for (design D2)."""
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece", my_score=6)
+
+    body = client.patch(f"/api/bookmarks/{bookmark_id}", json={"my_score": None}).json()
+
+    assert body["my_score"] is None
+    assert conn.execute(
+        "SELECT my_score FROM bookmarks WHERE id = ?", (bookmark_id,)
+    ).fetchone()[0] is None
+
+
+def test_patch_leaves_the_score_untouched_when_the_key_is_absent(client, db_path):
+    conn = connect(db_path)
+    _, bookmark_id = _bookmark(conn, _site(conn), "One Piece", my_score=4)
+
+    body = client.patch(f"/api/bookmarks/{bookmark_id}", json={"status": "on_hold"}).json()
+
+    assert body["my_score"] == 4
+
+
+def test_patch_clearing_the_score_writes_no_reading_history_row(client, db_path):
+    """Unlike `last_chapter_read`, `my_score` feeds nothing but the list --
+    clearing it, alone, must not fabricate a reading event (design's
+    "Clearing a score never writes reading_history" requirement)."""
+    conn = connect(db_path)
+    manga_id, bookmark_id = _bookmark(
+        conn, _site(conn), "One Piece", my_score=4, last_chapter_read=10.0
+    )
+
+    assert client.patch(f"/api/bookmarks/{bookmark_id}", json={"my_score": None}).status_code == 200
+
+    assert _history(conn, manga_id) == []
+
+
 def test_patch_unknown_bookmark_is_404(client, db_path):
     connect(db_path).close()  # bootstrap the schema; the table is just empty
     response = client.patch("/api/bookmarks/999", json={"last_chapter_read": 1})
@@ -398,6 +463,9 @@ def test_patch_unknown_bookmark_is_404(client, db_path):
         {"status": "binged"},  # outside the enum
         {"status": None},
         {"latest_chapter_num": 99},  # unknown field: the source columns are not editable
+        {"my_score": 11},  # above the closed 0-10 range
+        {"my_score": -1},  # below zero
+        {"my_score": 7.5},  # fractional; the field is a strict int
     ],
 )
 def test_patch_rejects_an_invalid_body_with_422(client, db_path, body):

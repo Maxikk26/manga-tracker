@@ -1,11 +1,16 @@
 """Direct repository-function tests that don't fit the higher-level suites:
-the stored-url cover candidate query (panel-v1b-fase-4 design D5) and the
-`TERMINAL_STATUSES` parity guard (design D8).
+the stored-url cover candidate query (panel-v1b-fase-4 design D5), the
+`TERMINAL_STATUSES` parity guard (design D8), and `update_panel_bookmark`'s
+`my_score` sentinel handling (design D1).
 """
 
 from manga_tracker.importer.export import TERMINAL_STATUSES as EXPORT_TERMINAL_STATUSES
 from manga_tracker.storage.db import connect
-from manga_tracker.storage.repositories import TERMINAL_STATUSES, list_stored_url_cover_candidates
+from manga_tracker.storage.repositories import (
+    TERMINAL_STATUSES,
+    list_stored_url_cover_candidates,
+    update_panel_bookmark,
+)
 from manga_tracker.web.app import TERMINAL_STATUSES as APP_TERMINAL_STATUSES
 
 NOW = "2026-08-25T00:00:00Z"
@@ -110,3 +115,64 @@ def test_list_stored_url_cover_candidates_excludes_non_terminal_statuses(tmp_pat
     conn.close()
 
     assert rows == []
+
+
+# --- update_panel_bookmark: my_score (panel-v1b-fase-4 design D1) -----------------
+
+
+def _seed_scored_bookmark(tmp_path, name, *, my_score=None, last_chapter_read=None):
+    conn = connect(str(tmp_path / f"{name}.db"))
+    manga_id = conn.execute(
+        "INSERT INTO mangas (title, created_at, updated_at) VALUES (?, ?, ?)",
+        ("Scored Manga", NOW, NOW),
+    ).lastrowid
+    bookmark_id = conn.execute(
+        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, my_score, origin, "
+        "created_at, updated_at) VALUES (?, 'reading', ?, ?, 'seed', ?, ?)",
+        (manga_id, last_chapter_read, my_score, NOW, NOW),
+    ).lastrowid
+    conn.commit()
+    return conn, manga_id, bookmark_id
+
+
+def _my_score(conn, bookmark_id):
+    return conn.execute("SELECT my_score FROM bookmarks WHERE id = ?", (bookmark_id,)).fetchone()[0]
+
+
+def _reading_history_count(conn, manga_id):
+    return conn.execute(
+        "SELECT COUNT(*) FROM reading_history WHERE manga_id = ?", (manga_id,)
+    ).fetchone()[0]
+
+
+def test_update_panel_bookmark_my_score_none_writes_sql_null(tmp_path):
+    conn, _manga_id, bookmark_id = _seed_scored_bookmark(tmp_path, "clear", my_score=7)
+
+    assert update_panel_bookmark(conn, bookmark_id, my_score=None, now=NOW) is True
+
+    assert _my_score(conn, bookmark_id) is None
+
+
+def test_update_panel_bookmark_leaves_my_score_untouched_when_the_argument_is_omitted(tmp_path):
+    """`my_score` defaults to `UNSET`, a sentinel distinct from `None`. If the
+    repository's guard is ever weakened from `is not UNSET` to `is not None`,
+    this default (`UNSET`, which very much `is not None`) would be bound
+    straight into the SQL parameter list — and `sqlite3` refuses to bind a
+    bare `object()`, so the swap fails loudly here rather than silently
+    dropping every un-nulled score (design D1)."""
+    conn, _manga_id, bookmark_id = _seed_scored_bookmark(tmp_path, "untouched", my_score=5)
+
+    assert update_panel_bookmark(conn, bookmark_id, now=NOW) is True
+
+    assert _my_score(conn, bookmark_id) == 5
+
+
+def test_update_panel_bookmark_my_score_only_edit_writes_no_reading_history(tmp_path):
+    conn, manga_id, bookmark_id = _seed_scored_bookmark(
+        tmp_path, "no-history", my_score=None, last_chapter_read=10.0
+    )
+
+    update_panel_bookmark(conn, bookmark_id, my_score=8, now=NOW)
+
+    assert _my_score(conn, bookmark_id) == 8
+    assert _reading_history_count(conn, manga_id) == 0

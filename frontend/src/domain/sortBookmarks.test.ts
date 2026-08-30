@@ -23,6 +23,7 @@ function bookmark(
     behind: null,
     last_read_at,
     status_changed_at,
+    my_score: null,
   };
 }
 

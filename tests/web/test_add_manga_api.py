@@ -25,7 +25,7 @@ NOW = "2026-08-19T12:00:00Z"
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
     "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind",
-    "last_read_at", "status_changed_at",
+    "last_read_at", "status_changed_at", "my_score",
 }
 
 _PREVIEW = AddPreview(

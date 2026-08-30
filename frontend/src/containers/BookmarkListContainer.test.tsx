@@ -8,7 +8,7 @@ import type { Bookmark } from "../domain/types";
 // Realistic wire payload: a plain row, a never-read row (nulls) and an
 // approx-progress row — the shapes that broke the first implementation.
 const payload: Bookmark[] = [
-  makeBookmark({ id: 1, title: "One Piece", last_chapter_read: 1100, behind: 2 }),
+  makeBookmark({ id: 1, title: "One Piece", last_chapter_read: 1100, behind: 2, my_score: 5 }),
   makeBookmark({
     id: 2,
     title: "Berserk",
@@ -57,10 +57,11 @@ describe("BookmarkListContainer", () => {
     expect(screen.getByText("Berserk")).toBeInTheDocument();
     expect(screen.getByText("Vagabond")).toBeInTheDocument();
 
-    // The never-read row shows an em dash, not "null" or 0.
+    // The never-read row shows an em dash, not "null" or 0. Index 0: the
+    // progress editor is rendered before the score editor.
     const berserkCard = screen.getByText("Berserk").closest("article")!;
     expect(
-      within(berserkCard).getByTitle(/haz clic para editar/i),
+      within(berserkCard).getAllByTitle(/haz clic para editar/i)[0],
     ).toHaveTextContent("—");
     expect(within(berserkCard).queryByText(/null/)).not.toBeInTheDocument();
 
@@ -75,7 +76,7 @@ describe("BookmarkListContainer", () => {
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    await user.click(within(card).getByTitle(/haz clic para editar/i));
+    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[0]);
     const input = within(card).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "1105{Enter}");
@@ -90,6 +91,42 @@ describe("BookmarkListContainer", () => {
     // The list is refetched after a successful PATCH: initial GET + refetch.
     const gets = fetchMock.mock.calls.filter(([, init]) => !init?.method);
     expect(gets).toHaveLength(2);
+  });
+
+  it("PATCHes {my_score: n} on an inline score edit", async () => {
+    const fetchMock = stubFetch();
+    const user = userEvent.setup();
+    render(<BookmarkListContainer />);
+
+    const card = (await screen.findByText("One Piece")).closest("article")!;
+    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[1]);
+    const input = within(card).getByRole("spinbutton");
+    await user.clear(input);
+    await user.type(input, "9{Enter}");
+
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    // Assert the actual serialized bytes `patchBookmark` sent, not merely
+    // that `fetch` was called with *some* matching object -- that is the
+    // only way a regression to `my_score?: number` (D3) would show: an
+    // `undefined` value there still lets a loose object-shape check pass,
+    // but `JSON.stringify` would have already dropped the key.
+    expect(patchCall?.[1]?.body).toBe(JSON.stringify({ my_score: 9 }));
+  });
+
+  it("clearing the score sends {\"my_score\":null}, never {} (D3: JSON.stringify drops undefined keys)", async () => {
+    const fetchMock = stubFetch();
+    const user = userEvent.setup();
+    render(<BookmarkListContainer />);
+
+    const card = (await screen.findByText("One Piece")).closest("article")!;
+    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[1]);
+    const input = within(card).getByRole("spinbutton");
+    await user.clear(input);
+    await user.tab();
+
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(patchCall?.[1]?.body).toBe(JSON.stringify({ my_score: null }));
+    expect(patchCall?.[1]?.body).not.toBe("{}");
   });
 
   it("shows the Spanish error state when the fetch fails", async () => {

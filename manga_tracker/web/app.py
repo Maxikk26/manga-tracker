@@ -152,26 +152,36 @@ def _source_error(exc: Exception) -> HTTPException:
 
 
 class BookmarkPatch(BaseModel):
-    """Body of PATCH /api/bookmarks/{id}: progress and/or status, at least one.
+    """Body of PATCH /api/bookmarks/{id}: progress, status and/or score, at
+    least one.
 
-    Both fields are optional but neither may be null when present: NULLing
-    progress back out is not a panel operation, and "absent" is expressed by
-    omitting the key. `model_fields_set` is what tells the two apart.
+    `last_chapter_read` and `status` are optional but neither may be null when
+    present: NULLing progress back out is not a panel operation, and "absent"
+    is expressed by omitting the key. `my_score` is different on purpose:
+    `null` while present is legal there -- it clears the score -- because the
+    field feeds nothing but the list, unlike progress, which feeds the
+    trigger, `reading_history` and the digest (design D1/D2,
+    panel-v1b-fase-4). `model_fields_set` is what tells "absent" apart from
+    "provided" for all three.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     last_chapter_read: float | None = Field(default=None, ge=0)
     status: BookmarkStatus | None = None
+    my_score: int | None = Field(default=None, ge=0, le=10)
 
     @model_validator(mode="after")
     def _check_presence(self) -> "BookmarkPatch":
         if not self.model_fields_set:
-            raise ValueError("the body must carry last_chapter_read and/or status")
+            raise ValueError("the body must carry last_chapter_read, status and/or my_score")
         if "last_chapter_read" in self.model_fields_set and self.last_chapter_read is None:
             raise ValueError("last_chapter_read cannot be null; omit it to leave progress alone")
         if "status" in self.model_fields_set and self.status is None:
             raise ValueError("status cannot be null; omit it to leave the status alone")
+        # my_score deliberately gets no clause here: a provided null clears
+        # the score, the one un-setting operation this PATCH allows (design
+        # D1/D2) -- resist "fixing" this asymmetry, it is the point.
         return self
 
 
@@ -232,6 +242,7 @@ def create_app(
                 bookmark_id,
                 last_chapter_read=patch.last_chapter_read if "last_chapter_read" in fields else UNSET,
                 status=patch.status.value if "status" in fields else UNSET,
+                my_score=patch.my_score if "my_score" in fields else UNSET,
                 now=_utc_now(),
             )
             if not found:

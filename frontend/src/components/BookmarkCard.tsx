@@ -9,6 +9,7 @@ interface Props {
   saving: boolean;
   onChangeProgress: (id: number, value: number) => void;
   onChangeStatus: (id: number, status: BookmarkStatus) => void;
+  onChangeScore: (id: number, value: number | null) => void;
 }
 
 /**
@@ -32,7 +33,13 @@ interface Props {
  * it carried no information and competed with the title for attention; as two
  * characters over the image it is still readable and costs nothing.
  */
-export function BookmarkCard({ bookmark, saving, onChangeProgress, onChangeStatus }: Props) {
+export function BookmarkCard({
+  bookmark,
+  saving,
+  onChangeProgress,
+  onChangeStatus,
+  onChangeScore,
+}: Props) {
   // The API 404s for a manga whose cover was never cached, which is an ordinary
   // state rather than an error, so the fallback is a first-class branch.
   const [coverFailed, setCoverFailed] = useState(false);
@@ -114,6 +121,18 @@ export function BookmarkCard({ bookmark, saving, onChangeProgress, onChangeStatu
         <span className="muted">
           {bookmark.latest_chapter_num !== null ? ` de ${bookmark.latest_chapter_num}` : ""}
         </span>
+      </p>
+
+      {/* Placed plainly, no styling decision made here: the visual pass is
+          phase 5's (PAN §195) and has not started. */}
+      <p>
+        <InlineNumberEdit
+          value={bookmark.my_score}
+          max={10}
+          disabled={saving}
+          onCommit={(value) => onChangeScore(bookmark.id, value)}
+          onClear={() => onChangeScore(bookmark.id, null)}
+        />
       </p>
 
       <select

@@ -8,18 +8,27 @@ import type { Bookmark } from "../domain/types";
 function renderCard(bookmark: Bookmark, { saving = false } = {}) {
   const onChangeProgress = vi.fn();
   const onChangeStatus = vi.fn();
+  const onChangeScore = vi.fn();
   render(
     <BookmarkCard
       bookmark={bookmark}
       saving={saving}
       onChangeProgress={onChangeProgress}
       onChangeStatus={onChangeStatus}
+      onChangeScore={onChangeScore}
     />,
   );
-  return { onChangeProgress, onChangeStatus };
+  return { onChangeProgress, onChangeStatus, onChangeScore };
 }
 
 const image = () => document.querySelector("img.cover-image") as HTMLImageElement | null;
+
+// The progress and score editors are both `InlineNumberEdit`s and share the
+// exact same accessible name -- rendered in this order (progress first),
+// which is what disambiguates them here, not a new label (BookmarkCard is
+// placed plainly per the hard constraint: zero visual/labelling decisions).
+const progressEditor = () => screen.getAllByTitle(/haz clic para editar/i)[0];
+const scoreEditor = () => screen.getAllByTitle(/haz clic para editar/i)[1];
 
 describe("the cover", () => {
   it("asks the panel's own api, never the address the database stored", () => {
@@ -166,7 +175,7 @@ describe("progress", () => {
   it("renders an em dash for a never-read bookmark, never the string 'null'", () => {
     renderCard(makeBookmark({ last_chapter_read: null, behind: null }));
 
-    expect(screen.getByTitle(/haz clic para editar/i)).toHaveTextContent("—");
+    expect(progressEditor()).toHaveTextContent("—");
     expect(screen.queryByText(/null/)).not.toBeInTheDocument();
   });
 
@@ -174,7 +183,7 @@ describe("progress", () => {
     const user = userEvent.setup();
     const { onChangeProgress } = renderCard(makeBookmark({ last_chapter_read: null }));
 
-    await user.click(screen.getByTitle(/haz clic para editar/i));
+    await user.click(progressEditor());
     expect(screen.getByRole("spinbutton")).toHaveValue(null); // empty, not 0
 
     await user.tab();
@@ -185,12 +194,60 @@ describe("progress", () => {
     const user = userEvent.setup();
     const { onChangeProgress } = renderCard(makeBookmark({ id: 42, last_chapter_read: 10 }));
 
-    await user.click(screen.getByTitle(/haz clic para editar/i));
+    await user.click(progressEditor());
     const input = screen.getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "12{Enter}");
 
     expect(onChangeProgress).toHaveBeenCalledExactlyOnceWith(42, 12);
+  });
+});
+
+describe("score", () => {
+  it("renders an em dash when my_score is null", () => {
+    renderCard(makeBookmark({ my_score: null }));
+
+    expect(scoreEditor()).toHaveTextContent("—");
+  });
+
+  it("renders the stored score", () => {
+    renderCard(makeBookmark({ my_score: 8 }));
+
+    expect(scoreEditor()).toHaveTextContent("8");
+  });
+
+  it("fires onChangeScore with the bookmark id and the committed value", async () => {
+    const user = userEvent.setup();
+    const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: null }));
+
+    await user.click(scoreEditor());
+    const input = screen.getByRole("spinbutton");
+    await user.type(input, "7{Enter}");
+
+    expect(onChangeScore).toHaveBeenCalledExactlyOnceWith(42, 7);
+  });
+
+  it("fires onChangeScore with null when the field is blanked out", async () => {
+    const user = userEvent.setup();
+    const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: 6 }));
+
+    await user.click(scoreEditor());
+    const input = screen.getByRole("spinbutton");
+    await user.clear(input);
+    await user.tab();
+
+    expect(onChangeScore).toHaveBeenCalledExactlyOnceWith(42, null);
+  });
+
+  it("rejects a score above 10", async () => {
+    const user = userEvent.setup();
+    const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: null }));
+
+    await user.click(scoreEditor());
+    const input = screen.getByRole("spinbutton");
+    await user.type(input, "11{Enter}");
+
+    expect(onChangeScore).not.toHaveBeenCalled();
   });
 });
 
@@ -206,10 +263,12 @@ describe("status", () => {
     expect(onChangeStatus).toHaveBeenCalledExactlyOnceWith(42, "on_hold");
   });
 
-  it("locks both editors while the row is saving", () => {
+  it("locks every editor while the row is saving", () => {
     renderCard(makeBookmark(), { saving: true });
 
     expect(screen.getByRole("combobox")).toBeDisabled();
-    expect(screen.getByTitle(/haz clic para editar/i)).toBeDisabled();
+    for (const editor of screen.getAllByTitle(/haz clic para editar/i)) {
+      expect(editor).toBeDisabled();
+    }
   });
 });

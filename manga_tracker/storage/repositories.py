@@ -376,7 +376,7 @@ def write_manual_add(
 _PANEL_BOOKMARK_SELECT = (
     "SELECT b.id, b.manga_id, m.title, b.status, b.last_chapter_read, b.progress_is_approx, "
     "ms.url, ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at, "
-    "b.status_changed_at "
+    "b.status_changed_at, b.my_score "
     "FROM bookmarks b JOIN mangas m ON m.id = b.manga_id "
     # LEFT, not INNER: a manga can exist without a source mapping (a pending
     # Kitsu entry whose url was never pasted), and its bookmark must still
@@ -388,7 +388,7 @@ _PANEL_BOOKMARK_SELECT = (
 def _panel_bookmark_row(row) -> dict:
     (bookmark_id, manga_id, title, status, last_chapter_read, progress_is_approx,
      manga_url, latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at,
-     status_changed_at) = row
+     status_changed_at, my_score) = row
     # NULL on either side means "behind is unknowable", not zero: a bookmark
     # with no recorded progress is not magically caught up.
     #
@@ -426,6 +426,9 @@ def _panel_bookmark_row(row) -> dict:
         "behind": behind,
         "last_read_at": last_read_at,
         "status_changed_at": status_changed_at,
+        # NULL means unscored, an ordinary state for a title never rated on
+        # Kitsu or in the panel -- not "zero" (panel-v1b-fase-4 design D1).
+        "my_score": my_score,
     }
 
 
@@ -445,10 +448,17 @@ def get_panel_bookmark(conn: sqlite3.Connection, bookmark_id: int) -> dict | Non
 
 
 def update_panel_bookmark(
-    conn: sqlite3.Connection, bookmark_id: int, *, last_chapter_read=UNSET, status=UNSET, now: str
+    conn: sqlite3.Connection, bookmark_id: int, *,
+    last_chapter_read=UNSET, status=UNSET, my_score=UNSET, now: str
 ) -> bool:
-    """Apply one panel edit: progress and/or status. Returns False when the
-    bookmark does not exist. Commits — one edit is one transaction.
+    """Apply one panel edit: progress, status and/or score. Returns False when
+    the bookmark does not exist. Commits — one edit is one transaction.
+
+    `my_score`: `UNSET` = absent (leave the stored score alone), `None` = clear
+    it to unscored, an `int` = set it. `None` is a legal *value* here, never a
+    signal of absence -- that is what `UNSET` is for -- so the guard below
+    MUST read `is not UNSET`, never `is not None`; the latter would make
+    un-scoring silently unreachable (panel-v1b-fase-4 design D1).
 
     An edited progress is exact by definition, so `progress_is_approx` drops to
     0 and `last_read_at` is sealed with the edit's timestamp. Downward edits
@@ -489,6 +499,11 @@ def update_panel_bookmark(
             if status != current_status:
                 assignments.append("status_changed_at = ?")
                 params.append(now)
+        if my_score is not UNSET:
+            # `None` binds as SQL NULL and is never tested for here -- it is
+            # the un-scoring value, not "nothing to do" (design D1).
+            assignments.append("my_score = ?")
+            params.append(my_score)
 
         # Mirrors the trigger's WHEN clause exactly: NEW IS NOT OLD AND NEW IS
         # NOT NULL. Any mismatch corrupts: correcting when the trigger stayed

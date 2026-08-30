@@ -23,6 +23,7 @@ export function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     behind: 20,
     last_read_at: "2026-08-10T03:00:00Z",
     status_changed_at: null,
+    my_score: null,
     ...overrides,
   };
 }

@@ -6,6 +6,7 @@ interface Props {
   savingIds: ReadonlySet<number>;
   onChangeProgress: (id: number, value: number) => void;
   onChangeStatus: (id: number, status: BookmarkStatus) => void;
+  onChangeScore: (id: number, value: number | null) => void;
 }
 
 /**
@@ -19,6 +20,7 @@ export function BookmarkGrid({
   savingIds,
   onChangeProgress,
   onChangeStatus,
+  onChangeScore,
 }: Props) {
   if (bookmarks.length === 0) {
     return <p className="empty-state">No hay mangas en este estado.</p>;
@@ -33,6 +35,7 @@ export function BookmarkGrid({
           saving={savingIds.has(bookmark.id)}
           onChangeProgress={onChangeProgress}
           onChangeStatus={onChangeStatus}
+          onChangeScore={onChangeScore}
         />
       ))}
     </div>

@@ -80,6 +80,11 @@ export function BookmarkListContainer() {
     [applyPatch],
   );
 
+  const handleChangeScore = useCallback(
+    (id: number, value: number | null) => void applyPatch(id, { my_score: value }),
+    [applyPatch],
+  );
+
   const handleAdded = useCallback(
     (added: Bookmark) => {
       setAddModalOpen(false);
@@ -152,6 +157,7 @@ export function BookmarkListContainer() {
         savingIds={savingIds}
         onChangeProgress={handleChangeProgress}
         onChangeStatus={handleChangeStatus}
+        onChangeScore={handleChangeScore}
       />
       {addModalOpen && (
         <AddMangaContainer
