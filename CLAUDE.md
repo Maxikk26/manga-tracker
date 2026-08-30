@@ -15,16 +15,18 @@ This file covers what the README does not: the architectural rules that are easy
 Real commands — do not invent others:
 
 ```
-uv run pytest -q                 the suite; 562 tests as of 2026-08-25
+uv run pytest -q                 the backend suite
 docker compose build             required when manga_tracker/, frontend/, pyproject.toml or the Dockerfile change
 docker compose up -d             the ONLY redeploy verb; `restart` does not recreate and silently keeps the old image
 ```
 
 What exists: `manga_tracker/` with `sources/manganato/`, `storage/`, `seed/`, `discovery/`, `notifier/`, `catalogue/`, `importer/`, `intake/`, `web/`, plus `scheduler.py` and `cli.py`; and `frontend/` for the panel's React build. Python 3.12 under `uv` with a committed lockfile, SQLite in a Docker volume, curl-cffi, APScheduler in-process, **two containers** off one image — detection and the panel, so a hung panel cannot take detection down.
 
-**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The database held 229 mangas and 229 bookmarks then; **236 bookmarks as of 2026-08-25**, the panel's add form accounting for the difference. **The V1b spec opened on 2026-08-17** (`spec-panel-v1b.md`), after the week of real use that gated it: a web panel with reading-progress editing as the core. FastAPI, no auth, **its own container**. Phases 1, 2 and 3 are deployed; `spec-panel-v1b.md` v1.6 added a **fifth** phase — the design pass — so "four phases" is retired wording.
+**V1a is done as of 2026-08-10** — all four done-criteria in `one-pager-v1a.md` are met, the last one verified against `job_runs`: the three jobs run unattended, including a full Sunday cycle on 2026-08-09. The reading list has grown since, the panel's add form accounting for the difference. **The V1b spec opened on 2026-08-17** (`spec-panel-v1b.md`), after the week of real use that gated it: a web panel with reading-progress editing as the core. FastAPI, no auth, **its own container**. Phases 1 to 4 are deployed; `spec-panel-v1b.md` v1.6 added a **fifth** phase — the design pass — so "four phases" is retired wording, and that fifth phase is the only one left.
 
 Two things this section got wrong for a week, because nobody updated it: it claimed there was no application code and no test tooling, long after both existed. **A stale statement here is expensive** — it is read at the start of every session and believed. When behaviour changes, this file changes with it.
+
+**What does not belong here is a number that rises on its own**: a test count, a bookmark count, a title count. Those were carried for a while and went stale without anyone being wrong about anything — the suite grows every time someone adds a test, the reading list grows every time the owner adds a manga, and neither event is a reason to edit this file. Keeping them current is a tax on a document nobody opens for its own sake. State the shape, not the tally; when the number matters, run the command that produces it. Decisions, measurements and configured values stay — the 41-minute feed window and the 5-failure dead-slug threshold are not tallies, they are the reasons something is the way it is.
 
 ## Spec authority, and where the docs contradict each other
 
@@ -79,7 +81,7 @@ This file used to say "raise the sweep frequency — do not touch the feed", and
 
 curl-cffi with Chrome impersonation, no Playwright. Organic `Referer` (the manga's page) when calling the JSON endpoint. 30s timeout, exactly one retry on transient error, never more than two attempts per item per run, no concurrency — all of that in both traffic classes below.
 
-**Two traffic classes, and the default is the conservative one.** `BATCH_POLICY` is 5-15s spacing with a 30s wait before the retry, and it covers everything unattended: the three jobs, `seed`, `import-kitsu`, `cache-covers`. `INTERACTIVE_POLICY` is 1-2s spacing with no retry wait, and `_cmd_panel` is its only caller. The reason the split is legitimate rather than a shortcut: the throttle exists so a 229-title sweep running alone every day does not look like a scraper enumerating a catalogue, while three requests fired by one human click are *less* traffic than opening the same page in a browser. Both classes stay sequential with zero concurrency; that part is not negotiable in either.
+**Two traffic classes, and the default is the conservative one.** `BATCH_POLICY` is 5-15s spacing with a 30s wait before the retry, and it covers everything unattended: the three jobs, `seed`, `import-kitsu`, `cache-covers`. `INTERACTIVE_POLICY` is 1-2s spacing with no retry wait, and `_cmd_panel` is its only caller. The reason the split is legitimate rather than a shortcut: the throttle exists so a whole-list sweep running alone every day does not look like a scraper enumerating a catalogue, while three requests fired by one human click are *less* traffic than opening the same page in a browser. Both classes stay sequential with zero concurrency; that part is not negotiable in either.
 
 Two things follow that are easy to undo by accident. **The delay is spacing measured against `time.monotonic`, not a toll charged per call** — sleep the remainder of the draw, never the whole draw when the wall clock already covered it. It was a sticky boolean until 2026-08-19, and because `cli.py` builds one transport per process, a request arriving hours later still slept 5-15s; free on a sweep, 15-45s per add on the panel. And **`fetch_cover` is the one operation that does not retry** (`retry=False` on the `Transport` Protocol): the image hosts answer 403 for an absent thumbnail, 403 is transient by the taxonomy below, and confirming a missing cover measured 43.9s. A cover that is not there is an ordinary state.
 
