@@ -4,6 +4,10 @@ import { BookmarkCard } from "./BookmarkCard";
 interface Props {
   bookmarks: Bookmark[];
   savingIds: ReadonlySet<number>;
+  /** Threaded straight to every `BookmarkCard` (design D8). Defaults false --
+   *  the container does not wire the real "Todo"-tab value until fase 5
+   *  slice 3 exists; every tab keeps showing "Al día" until then. */
+  showStatus?: boolean;
   onChangeProgress: (id: number, value: number) => void;
   onChangeStatus: (id: number, status: BookmarkStatus) => void;
   onChangeScore: (id: number, value: number | null) => void;
@@ -18,6 +22,7 @@ interface Props {
 export function BookmarkGrid({
   bookmarks,
   savingIds,
+  showStatus = false,
   onChangeProgress,
   onChangeStatus,
   onChangeScore,
@@ -33,6 +38,7 @@ export function BookmarkGrid({
           key={bookmark.id}
           bookmark={bookmark}
           saving={savingIds.has(bookmark.id)}
+          showStatus={showStatus}
           onChangeProgress={onChangeProgress}
           onChangeStatus={onChangeStatus}
           onChangeScore={onChangeScore}
