@@ -1,7 +1,8 @@
 """Direct repository-function tests that don't fit the higher-level suites:
 the stored-url cover candidate query (panel-v1b-fase-4 design D5), the
-`TERMINAL_STATUSES` parity guard (design D8), and `update_panel_bookmark`'s
-`my_score` sentinel handling (design D1).
+`TERMINAL_STATUSES` parity guard (design D8), `update_panel_bookmark`'s
+`my_score` sentinel handling (design D1), and `set_bookmark_score`'s
+fill-only-NULL guard (design D6).
 """
 
 from manga_tracker.importer.export import TERMINAL_STATUSES as EXPORT_TERMINAL_STATUSES
@@ -9,6 +10,7 @@ from manga_tracker.storage.db import connect
 from manga_tracker.storage.repositories import (
     TERMINAL_STATUSES,
     list_stored_url_cover_candidates,
+    set_bookmark_score,
     update_panel_bookmark,
 )
 from manga_tracker.web.app import TERMINAL_STATUSES as APP_TERMINAL_STATUSES
@@ -176,3 +178,61 @@ def test_update_panel_bookmark_my_score_only_edit_writes_no_reading_history(tmp_
 
     assert _my_score(conn, bookmark_id) == 8
     assert _reading_history_count(conn, manga_id) == 0
+
+
+# --- set_bookmark_score (panel-v1b-fase-4 design D6, TOCTOU) -----------------
+
+
+class _CountingConnection:
+    """Proxies every attribute to a real `sqlite3.Connection` except
+    `execute`, which it also counts. `sqlite3.Connection` is an immutable C
+    type -- neither the class nor an instance accepts a patched `execute` --
+    so counting calls means wrapping one instead of monkeypatching it."""
+
+    def __init__(self, real):
+        self._real = real
+        self.execute_calls: list = []
+
+    def execute(self, *args, **kwargs):
+        self.execute_calls.append(args)
+        return self._real.execute(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def test_set_bookmark_score_fills_an_unscored_bookmark_in_one_statement(tmp_path):
+    """The fill-only-NULL rule MUST be one statement -- the guard lives in the
+    WHERE clause, never in a Python read-then-write (design D6): the latter is
+    a real TOCTOU against a concurrent panel edit on the same SQLite file, not
+    a theoretical one.
+
+    Asserted mechanically, not just by outcome, and on THIS scenario
+    specifically: a read-then-write rewrite needs two `execute()` calls to
+    fill a NULL score (a SELECT to check it is still unscored, then the
+    UPDATE), while the one-statement `UPDATE ... WHERE my_score IS NULL`
+    needs exactly one. (The rejected-row scenario below can't tell the two
+    shapes apart -- a read-then-write's SELECT alone is enough to bail out
+    early there, so it also costs one call. This is the scenario where the
+    call count actually diverges.) Pinning it to 1 here fails loudly the
+    moment the guard moves into Python, even though the *outcome* would look
+    identical from a single-threaded caller either way.
+    """
+    conn, manga_id, bookmark_id = _seed_scored_bookmark(tmp_path, "fill", my_score=None)
+    counting = _CountingConnection(conn)
+
+    assert set_bookmark_score(counting, manga_id, 9, now=NOW) is True
+
+    assert len(counting.execute_calls) == 1, (
+        f"expected exactly one execute() call, got {len(counting.execute_calls)}: "
+        f"{counting.execute_calls}"
+    )
+    assert _my_score(conn, bookmark_id) == 9
+
+
+def test_set_bookmark_score_returns_false_and_changes_nothing_on_an_already_scored_row(tmp_path):
+    conn, manga_id, bookmark_id = _seed_scored_bookmark(tmp_path, "already-scored", my_score=7)
+
+    assert set_bookmark_score(conn, manga_id, 9, now=NOW) is False
+
+    assert _my_score(conn, bookmark_id) == 7  # untouched -- the hand-typed score survives

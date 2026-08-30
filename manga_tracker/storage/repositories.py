@@ -530,6 +530,29 @@ def update_panel_bookmark(
     return True
 
 
+def set_bookmark_score(conn: sqlite3.Connection, manga_id: int, my_score: int, *, now: str) -> bool:
+    """Fill an unscored bookmark from `import-scores`. Returns False, changing
+    nothing, when it already had one.
+
+    One statement, and that is the whole point (panel-v1b-fase-4 design D6):
+    the fill-only-NULL guard lives in the WHERE clause, never in a Python
+    read-then-write. The panel container serves the same SQLite file this
+    importer writes to, so a read-then-write would be a real TOCTOU -- the
+    owner could be typing a score in the browser while the import runs -- not
+    a theoretical one. WAL plus `busy_timeout=5000` (db.py) handles the lock;
+    this one conditional UPDATE is what closes the race itself.
+
+    Commits -- each fill is its own transaction, safe to interleave with a
+    concurrent panel edit.
+    """
+    with transaction(conn):
+        cursor = conn.execute(
+            "UPDATE bookmarks SET my_score = ?, updated_at = ? WHERE manga_id = ? AND my_score IS NULL",
+            (my_score, now, manga_id),
+        )
+        return cursor.rowcount > 0
+
+
 # --- history family (spec-panel-v1b.md fase 2) --------------------------------
 
 # The fixed width `read_at`/`detected_at`/`source_published_at` are always
