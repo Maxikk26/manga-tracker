@@ -35,6 +35,7 @@ from manga_tracker.discovery.onhold_sweep import JOB_NAME as ONHOLD_SWEEP_JOB
 from manga_tracker.importer.export import ExportError, read_export
 from manga_tracker.importer.pending import write_pending
 from manga_tracker.importer.run import STATUS_LOAD_ORDER, run_import
+from manga_tracker.importer.scores import import_scores
 from manga_tracker.intake.pasted_url import PastedUrlIntake
 from manga_tracker.logging_setup import configure_logging
 from manga_tracker.notifier.telegram import TelegramSender
@@ -169,6 +170,61 @@ def _report_pending(report, pending_path) -> None:
         return
     print(f"Wrote {written} row(s) to {pending_path}.")
     print(f"Fill the url column, then: python -m manga_tracker seed --file {pending_path}")
+
+
+def _cmd_import_scores(args: argparse.Namespace, config: AppConfig) -> int:
+    """One-shot backfill of `bookmarks.my_score` from the same Kitsu export
+    `import-kitsu` reads (docs/spec-importador-kitsu.md, decision 5 reversed
+    by panel-v1b-fase-4).
+
+    Mirrors `_cmd_import_kitsu`'s ordering exactly: the file is read and
+    reported on FIRST, before a connection, before the first catalogue
+    request. Unlike `_cmd_import_kitsu`, this command never touches the
+    source -- it has no `ManganatoClient` and no `sites` row to write, so it
+    never calls `_bootstrap` and constructs the catalogue directly instead,
+    same as `_cmd_import_kitsu` already does for the catalogue half.
+
+    Fills only NULL scores (design D6) and never creates a row: an unresolved
+    id or a manga absent from the database is an ordinary skip, not a failure.
+    """
+    try:
+        entries = read_export(args.file)
+    except (OSError, ExportError) as exc:
+        print(f"Cannot read the export at {args.file}: {exc}")
+        return 1
+
+    _report_score_composition(entries)
+    if args.dry_run:
+        # File-only counts: resolving would cost the same ~38 requests as the
+        # real run, which is just the run without the write. Said explicitly,
+        # because these counts are NOT resolved matches.
+        print("Dry run: these are file counts, not resolved matches. Nothing requested, nothing written.")
+        return 0
+
+    conn = connect(config.db_path)
+    # Same constructor `_cmd_import_kitsu` uses for the catalogue half, and
+    # nothing else: no `ensure_site`, no `ManganatoClient` -- this command
+    # never asks the source anything.
+    catalogue = KitsuCatalogue(UrllibJsonTransport())
+    try:
+        report = import_scores(args.file, conn, catalogue)
+    except (CatalogueTransient, CatalogueUnexpected) as exc:
+        # Resolution happens before the first write (design D6, mirroring KIT
+        # "Lo primero"), so this really is "nothing written".
+        print(f"Import aborted before any score was written: {exc}")
+        print("Nothing was written. Re-run it when the service answers again; re-running is safe.")
+        return 1
+
+    # A partial result is not a failed run: an unresolved id or a manga this
+    # database does not have are ordinary skips, each with its own counter.
+    return 0
+
+
+def _report_score_composition(entries) -> None:
+    """What `import-scores` cares about, before it starts doing anything:
+    how many of the file's entries carry a score at all."""
+    with_score = sum(1 for entry in entries if entry.my_score is not None)
+    print(f"{len(entries)} entr(ies) in the export; {with_score} carry a score.")
 
 
 def _utc_now() -> str:
@@ -468,6 +524,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="Validate the export and report; write nothing, request nothing"
     )
     import_kitsu.set_defaults(handler=_cmd_import_kitsu)
+
+    import_scores_parser = subparsers.add_parser(
+        "import-scores",
+        help="Backfill bookmarks.my_score from the Kitsu XML export (spec-importador-kitsu.md)",
+    )
+    # Same default as import-kitsu's --file: the same export file feeds both.
+    import_scores_parser.add_argument("--file", default="data/kitsu-manga.xml")
+    import_scores_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Report file-only counts (not resolved matches); request and write nothing",
+    )
+    import_scores_parser.set_defaults(handler=_cmd_import_scores)
 
     run = subparsers.add_parser("run", help="Start the scheduler (blocks until interrupted)")
     run.set_defaults(handler=_cmd_run)
