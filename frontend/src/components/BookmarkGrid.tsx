@@ -11,6 +11,7 @@ interface Props {
   onChangeProgress: (id: number, value: number) => void;
   onChangeStatus: (id: number, status: BookmarkStatus) => void;
   onChangeScore: (id: number, value: number | null) => void;
+  onEditingChange: (id: number, open: boolean) => void;
 }
 
 /**
@@ -26,13 +27,18 @@ export function BookmarkGrid({
   onChangeProgress,
   onChangeStatus,
   onChangeScore,
+  onEditingChange,
 }: Props) {
   if (bookmarks.length === 0) {
     return <p className="empty-state">No hay mangas en este estado.</p>;
   }
 
   return (
-    <div className="bookmark-grid">
+    // `tabIndex={-1}` makes this a focus sink (design D6): when a popover
+    // closes and its trigger has since unmounted (a status change removed
+    // the row from this tab, fase 5 slice 2b), focus lands here instead of
+    // silently falling to `<body>`.
+    <div className="bookmark-grid" tabIndex={-1}>
       {bookmarks.map((bookmark) => (
         <BookmarkCard
           key={bookmark.id}
@@ -42,6 +48,7 @@ export function BookmarkGrid({
           onChangeProgress={onChangeProgress}
           onChangeStatus={onChangeStatus}
           onChangeScore={onChangeScore}
+          onEditingChange={onEditingChange}
         />
       ))}
     </div>

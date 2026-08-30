@@ -1,8 +1,11 @@
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "../domain/types";
 import { STATUS_LABELS } from "../domain/statusLabels";
 import { coverUrl, hueOf, initials } from "../domain/covers";
+import { isCaughtUp } from "../domain/sortBookmarks";
 import { InlineNumberEdit } from "./InlineNumberEdit";
+import { Popover } from "./Popover";
+import { ChapterEditor } from "./ChapterEditor";
 
 interface Props {
   bookmark: Bookmark;
@@ -14,6 +17,10 @@ interface Props {
   onChangeProgress: (id: number, value: number) => void;
   onChangeStatus: (id: number, status: BookmarkStatus) => void;
   onChangeScore: (id: number, value: number | null) => void;
+  /** Fired whenever this card's own popover opens or closes (design D3) --
+   *  the container's only signal that a row is being edited, used to freeze
+   *  the list order while any card's panel is open. */
+  onEditingChange: (id: number, open: boolean) => void;
 }
 
 /**
@@ -40,19 +47,27 @@ function BookmarkCardComponent({
   onChangeProgress,
   onChangeStatus,
   onChangeScore,
+  onEditingChange,
 }: Props) {
   // The API 404s for a manga whose cover was never cached, which is an ordinary
   // state rather than an error, so the fallback is a first-class branch.
   const [coverFailed, setCoverFailed] = useState(false);
 
-  const approxMarker = bookmark.progress_is_approx ? (
-    <span
-      className="approx-marker"
-      title="Progreso aproximado: viene del import de Kitsu, no de una lectura confirmada"
-    >
-      ~
-    </span>
-  ) : null;
+  // Which popover is open, if any (design D3). Only "chapter" exists this
+  // slice -- the score trigger still uses `InlineNumberEdit` until fase 5
+  // slice 2b builds `ScoreEditor`.
+  const [openPopover, setOpenPopover] = useState<"chapter" | null>(null);
+  const chapterTriggerRef = useRef<HTMLButtonElement>(null);
+
+  function openChapterPopover() {
+    setOpenPopover("chapter");
+    onEditingChange(bookmark.id, true);
+  }
+
+  function closePopover() {
+    setOpenPopover(null);
+    onEditingChange(bookmark.id, false);
+  }
 
   const hue = hueOf(bookmark.title);
   const poster = coverFailed ? (
@@ -80,22 +95,36 @@ function BookmarkCardComponent({
   // first detection lands.
   const readable = bookmark.manga_url !== null;
 
+  const caughtUp = isCaughtUp(bookmark);
+
   // One chip per corner (Q5, read off PROTO): the status pill wins whenever a
   // card could have come from any tab, "Al día" otherwise. Never both.
   const chip = showStatus ? (
     <span className="chip chip-status" data-st={bookmark.status}>
       {STATUS_LABELS[bookmark.status]}
     </span>
-  ) : bookmark.behind === 0 ? (
+  ) : caughtUp ? (
     <span className="chip">Al día</span>
   ) : null;
 
+  const hasTotal = bookmark.latest_chapter_num !== null;
+  // "Sin empezar" (fase 5 slice 3, design D13) is not wired yet -- until
+  // then this keeps the pre-existing null convention rather than ever
+  // interpolating the literal value `null`.
+  const chapterLabel = bookmark.last_chapter_read === null ? "—" : bookmark.last_chapter_read;
+  const chapterAriaLabel = [
+    `Editar capítulo leído de ${bookmark.title}.`,
+    hasTotal && bookmark.last_chapter_read !== null
+      ? `Vas por el ${bookmark.last_chapter_read} de ${bookmark.latest_chapter_num}.`
+      : null,
+    bookmark.progress_is_approx ? "El progreso es aproximado." : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" ");
+
   return (
     <>
-      <article
-        className={saving ? "card card-saving" : "card"}
-        data-done={bookmark.behind === 0 || undefined}
-      >
+      <article className={saving ? "card card-saving" : "card"} data-done={caughtUp || undefined}>
         {readable ? (
           <a
             className="poster"
@@ -118,15 +147,25 @@ function BookmarkCardComponent({
             {bookmark.title}
           </h3>
           <div className="meta">
-            <InlineNumberEdit
-              value={bookmark.last_chapter_read}
-              prefix={approxMarker}
-              disabled={saving}
-              onCommit={(value) => onChangeProgress(bookmark.id, value)}
-            />
-            <span className="muted">
-              {bookmark.latest_chapter_num !== null ? ` de ${bookmark.latest_chapter_num}` : ""}
-            </span>
+            <button
+              ref={chapterTriggerRef}
+              type="button"
+              className={hasTotal ? "edit has-total" : "edit"}
+              data-approx={bookmark.progress_is_approx || undefined}
+              aria-label={chapterAriaLabel}
+              onClick={openChapterPopover}
+            >
+              {hasTotal ? (
+                <>
+                  <span className="chapter-rest">cap. {chapterLabel}</span>
+                  <span className="chapter-full">
+                    {chapterLabel} / {bookmark.latest_chapter_num}
+                  </span>
+                </>
+              ) : (
+                `cap. ${chapterLabel}`
+              )}
+            </button>
             <InlineNumberEdit
               value={bookmark.my_score}
               max={10}
@@ -137,6 +176,19 @@ function BookmarkCardComponent({
           </div>
         </div>
       </article>
+      {openPopover === "chapter" && (
+        <Popover
+          anchor={chapterTriggerRef.current}
+          label={`Capítulo leído de ${bookmark.title}`}
+          onDismiss={closePopover}
+        >
+          <ChapterEditor
+            bookmark={bookmark}
+            onCommit={(value) => onChangeProgress(bookmark.id, value)}
+            onRequestClose={closePopover}
+          />
+        </Popover>
+      )}
 
       {/* Temporary layout: this control belongs inside the chapter popover
           (design D12, fase 5 slice 2b) and moves there once that popover
