@@ -7,18 +7,22 @@ import { makeBookmark } from "../test/fixtures";
 const input = () => screen.getByRole("textbox", { name: "Capítulo leído" }) as HTMLInputElement;
 const minus = () => screen.getByRole("button", { name: "Uno menos" });
 const plus = () => screen.getByRole("button", { name: "Uno más" });
+const statusSelect = (title = "One Piece") =>
+  screen.getByRole("combobox", { name: `Estado de ${title}` });
 
 function renderEditor(overrides: Parameters<typeof makeBookmark>[0] = {}) {
   const onCommit = vi.fn();
+  const onCommitStatus = vi.fn();
   const onRequestClose = vi.fn();
   render(
     <ChapterEditor
       bookmark={makeBookmark(overrides)}
       onCommit={onCommit}
+      onCommitStatus={onCommitStatus}
       onRequestClose={onRequestClose}
     />,
   );
-  return { onCommit, onRequestClose };
+  return { onCommit, onCommitStatus, onRequestClose };
 }
 
 describe("ChapterEditor", () => {
@@ -120,5 +124,24 @@ describe("ChapterEditor", () => {
     renderEditor({ progress_is_approx: true });
 
     expect(screen.getByText("El progreso guardado es aproximado.")).toBeInTheDocument();
+  });
+
+  it("carries a labelled status select, kept verbatim for existing container-test selectors (design D12)", () => {
+    renderEditor({ title: "One Piece", status: "reading" });
+
+    expect(statusSelect()).toHaveValue("reading");
+  });
+
+  it("a status change commits the new status and closes the popover", async () => {
+    const user = userEvent.setup();
+    const { onCommitStatus, onRequestClose } = renderEditor({
+      title: "One Piece",
+      status: "reading",
+    });
+
+    await user.selectOptions(statusSelect(), "on_hold");
+
+    expect(onCommitStatus).toHaveBeenCalledExactlyOnceWith("on_hold");
+    expect(onRequestClose).toHaveBeenCalledOnce();
   });
 });
