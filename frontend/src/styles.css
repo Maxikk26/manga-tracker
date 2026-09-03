@@ -364,9 +364,10 @@ body {
   white-space: nowrap;
 }
 
-/* --- Chapter trigger (fase 5 slice 2a) ---
-   Opens the chapter popover; the score trigger still uses the pre-existing
-   inline editor below until slice 2b builds `ScoreEditor`. */
+/* --- Meta-row triggers (fase 5 slices 2a/2b) ---
+   Shared by the chapter trigger (opens the chapter+status popover) and the
+   score trigger (opens the score popover, fase 5 slice 2b) -- both are
+   plain buttons in the same one-line row. */
 
 .edit {
   position: relative;
@@ -564,54 +565,49 @@ body {
   color: var(--muted);
 }
 
-/* --- Inline progress edit --- */
-
-.progress-display {
-  border: 1px dashed transparent;
-  background: none;
-  font: inherit;
-  color: inherit;
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-
-.progress-display:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.progress-display:disabled {
-  cursor: default;
-}
-
-.progress-input {
-  width: 5.5rem;
-  font: inherit;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-}
-
-/* The input is rendered already focused, so the accent border reads as the
-   focus state and killing the outline looked harmless. It is not: the rule
-   travels with the class, and the next thing to reuse it inherits a control
-   with no focus indicator at all (WCAG 2.4.7). A real ring costs nothing. */
-.progress-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.approx-marker {
+.pop-scale {
   color: var(--muted);
-  margin-right: 0.15rem;
-  cursor: help;
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
-/* --- Status select --- */
+.pop-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
 
-.status-select {
+.pop-actions button {
+  flex: 1;
+  min-height: 34px;
+  padding: 0 0.6rem;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.pop-actions button:hover {
+  border-color: var(--accent);
+}
+
+.pop-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Status row (fase 5 slice 2b, design D12) -- now inside the chapter
+   popover, replacing the standalone `<select>` that used to sit below the
+   card. --- */
+
+.pop-status {
+  margin-top: 0.6rem;
+}
+
+.pop-select {
   font: inherit;
   font-size: 0.88rem;
   padding: 0.2rem 0.3rem;
@@ -619,6 +615,7 @@ body {
   border-radius: 6px;
   background: var(--surface);
   color: inherit;
+  width: 100%;
 }
 
 /* --- Link --- */
