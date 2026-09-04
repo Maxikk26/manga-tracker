@@ -1,11 +1,11 @@
 import { memo, useRef, useState } from "react";
-import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "../domain/types";
+import type { Bookmark, BookmarkStatus } from "../domain/types";
 import { STATUS_LABELS } from "../domain/statusLabels";
 import { coverUrl, hueOf, initials } from "../domain/covers";
 import { isCaughtUp } from "../domain/sortBookmarks";
-import { InlineNumberEdit } from "./InlineNumberEdit";
 import { Popover } from "./Popover";
 import { ChapterEditor } from "./ChapterEditor";
+import { ScoreEditor } from "./ScoreEditor";
 
 interface Props {
   bookmark: Bookmark;
@@ -53,14 +53,20 @@ function BookmarkCardComponent({
   // state rather than an error, so the fallback is a first-class branch.
   const [coverFailed, setCoverFailed] = useState(false);
 
-  // Which popover is open, if any (design D3). Only "chapter" exists this
-  // slice -- the score trigger still uses `InlineNumberEdit` until fase 5
-  // slice 2b builds `ScoreEditor`.
-  const [openPopover, setOpenPopover] = useState<"chapter" | null>(null);
+  // Which popover is open, if any (design D3): the card owns this, the
+  // container only learns the fact that *some* row is being edited via
+  // `onEditingChange`.
+  const [openPopover, setOpenPopover] = useState<"chapter" | "score" | null>(null);
   const chapterTriggerRef = useRef<HTMLButtonElement>(null);
+  const scoreTriggerRef = useRef<HTMLButtonElement>(null);
 
   function openChapterPopover() {
     setOpenPopover("chapter");
+    onEditingChange(bookmark.id, true);
+  }
+
+  function openScorePopover() {
+    setOpenPopover("score");
     onEditingChange(bookmark.id, true);
   }
 
@@ -121,6 +127,7 @@ function BookmarkCardComponent({
   ]
     .filter((part): part is string => part !== null)
     .join(" ");
+  const scoreLabel = bookmark.my_score === null ? "No puntuado" : `${bookmark.my_score}/10`;
 
   return (
     <>
@@ -166,13 +173,15 @@ function BookmarkCardComponent({
                 `cap. ${chapterLabel}`
               )}
             </button>
-            <InlineNumberEdit
-              value={bookmark.my_score}
-              max={10}
-              disabled={saving}
-              onCommit={(value) => onChangeScore(bookmark.id, value)}
-              onClear={() => onChangeScore(bookmark.id, null)}
-            />
+            <button
+              ref={scoreTriggerRef}
+              type="button"
+              className="edit"
+              aria-label={`Editar puntuación de ${bookmark.title}.`}
+              onClick={openScorePopover}
+            >
+              {scoreLabel}
+            </button>
           </div>
         </div>
       </article>
@@ -185,29 +194,24 @@ function BookmarkCardComponent({
           <ChapterEditor
             bookmark={bookmark}
             onCommit={(value) => onChangeProgress(bookmark.id, value)}
+            onCommitStatus={(status) => onChangeStatus(bookmark.id, status)}
             onRequestClose={closePopover}
           />
         </Popover>
       )}
-
-      {/* Temporary layout: this control belongs inside the chapter popover
-          (design D12, fase 5 slice 2b) and moves there once that popover
-          exists. Until then it renders as a plain sibling below the card --
-          a review artifact of the chain never reaching main mid-slice, not a
-          shipped regression (design's Slicing note). */}
-      <select
-        className="status-select"
-        value={bookmark.status}
-        disabled={saving}
-        aria-label={`Estado de ${bookmark.title}`}
-        onChange={(event) => onChangeStatus(bookmark.id, event.target.value as BookmarkStatus)}
-      >
-        {BOOKMARK_STATUSES.map((status) => (
-          <option key={status} value={status}>
-            {STATUS_LABELS[status]}
-          </option>
-        ))}
-      </select>
+      {openPopover === "score" && (
+        <Popover
+          anchor={scoreTriggerRef.current}
+          label={`Puntuación de ${bookmark.title}`}
+          onDismiss={closePopover}
+        >
+          <ScoreEditor
+            bookmark={bookmark}
+            onCommit={(value) => onChangeScore(bookmark.id, value)}
+            onRequestClose={closePopover}
+          />
+        </Popover>
+      )}
     </>
   );
 }

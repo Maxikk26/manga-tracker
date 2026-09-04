@@ -101,12 +101,10 @@ describe("BookmarkListContainer", () => {
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    // The score editor is still `InlineNumberEdit` this slice (fase 5 slice
-    // 2b builds `ScoreEditor`) -- it is the only element left carrying the
-    // old title attribute, now that the chapter trigger has its own
-    // aria-label instead.
-    await user.click(within(card).getByTitle(/haz clic para editar/i));
-    const input = within(card).getByRole("spinbutton");
+    // The score trigger has its own aria-label (fase 5 slice 2b's
+    // `ScoreEditor`), same as the chapter trigger.
+    await user.click(within(card).getByRole("button", { name: /^Editar puntuación/ }));
+    const input = screen.getByRole("textbox", { name: /Puntuación de 0 a/ });
     await user.clear(input);
     await user.type(input, "9{Enter}");
 
@@ -125,8 +123,8 @@ describe("BookmarkListContainer", () => {
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    await user.click(within(card).getByTitle(/haz clic para editar/i));
-    const input = within(card).getByRole("spinbutton");
+    await user.click(within(card).getByRole("button", { name: /^Editar puntuación/ }));
+    const input = screen.getByRole("textbox", { name: /Puntuación de 0 a/ });
     await user.clear(input);
     await user.tab();
 

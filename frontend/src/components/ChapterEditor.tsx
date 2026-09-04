@@ -1,10 +1,16 @@
 import { useRef, useState, type KeyboardEvent } from "react";
-import type { Bookmark } from "../domain/types";
+import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "../domain/types";
+import { STATUS_LABELS } from "../domain/statusLabels";
 import { DecimalInput } from "./DecimalInput";
 
 interface Props {
   bookmark: Bookmark;
   onCommit: (value: number) => void;
+  /** Fired by the status row (design D12/Q4). Selecting a different status
+   *  commits it and closes the popover -- the caller is expected to call
+   *  `onRequestClose` right after, same as the select's own `onChange` does
+   *  below. */
+  onCommitStatus: (status: BookmarkStatus) => void;
   /** The popover's own close, threaded straight through (design D3: the card
    *  owns the popover, this is the same callback passed as `onDismiss` to
    *  `Popover`). Enter commits, then closes. */
@@ -19,8 +25,10 @@ function stepValue(current: number, delta: number): number {
 }
 
 /**
- * The chapter half of the popover (design D2/D11/D3). No status row yet --
- * that is fase 5 slice 2b's job (design D12).
+ * The chapter half of the popover (design D2/D11/D3), plus the status row
+ * (design D12): the chapter popover is where status now lives too, so the
+ * standalone `<select>` that used to sit below the card is gone (fase 5
+ * slice 2b).
  *
  * The draft is seeded once, from the bookmark prop at the moment this
  * component is created (never re-seeded from a later refetch while the
@@ -29,7 +37,7 @@ function stepValue(current: number, delta: number): number {
  * field, never the literal string "null" (the guard PROTO's own
  * `openChapterPop` is missing).
  */
-export function ChapterEditor({ bookmark, onCommit, onRequestClose }: Props) {
+export function ChapterEditor({ bookmark, onCommit, onCommitStatus, onRequestClose }: Props) {
   const [draft, setDraft] = useState(() =>
     bookmark.last_chapter_read === null ? "" : String(bookmark.last_chapter_read),
   );
@@ -112,6 +120,27 @@ export function ChapterEditor({ bookmark, onCommit, onRequestClose }: Props) {
         <span className="pop-hint">El progreso guardado es aproximado.</span>
       )}
       <span className="pop-hint">Se guarda solo.</span>
+      <div className="pop-status">
+        <span className="pop-label">Estado</span>
+        <select
+          className="pop-select"
+          value={bookmark.status}
+          // Kept verbatim (design D12): the existing container tests still
+          // select this control by this exact label now that it lives here
+          // instead of below the card.
+          aria-label={`Estado de ${bookmark.title}`}
+          onChange={(event) => {
+            onCommitStatus(event.target.value as BookmarkStatus);
+            onRequestClose(); // status choice closes the popover (Q4)
+          }}
+        >
+          {BOOKMARK_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {STATUS_LABELS[status]}
+            </option>
+          ))}
+        </select>
+      </div>
     </>
   );
 }

@@ -26,11 +26,10 @@ function renderCard(bookmark: Bookmark, { saving = false, showStatus = false } =
 
 const image = () => document.querySelector("img.cover-image") as HTMLImageElement | null;
 
-// The chapter trigger opens a popover (fase 5 slice 2a) and carries its own
-// aria-label; the score editor is still `InlineNumberEdit` this slice, the
-// only element left with the old title attribute.
+// Both triggers open a popover (fase 5 slices 2a/2b) and carry their own
+// aria-label -- `InlineNumberEdit`'s old title attribute is gone entirely.
 const chapterTrigger = () => screen.getByRole("button", { name: /^Editar capítulo leído/ });
-const scoreEditor = () => screen.getByTitle(/haz clic para editar/i);
+const scoreEditor = () => screen.getByRole("button", { name: /^Editar puntuación/ });
 
 describe("the cover", () => {
   it("asks the panel's own api, never the address the database stored", () => {
@@ -211,17 +210,27 @@ describe("the chapter trigger and its popover (fase 5 slice 2a)", () => {
   });
 });
 
-describe("score", () => {
-  it("renders an em dash when my_score is null", () => {
+describe("score (fase 5 slice 2b)", () => {
+  it("reads No puntuado when my_score is null", () => {
     renderCard(makeBookmark({ my_score: null }));
 
-    expect(scoreEditor()).toHaveTextContent("—");
+    expect(scoreEditor()).toHaveTextContent("No puntuado");
   });
 
-  it("renders the stored score", () => {
+  it("reads {my_score}/10 when scored", () => {
     renderCard(makeBookmark({ my_score: 8 }));
 
-    expect(scoreEditor()).toHaveTextContent("8");
+    expect(scoreEditor()).toHaveTextContent("8/10");
+  });
+
+  it("opens the score popover on click and reports it upward via onEditingChange", async () => {
+    const user = userEvent.setup();
+    const { onEditingChange } = renderCard(makeBookmark({ id: 42 }));
+
+    await user.click(scoreEditor());
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onEditingChange).toHaveBeenCalledExactlyOnceWith(42, true);
   });
 
   it("fires onChangeScore with the bookmark id and the committed value", async () => {
@@ -229,7 +238,7 @@ describe("score", () => {
     const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: null }));
 
     await user.click(scoreEditor());
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("textbox", { name: /Puntuación de 0 a/ });
     await user.type(input, "7{Enter}");
 
     expect(onChangeScore).toHaveBeenCalledExactlyOnceWith(42, 7);
@@ -240,7 +249,7 @@ describe("score", () => {
     const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: 6 }));
 
     await user.click(scoreEditor());
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("textbox", { name: /Puntuación de 0 a/ });
     await user.clear(input);
     await user.tab();
 
@@ -252,31 +261,31 @@ describe("score", () => {
     const { onChangeScore } = renderCard(makeBookmark({ id: 42, my_score: null }));
 
     await user.click(scoreEditor());
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("textbox", { name: /Puntuación de 0 a/ });
     await user.type(input, "11{Enter}");
 
     expect(onChangeScore).not.toHaveBeenCalled();
   });
+
+  it("is never disabled while the row is saving (design D5, same as the chapter trigger)", () => {
+    renderCard(makeBookmark(), { saving: true });
+
+    expect(scoreEditor()).not.toBeDisabled();
+  });
 });
 
-describe("status", () => {
-  it("fires onChangeStatus when the select changes", async () => {
+describe("status (fase 5 slice 2b -- now inside the chapter popover, design D12)", () => {
+  it("fires onChangeStatus with the bookmark id and closes the popover", async () => {
     // Carried over from the table deliberately: changing status is fase 1
     // functionality and the prototype's card did not have it.
     const user = userEvent.setup();
-    const { onChangeStatus } = renderCard(makeBookmark({ id: 42 }));
+    const { onChangeStatus } = renderCard(makeBookmark({ id: 42, title: "One Piece" }));
 
-    await user.selectOptions(screen.getByRole("combobox"), "on_hold");
+    await user.click(chapterTrigger());
+    const select = screen.getByRole("combobox", { name: "Estado de One Piece" });
+    await user.selectOptions(select, "on_hold");
 
     expect(onChangeStatus).toHaveBeenCalledExactlyOnceWith(42, "on_hold");
-  });
-
-  it("locks every editor while the row is saving", () => {
-    renderCard(makeBookmark(), { saving: true });
-
-    expect(screen.getByRole("combobox")).toBeDisabled();
-    for (const editor of screen.getAllByTitle(/haz clic para editar/i)) {
-      expect(editor).toBeDisabled();
-    }
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
