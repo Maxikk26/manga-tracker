@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 interface Props {
   /** The raw text draft; "" means "not typed yet" (the caller decides what
    *  that submits as — the add modal treats it as 0). */
@@ -5,6 +7,14 @@ interface Props {
   onChange: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Passed straight to the native input (fase 5 slice 2a): the commit
+   *  contract for the popover editors is blur-or-Enter, never per
+   *  keystroke, and this is the seam that lets a caller implement it
+   *  without a second input component -- "the difference lives in the
+   *  commit validator, not in a second component" (design D11). */
+  onBlur?: () => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+  "aria-label"?: string;
 }
 
 /**
@@ -38,7 +48,15 @@ export function sanitizeDecimal(raw: string): string {
  * keystroke through `sanitizeDecimal`. Reuse this for any future numeric
  * field — the preference is standing, not modal-specific.
  */
-export function DecimalInput({ value, onChange, disabled = false, placeholder = "0" }: Props) {
+export function DecimalInput({
+  value,
+  onChange,
+  disabled = false,
+  placeholder = "0",
+  onBlur,
+  onKeyDown,
+  "aria-label": ariaLabel,
+}: Props) {
   return (
     <input
       type="text"
@@ -48,7 +66,10 @@ export function DecimalInput({ value, onChange, disabled = false, placeholder = 
       placeholder={placeholder}
       value={value}
       disabled={disabled}
+      aria-label={ariaLabel}
       onChange={(event) => onChange(sanitizeDecimal(event.target.value))}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
     />
   );
 }
