@@ -54,8 +54,12 @@ function byDateDesc(field: keyof Bookmark) {
  * unknown — no mapping, or nothing detected yet — and "I cannot tell" is not
  * "I am up to date", so an unknown stays with the actionable ones rather than
  * being filed away as done.
+ *
+ * Exported (fase 5 slice 2a, design D9) so the card's fade, its "Al día"
+ * chip and this sorter share one definition instead of three copies of
+ * `behind === 0` drifting independently.
  */
-function isCaughtUp(bookmark: Bookmark): boolean {
+export function isCaughtUp(bookmark: Bookmark): boolean {
   return bookmark.behind === 0;
 }
 
@@ -81,4 +85,37 @@ export function sortBookmarksForTab(
     const caughtUp = Number(isCaughtUp(a)) - Number(isCaughtUp(b));
     return caughtUp !== 0 ? caughtUp : byDate(a, b);
   });
+}
+
+/**
+ * Re-sequences `rows` to match a previously-captured `ids` order (fase 5
+ * slice 2a, design D4) -- the ordering freeze while a popover is open.
+ *
+ * Ids, never row objects: freezing the objects would freeze their *values*
+ * too, so an open chapter panel would sit over a card still showing the old
+ * number -- the card must keep repainting from fresh props while only its
+ * *position* stays put. A row whose id is not in `ids` is appended after the
+ * frozen sequence (a fresh row from a refetch, e.g. one just added); a
+ * frozen id no longer present in `rows` is silently dropped (e.g. removed
+ * upstream). Never throws, never mutates either input.
+ */
+export function applyFrozenOrder(
+  rows: readonly Bookmark[],
+  ids: readonly number[],
+): Bookmark[] {
+  const byId = new Map(rows.map((row) => [row.id, row] as const));
+  const ordered: Bookmark[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row) {
+      ordered.push(row);
+      byId.delete(id);
+    }
+  }
+  // Whatever is left in `byId` was never in the frozen sequence -- append it
+  // in the order it arrived in `rows`.
+  for (const row of rows) {
+    if (byId.has(row.id)) ordered.push(row);
+  }
+  return ordered;
 }

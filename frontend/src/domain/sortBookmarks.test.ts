@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sortBookmarksForTab } from "./sortBookmarks";
+import { applyFrozenOrder, sortBookmarksForTab } from "./sortBookmarks";
 import type { Bookmark, BookmarkStatus } from "./types";
 
 function bookmark(
@@ -223,5 +223,45 @@ describe("sortBookmarksForTab: reading puts what you owe first", () => {
       "on_hold",
     );
     expect(titlesOf(sorted)).toEqual(["Pausada ayer", "Pausada en junio"]);
+  });
+});
+
+describe("applyFrozenOrder", () => {
+  const rowsAbc = [
+    bookmark(1, "Alfa", null),
+    bookmark(2, "Bravo", null),
+    bookmark(3, "Charlie", null),
+  ];
+
+  it("reorders rows to match the frozen id sequence", () => {
+    const result = applyFrozenOrder(rowsAbc, [3, 1, 2]);
+    expect(titlesOf(result)).toEqual(["Charlie", "Alfa", "Bravo"]);
+  });
+
+  it("appends a row whose id is absent from the frozen sequence, in its input order", () => {
+    // A refetch can add a row (a new bookmark, or one leaving another tab)
+    // that the freeze never saw -- it must not vanish, and it must not
+    // jump ahead of the frozen sequence either.
+    const result = applyFrozenOrder(rowsAbc, [2, 1]);
+    expect(titlesOf(result)).toEqual(["Bravo", "Alfa", "Charlie"]);
+  });
+
+  it("silently drops a frozen id no longer present in rows", () => {
+    // Id 9 was frozen (a row that has since been removed upstream) and must
+    // not throw or leave a gap; Bravo was never frozen, so it still gets
+    // appended after the frozen sequence like any other unlisted row.
+    const result = applyFrozenOrder(rowsAbc, [9, 3, 1]);
+    expect(titlesOf(result)).toEqual(["Charlie", "Alfa", "Bravo"]);
+  });
+
+  it("returns the input order unchanged for an empty id list", () => {
+    const result = applyFrozenOrder(rowsAbc, []);
+    expect(titlesOf(result)).toEqual(["Alfa", "Bravo", "Charlie"]);
+  });
+
+  it("never mutates the input array", () => {
+    const copy = [...rowsAbc];
+    applyFrozenOrder(rowsAbc, [3, 2, 1]);
+    expect(rowsAbc).toEqual(copy);
   });
 });
