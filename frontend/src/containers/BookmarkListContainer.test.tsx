@@ -57,27 +57,29 @@ describe("BookmarkListContainer", () => {
     expect(screen.getByText("Berserk")).toBeInTheDocument();
     expect(screen.getByText("Vagabond")).toBeInTheDocument();
 
-    // The never-read row shows an em dash, not "null" or 0. Index 0: the
-    // progress editor is rendered before the score editor.
+    // The never-read row shows a placeholder rest label, not "null" or 0.
     const berserkCard = screen.getByText("Berserk").closest("article")!;
     expect(
-      within(berserkCard).getAllByTitle(/haz clic para editar/i)[0],
-    ).toHaveTextContent("—");
+      within(berserkCard).getByRole("button", { name: /^Editar capítulo leído/ }),
+    ).toHaveTextContent("cap. —");
     expect(within(berserkCard).queryByText(/null/)).not.toBeInTheDocument();
 
-    // The approx row carries the "~" marker.
+    // The approx row carries the dotted-underline marker (design D13),
+    // never the free-standing "~".
     const vagabondCard = screen.getByText("Vagabond").closest("article")!;
-    expect(within(vagabondCard).getByTitle(/aproximado/i)).toHaveTextContent("~");
+    expect(
+      within(vagabondCard).getByRole("button", { name: /^Editar capítulo leído/ }),
+    ).toHaveAttribute("data-approx");
   });
 
-  it("PATCHes only the changed field on an inline progress edit", async () => {
+  it("PATCHes only the changed field from the chapter popover", async () => {
     const fetchMock = stubFetch();
     const user = userEvent.setup();
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[0]);
-    const input = within(card).getByRole("spinbutton");
+    await user.click(within(card).getByRole("button", { name: /^Editar capítulo leído/ }));
+    const input = screen.getByRole("textbox", { name: "Capítulo leído" });
     await user.clear(input);
     await user.type(input, "1105{Enter}");
 
@@ -99,7 +101,11 @@ describe("BookmarkListContainer", () => {
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[1]);
+    // The score editor is still `InlineNumberEdit` this slice (fase 5 slice
+    // 2b builds `ScoreEditor`) -- it is the only element left carrying the
+    // old title attribute, now that the chapter trigger has its own
+    // aria-label instead.
+    await user.click(within(card).getByTitle(/haz clic para editar/i));
     const input = within(card).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "9{Enter}");
@@ -119,7 +125,7 @@ describe("BookmarkListContainer", () => {
     render(<BookmarkListContainer />);
 
     const card = (await screen.findByText("One Piece")).closest("article")!;
-    await user.click(within(card).getAllByTitle(/haz clic para editar/i)[1]);
+    await user.click(within(card).getByTitle(/haz clic para editar/i));
     const input = within(card).getByRole("spinbutton");
     await user.clear(input);
     await user.tab();
@@ -231,6 +237,161 @@ describe("BookmarkListContainer", () => {
       ).toBe(false);
       // The grid is unchanged: still on "reading", still showing One Piece.
       expect(screen.getByText("One Piece")).toBeInTheDocument();
+    });
+  });
+
+  describe("the PATCH write queue (fase 5 slice 2a, design D5)", () => {
+    /** A promise this test settles by hand, so it can control exactly when
+     *  each PATCH "response" arrives, independent of the other. */
+    function createDeferred() {
+      let resolve!: (value: Response) => void;
+      const promise = new Promise<Response>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    it(
+      "serializes a rapid burst of chapter commits for one bookmark: the second " +
+        "PATCH is not even sent until the first's write and refetch settle, " +
+        "exactly one refetch follows the whole burst, and the final displayed " +
+        "value is the later commit -- never the earlier response",
+      async () => {
+        const user = userEvent.setup();
+        const original = payload;
+        // The state the server would report after both stepper commits
+        // (1100 -> 1101 -> 1102) have actually been applied.
+        const afterBurst = payload.map((bookmark) =>
+          bookmark.id === 1 ? { ...bookmark, last_chapter_read: 1102 } : bookmark,
+        );
+
+        const patchDeferreds = [createDeferred(), createDeferred()];
+        let patchCalls = 0;
+        let getCalls = 0;
+        const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          if (init?.method === "PATCH") {
+            const deferred = patchDeferreds[patchCalls];
+            patchCalls += 1;
+            return deferred.promise;
+          }
+          getCalls += 1;
+          return jsonResponse(getCalls === 1 ? original : afterBurst);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        render(<BookmarkListContainer />);
+        const card = (await screen.findByText("One Piece")).closest("article")!;
+        await user.click(within(card).getByRole("button", { name: /^Editar capítulo leído/ }));
+        const plus = screen.getByRole("button", { name: "Uno más" });
+
+        // Two rapid stepper commits for the SAME bookmark: each commits
+        // immediately (design D11), with no blur or Enter in between.
+        await user.click(plus);
+        await user.click(plus);
+
+        // The discriminating assertion: a naive implementation that just
+        // fires requests would have already called `patchBookmark` twice
+        // by this point (both commits dispatched back to back). The
+        // correctly-serialized queue has not sent the second write yet --
+        // it is still waiting on the first's own cycle to settle.
+        await waitFor(() => expect(patchCalls).toBe(1));
+        expect(getCalls).toBe(1); // just the initial load so far
+
+        // The FIRST (earlier) write's response arrives. Because the second
+        // commit already bumped the sequence, this link's own refetch is
+        // skipped -- but the queue is now free to send the second write.
+        patchDeferreds[0].resolve(jsonResponse({}));
+        await waitFor(() => expect(patchCalls).toBe(2));
+        expect(getCalls).toBe(1); // still no refetch: link 1's was skipped
+
+        // The SECOND (later, freshest) write's response arrives.
+        patchDeferreds[1].resolve(jsonResponse({}));
+
+        // Exactly one refetch follows the whole burst, and the displayed
+        // value reflects the later commit -- an earlier response can never
+        // overwrite it, by construction.
+        await waitFor(() => expect(getCalls).toBe(2));
+        await waitFor(() =>
+          expect(
+            within(card).getByRole("button", { name: /^Editar capítulo leído/ }),
+          ).toHaveTextContent("cap. 1102"),
+        );
+        expect(getCalls).toBe(2);
+      },
+    );
+  });
+
+  describe("the ordering freeze while a popover is open (fase 5 slice 2a, design D3/D4)", () => {
+    const rowA = makeBookmark({
+      id: 101,
+      title: "Alpha Manga",
+      last_chapter_read: 99,
+      latest_chapter_num: 100,
+      behind: 1,
+      last_read_at: "2026-08-20T10:00:00Z",
+    });
+    const rowB = makeBookmark({
+      id: 102,
+      title: "Beta Manga",
+      last_chapter_read: 10,
+      latest_chapter_num: 50,
+      behind: 40,
+      last_read_at: "2026-08-10T10:00:00Z",
+    });
+
+    function stubFetchForFreeze() {
+      let getCalls = 0;
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PATCH") return jsonResponse({});
+        getCalls += 1;
+        // After the edit's refetch, Alpha is caught up.
+        return jsonResponse(
+          getCalls === 1
+            ? [rowA, rowB]
+            : [{ ...rowA, last_chapter_read: 100, behind: 0 }, rowB],
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    const titlesInOrder = () =>
+      screen
+        .getAllByRole("article")
+        .map((article) => within(article).getByRole("heading").textContent);
+
+    it("does not reorder mid-edit even once the edit makes the row caught-up, then re-sorts and returns focus on close", async () => {
+      stubFetchForFreeze();
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("Alpha Manga");
+
+      // Alpha is read more recently and neither row is caught up yet, so it
+      // sorts first.
+      expect(titlesInOrder()).toEqual(["Alpha Manga", "Beta Manga"]);
+
+      const trigger = screen.getByRole("button", {
+        name: /^Editar capítulo leído de Alpha Manga/,
+      });
+      await user.click(trigger);
+      // The stepper commits immediately but does not close the popover.
+      await user.click(screen.getByRole("button", { name: "Uno más" }));
+
+      // Wait for the fresh (now caught-up) data to actually land, so the
+      // very next assertion proves the freeze -- not just timing.
+      await waitFor(() => expect(screen.getByText("Al día")).toBeInTheDocument());
+
+      // Still open: Alpha has not moved, even though it is now caught up.
+      expect(titlesInOrder()).toEqual(["Alpha Manga", "Beta Manga"]);
+
+      await user.keyboard("{Escape}");
+
+      // Closed: the list re-sorts (Alpha sinks below Beta), and focus
+      // returns to the trigger that opened the popover.
+      await waitFor(() => expect(titlesInOrder()).toEqual(["Beta Manga", "Alpha Manga"]));
+      expect(
+        screen.getByRole("button", { name: /^Editar capítulo leído de Alpha Manga/ }),
+      ).toHaveFocus();
     });
   });
 });

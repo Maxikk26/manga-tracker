@@ -5,30 +5,32 @@ import { BookmarkCard } from "./BookmarkCard";
 import { makeBookmark } from "../test/fixtures";
 import type { Bookmark } from "../domain/types";
 
-function renderCard(bookmark: Bookmark, { saving = false } = {}) {
+function renderCard(bookmark: Bookmark, { saving = false, showStatus = false } = {}) {
   const onChangeProgress = vi.fn();
   const onChangeStatus = vi.fn();
   const onChangeScore = vi.fn();
+  const onEditingChange = vi.fn();
   render(
     <BookmarkCard
       bookmark={bookmark}
       saving={saving}
+      showStatus={showStatus}
       onChangeProgress={onChangeProgress}
       onChangeStatus={onChangeStatus}
       onChangeScore={onChangeScore}
+      onEditingChange={onEditingChange}
     />,
   );
-  return { onChangeProgress, onChangeStatus, onChangeScore };
+  return { onChangeProgress, onChangeStatus, onChangeScore, onEditingChange };
 }
 
 const image = () => document.querySelector("img.cover-image") as HTMLImageElement | null;
 
-// The progress and score editors are both `InlineNumberEdit`s and share the
-// exact same accessible name -- rendered in this order (progress first),
-// which is what disambiguates them here, not a new label (BookmarkCard is
-// placed plainly per the hard constraint: zero visual/labelling decisions).
-const progressEditor = () => screen.getAllByTitle(/haz clic para editar/i)[0];
-const scoreEditor = () => screen.getAllByTitle(/haz clic para editar/i)[1];
+// The chapter trigger opens a popover (fase 5 slice 2a) and carries its own
+// aria-label; the score editor is still `InlineNumberEdit` this slice, the
+// only element left with the old title attribute.
+const chapterTrigger = () => screen.getByRole("button", { name: /^Editar capítulo leído/ });
+const scoreEditor = () => screen.getByTitle(/haz clic para editar/i);
 
 describe("the cover", () => {
   it("asks the panel's own api, never the address the database stored", () => {
@@ -154,19 +156,7 @@ describe("the caught-up fade and its chip", () => {
   });
 
   it("shows the status pill instead of Al día when showStatus is set, even caught up", () => {
-    const onChangeProgress = vi.fn();
-    const onChangeStatus = vi.fn();
-    const onChangeScore = vi.fn();
-    render(
-      <BookmarkCard
-        bookmark={makeBookmark({ behind: 0, status: "dropped" })}
-        saving={false}
-        showStatus
-        onChangeProgress={onChangeProgress}
-        onChangeStatus={onChangeStatus}
-        onChangeScore={onChangeScore}
-      />,
-    );
+    renderCard(makeBookmark({ behind: 0, status: "dropped" }), { showStatus: true });
 
     // Not `getByText`: the status `<select>` (task 1.4) also renders an
     // "Abandonado" option, so the chip is asserted by its own selector.
@@ -175,45 +165,49 @@ describe("the caught-up fade and its chip", () => {
   });
 });
 
-describe("progress", () => {
-  it("renders '~' when progress_is_approx is true (JSON boolean, not 0/1)", () => {
+describe("the chapter trigger and its popover (fase 5 slice 2a)", () => {
+  it("carries the dotted-underline marker when progress_is_approx is true", () => {
     renderCard(makeBookmark({ progress_is_approx: true }));
-    expect(screen.getByTitle(/aproximado/i)).toHaveTextContent("~");
+    expect(chapterTrigger()).toHaveAttribute("data-approx");
   });
 
-  it("does not render '~' when progress_is_approx is false", () => {
+  it("carries no marker when progress_is_approx is false", () => {
     renderCard(makeBookmark({ progress_is_approx: false }));
-    expect(screen.queryByTitle(/aproximado/i)).not.toBeInTheDocument();
+    expect(chapterTrigger()).not.toHaveAttribute("data-approx");
   });
 
-  it("renders an em dash for a never-read bookmark, never the string 'null'", () => {
+  it("shows a placeholder rest label for a never-read bookmark, never the literal string 'null'", () => {
     renderCard(makeBookmark({ last_chapter_read: null, behind: null }));
 
-    expect(progressEditor()).toHaveTextContent("—");
+    expect(chapterTrigger()).toHaveTextContent("cap. —");
     expect(screen.queryByText(/null/)).not.toBeInTheDocument();
   });
 
-  it("opens an empty editor and fires no PATCH on blur without typing", async () => {
+  it("opens the chapter popover on click and reports it upward via onEditingChange", async () => {
     const user = userEvent.setup();
-    const { onChangeProgress } = renderCard(makeBookmark({ last_chapter_read: null }));
+    const { onEditingChange } = renderCard(makeBookmark({ id: 42 }));
 
-    await user.click(progressEditor());
-    expect(screen.getByRole("spinbutton")).toHaveValue(null); // empty, not 0
+    await user.click(chapterTrigger());
 
-    await user.tab();
-    expect(onChangeProgress).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onEditingChange).toHaveBeenCalledExactlyOnceWith(42, true);
   });
 
-  it("fires onChangeProgress with the bookmark id and the committed value", async () => {
+  it("wires the popover's commit to onChangeProgress with the bookmark id", async () => {
     const user = userEvent.setup();
     const { onChangeProgress } = renderCard(makeBookmark({ id: 42, last_chapter_read: 10 }));
 
-    await user.click(progressEditor());
-    const input = screen.getByRole("spinbutton");
+    await user.click(chapterTrigger());
+    const input = screen.getByRole("textbox", { name: "Capítulo leído" });
     await user.clear(input);
     await user.type(input, "12{Enter}");
 
     expect(onChangeProgress).toHaveBeenCalledExactlyOnceWith(42, 12);
+  });
+
+  it("is never disabled while the row is saving (design D5 -- the queue provides ordering, not `disabled`)", () => {
+    renderCard(makeBookmark(), { saving: true });
+    expect(chapterTrigger()).not.toBeDisabled();
   });
 });
 
