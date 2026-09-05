@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyFrozenOrder, sortBookmarksForTab } from "./sortBookmarks";
-import type { Bookmark, BookmarkStatus } from "./types";
+import { applyFrozenOrder, sortBookmarksForAll, sortBookmarksForTab } from "./sortBookmarks";
+import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "./types";
 
 function bookmark(
   id: number,
@@ -223,6 +223,61 @@ describe("sortBookmarksForTab: reading puts what you owe first", () => {
       "on_hold",
     );
     expect(titlesOf(sorted)).toEqual(["Pausada ayer", "Pausada en junio"]);
+  });
+});
+
+describe("sortBookmarksForAll", () => {
+  // One bookmark per status, each carrying data that would make a global
+  // (non-contiguous) sort visibly reorder them across tabs -- caught-up
+  // "reading" rows sink within "reading", `on_hold` orders by its own
+  // pause date, etc.
+  const rows: Bookmark[] = [
+    { ...bookmark(1, "Reading caught up", "2026-08-18T10:00:00Z"), behind: 0 },
+    { ...bookmark(2, "Reading behind", "2026-08-01T10:00:00Z"), behind: 5 },
+    bookmark(3, "Want to read", null, "want_to_read"),
+    bookmark(4, "Completed", null, "completed"),
+    paused(5, "On hold recent", "2026-08-17T10:00:00Z"),
+    paused(6, "On hold old", "2026-06-01T10:00:00Z"),
+    bookmark(7, "Dropped", null, "dropped"),
+  ];
+
+  it("groups the output contiguously by BOOKMARK_STATUSES order", () => {
+    const result = sortBookmarksForAll(rows);
+    const statusesSeen = result.map((row) => row.status);
+    // Contiguous: once a status' block ends, it never reappears later.
+    const firstSeenAt = new Map<BookmarkStatus, number>();
+    statusesSeen.forEach((status, index) => {
+      if (!firstSeenAt.has(status)) firstSeenAt.set(status, index);
+    });
+    const order = [...firstSeenAt.entries()].sort((a, b) => a[1] - b[1]).map(([s]) => s);
+    expect(order).toEqual(
+      BOOKMARK_STATUSES.filter((status) => statusesSeen.includes(status)),
+    );
+    let lastIndexOfPreviousBlock = -1;
+    for (const status of order) {
+      const indices = statusesSeen
+        .map((s, i) => (s === status ? i : -1))
+        .filter((i) => i !== -1);
+      expect(Math.min(...indices)).toBeGreaterThan(lastIndexOfPreviousBlock);
+      lastIndexOfPreviousBlock = Math.max(...indices);
+    }
+  });
+
+  it("matches, per status, the output of that status' own sortBookmarksForTab -- the property " +
+    "that guards against PROTO's global-partition bug ever creeping back in", () => {
+    const result = sortBookmarksForAll(rows);
+    for (const status of BOOKMARK_STATUSES) {
+      const fromAll = result.filter((row) => row.status === status);
+      const fromTab = sortBookmarksForTab(
+        rows.filter((row) => row.status === status),
+        status,
+      );
+      expect(fromAll).toEqual(fromTab);
+    }
+  });
+
+  it("never returns the caller's array", () => {
+    expect(sortBookmarksForAll(rows)).not.toBe(rows);
   });
 });
 

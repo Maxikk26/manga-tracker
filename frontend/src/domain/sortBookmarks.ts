@@ -1,4 +1,4 @@
-import type { Bookmark, BookmarkStatus } from "./types";
+import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "./types";
 
 /**
  * Per-tab ordering.
@@ -85,6 +85,28 @@ export function sortBookmarksForTab(
     const caughtUp = Number(isCaughtUp(a)) - Number(isCaughtUp(b));
     return caughtUp !== 0 ? caughtUp : byDate(a, b);
   });
+}
+
+/**
+ * The "Todo" tab's own ordering (fase 5 slice 3, design D9): each status'
+ * rows, sorted by that status' own `sortBookmarksForTab`, concatenated in
+ * `BOOKMARK_STATUSES` order.
+ *
+ * PROTO's `sorted()` is not ported: it runs one global `isDone` partition
+ * over the merged rows, which interleaves tabs the moment a non-"reading"
+ * row carries live `behind` data (and "on_hold" is still swept by it) --
+ * production's per-tab order is shipped and asserted, PROTO's is arbitrary.
+ * O(5n) over ~236 rows is free, and the property is directly testable: for
+ * every status, `sortBookmarksForAll(rows).filter(bySameStatus)` must
+ * deep-equal that status' own `sortBookmarksForTab` output.
+ */
+export function sortBookmarksForAll(bookmarks: readonly Bookmark[]): Bookmark[] {
+  return BOOKMARK_STATUSES.flatMap((status) =>
+    sortBookmarksForTab(
+      bookmarks.filter((bookmark) => bookmark.status === status),
+      status,
+    ),
+  );
 }
 
 /**

@@ -8,6 +8,14 @@ export const BOOKMARK_STATUSES = [
 
 export type BookmarkStatus = (typeof BOOKMARK_STATUSES)[number];
 
+/** The "Todo" tab's sentinel (fase 5 slice 3, design D8): a literal, not
+ *  `null` -- `null` is this codebase's *unknown* idiom, so a null tab would
+ *  read as "no tab selected" rather than "every tab". Only the container's
+ *  `activeTab` and `StatusTabs`' props see `TabKey`; `sortBookmarksForTab`
+ *  keeps its existing `BookmarkStatus`-only signature. */
+export const ALL_TAB = "all" as const;
+export type TabKey = BookmarkStatus | typeof ALL_TAB;
+
 export interface Bookmark {
   id: number;
   manga_id: number;
