@@ -1,6 +1,6 @@
 # Spec: Modelo de datos (SQLite) — manga-tracker V1a
 
-Versión 1.9 — 2026-08-18. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
+Versión 1.10 — 2026-09-04. Documento 2 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14). Define el esquema completo de la base de datos que se crea desde el primer día de V1a, aunque varias piezas (import Kitsu, cadencia, estadísticas) lo llenen después o lo consuman recién en V1b.
 
 ## Resumen
 
@@ -11,10 +11,12 @@ Versión 1.9 — 2026-08-18. Documento 2 del paquete SDD. Depende de `one-pager-
 | **Los dos capítulos** | `bookmarks.last_chapter_read` (por cuál voy yo) y `manga_sites.latest_chapter_num` (último publicado en la fuente). No existe una tercera noción de capítulo; `latest_chapter_seen`/`latest_chapter_available` están retirados | §Glosario |
 | **Timestamps** | Texto ISO 8601 **en UTC**, siempre. La zona local (America/Caracas) la aplica el backend al presentar, y **antes** de agrupar en toda agregación por día calendario | §Convenciones globales |
 | **Capturar lo irrecuperable** | `chapter_history` (lo que publica la fuente) y `reading_history` (lo que leo yo) se escriben desde el día uno aunque nadie las lea hasta V1b. El trigger dispara **solo en UPDATE**, para que el alta masiva del seed y del import no invente 340 lecturas falsas | §Tabla 5, §Tabla 6 |
-| **Fechas de estado** | `bookmarks.status_changed_at` (migración 2) responde "¿desde cuándo está en este estado?". **Sin backfill**: null = desconocido, que es la verdad; copiar `updated_at` habría afirmado que 141 mangas se pausaron el día del import | §Tabla 4 |
+| **Fechas de estado** | `bookmarks.status_changed_at` (migración 2) responde "¿desde cuándo está en este estado?". **Sin backfill**: null = desconocido, que es la verdad; copiar `updated_at` habría afirmado que 141 mangas se pausaron el día del import. El alta del panel **sí** la sella al crear la fila, desde el 2026-08-20 | §Tabla 4, §Pendientes abiertos |
 | **Migraciones** | `PRAGMA user_version` + `MIGRATIONS`. Hay **2** aplicadas. Costo por migración: escribirla idempotente, un test sobre base **en archivo** (nunca `:memory:`), y respaldar antes de desplegar — copiar un archivo | §Versionado del esquema |
 | **Costo operativo** | Cero administración. `job_runs` crece ~5.500 filas/año de texto corto: sin política de retención, y si molesta, purga manual | §Tabla 7 |
 | **Fuera del esquema** | Tabla de usuarios, de notificaciones enviadas, de pendientes de slug, de auditoría; selectores CSS en `sites`; campos de hiatus; y las **imágenes** de portada, que son archivos en disco, no filas | §Qué NO está en el esquema |
+
+Cambios vs 1.9: **se cierra el único pendiente abierto que le quedaba al documento, y llevaba quince días siendo falso.** Decía que el alta de mangas desde el panel *debe* sellar `status_changed_at` al crear el bookmark y que "no hay nada que cambiar hoy: ese formulario todavía no existe". El formulario existe desde el 2026-08-20 y `write_manual_add` (`manga_tracker/storage/repositories.py`) sella la columna en el mismo `INSERT` del bookmark, con el mismo `now` que el resto de la transacción. `spec-panel-v1b.md` lo dio por cerrado en su v1.3 **ese mismo día**; este documento nunca se enteró, y un pendiente cerrado en el documento vecino sigue abierto aquí hasta que alguien lo escriba — que es exactamente la clase de afirmación que se lee al principio de una sesión y se cree. El pendiente queda tachado con su cierre en vez de borrado, y la fila **Fechas de estado** del Resumen lo registra. **El esquema no cambia**: no hay migración nueva, siguen siendo dos.
 
 Cambios vs 1.8: **el esquema gana `bookmarks.status_changed_at` como migración 2**, y con ella la respuesta a "¿desde cuándo está pausado esto?", que hasta hoy no existía — `updated_at` no servía de sustituto y la razón está medida, no supuesta (las 141 filas `on_hold` de producción cargan exactamente dos valores distintos, así que ordenar por ahí produce dos bloques y no un orden). Se registra también que el **cache de portadas existe y deliberadamente no es esquema**: las imágenes viven como archivos junto a la base, dentro del mismo volumen, y `mangas.cover_url` sigue siendo la dirección, no la imagen. Y el documento paga su deuda con la convención del `runbook-mantenimiento.md`: gana la sección `## Resumen` inicial, que le faltaba desde la v1.0 — la que traía al final es de trazabilidad y no cumple, porque la convención exige abrir con ella.
 
@@ -288,9 +290,9 @@ Se descarta explícitamente una tabla de auditoría en DB: sería la versión en
 
 ## Pendientes abiertos
 
-- **Alta de mangas desde el panel (fase 3 de V1b) debe sellar `status_changed_at` al crear el bookmark.** Una fila nueva sí conoce la fecha de su estado inicial, así que dejarla en null ahí sería perder un dato disponible, no registrar un desconocido. No hay nada que cambiar hoy: ese formulario todavía no existe.
+- ~~**Alta de mangas desde el panel (fase 3 de V1b) debe sellar `status_changed_at` al crear el bookmark.** Una fila nueva sí conoce la fecha de su estado inicial, así que dejarla en null ahí sería perder un dato disponible, no registrar un desconocido. No hay nada que cambiar hoy: ese formulario todavía no existe.~~ **Cerrado el 2026-08-20: el formulario existe y sella la columna.** `write_manual_add` la incluye en el `INSERT` del bookmark con el mismo `now` que el resto de la transacción, y su docstring registra el porqué — el estado de una fila recién creada acaba de cambiar, por definición, en el momento en que se creó. Se registra tachado y no borrado por el patrón, que es el que vale: el pendiente se abrió porque no había nada que hacer, y siguió abierto **quince días después de que sí lo hubiera**, porque quien lo cerró lo cerró en `spec-panel-v1b.md` (v1.3, el mismo día) y no aquí.
 
-Fuera de eso, el esquema está cerrado para implementación.
+**No queda ningún pendiente abierto**: el esquema está cerrado para implementación.
 
 ## Handoffs a la spec del descubrimiento (documento 3) — RESUELTOS
 
