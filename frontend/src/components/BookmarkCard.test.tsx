@@ -175,10 +175,10 @@ describe("the chapter trigger and its popover (fase 5 slice 2a)", () => {
     expect(chapterTrigger()).not.toHaveAttribute("data-approx");
   });
 
-  it("shows a placeholder rest label for a never-read bookmark, never the literal string 'null'", () => {
+  it("renders 'Sin empezar' for a never-read bookmark, never the literal string 'null' (design D13)", () => {
     renderCard(makeBookmark({ last_chapter_read: null, behind: null }));
 
-    expect(chapterTrigger()).toHaveTextContent("cap. —");
+    expect(chapterTrigger()).toHaveTextContent("Sin empezar");
     expect(screen.queryByText(/null/)).not.toBeInTheDocument();
   });
 

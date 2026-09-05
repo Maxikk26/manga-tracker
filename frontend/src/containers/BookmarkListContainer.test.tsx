@@ -57,11 +57,11 @@ describe("BookmarkListContainer", () => {
     expect(screen.getByText("Berserk")).toBeInTheDocument();
     expect(screen.getByText("Vagabond")).toBeInTheDocument();
 
-    // The never-read row shows a placeholder rest label, not "null" or 0.
+    // The never-read row shows "Sin empezar" (design D13), not "null" or 0.
     const berserkCard = screen.getByText("Berserk").closest("article")!;
     expect(
       within(berserkCard).getByRole("button", { name: /^Editar capítulo leído/ }),
-    ).toHaveTextContent("cap. —");
+    ).toHaveTextContent("Sin empezar");
     expect(within(berserkCard).queryByText(/null/)).not.toBeInTheDocument();
 
     // The approx row carries the dotted-underline marker (design D13),
@@ -390,6 +390,102 @@ describe("BookmarkListContainer", () => {
       expect(
         screen.getByRole("button", { name: /^Editar capítulo leído de Alpha Manga/ }),
       ).toHaveFocus();
+    });
+  });
+
+  describe("search and Todo (fase 5 slice 3)", () => {
+    it(
+      "gives an empty tab with no query a message that never carries «» quoting, distinct from " +
+        "the 'Sin resultados' message a non-matching query produces",
+      async () => {
+        stubFetch();
+        const user = userEvent.setup();
+        render(<BookmarkListContainer />);
+        await screen.findByText("One Piece");
+
+        // "Abandonado" carries zero bookmarks in this fixture payload.
+        await user.click(screen.getByRole("button", { name: /abandonado/i }));
+        const noQueryText = document.querySelector(".empty-state p")!.textContent!;
+        expect(noQueryText).not.toMatch(/«.*»/);
+
+        // Switch to a non-empty tab and type a query that matches nothing.
+        await user.click(screen.getByRole("button", { name: /^leyendo/i }));
+        await user.type(
+          screen.getByRole("searchbox", { name: "Buscar por título" }),
+          "zzz-no-match",
+        );
+
+        await waitFor(() =>
+          expect(document.querySelector(".empty-state p")).toHaveTextContent(
+            /^Sin resultados para «.*» en «.*»\.$/,
+          ),
+        );
+        const noMatchText = document.querySelector(".empty-state p")!.textContent!;
+
+        // The discriminating assertion: the two message shapes never collide.
+        expect(noMatchText).not.toBe(noQueryText);
+      },
+    );
+
+    it(
+      "renders 'Sin empezar' for a never-read bookmark from its own tab and from Todo alike, " +
+        "never the literal string 'null'",
+      async () => {
+        stubFetch();
+        const user = userEvent.setup();
+        render(<BookmarkListContainer />);
+
+        // Own tab ("Leyendo", the default activeTab).
+        const berserkOwnTab = (await screen.findByText("Berserk")).closest("article")!;
+        expect(
+          within(berserkOwnTab).getByRole("button", { name: /^Editar capítulo leído/ }),
+        ).toHaveTextContent("Sin empezar");
+        expect(within(berserkOwnTab).queryByText(/null/)).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /^Todo/ }));
+
+        const berserkInTodo = (await screen.findByText("Berserk")).closest("article")!;
+        expect(
+          within(berserkInTodo).getByRole("button", { name: /^Editar capítulo leído/ }),
+        ).toHaveTextContent("Sin empezar");
+        expect(within(berserkInTodo).queryByText(/null/)).not.toBeInTheDocument();
+      },
+    );
+
+    it("the scope-jump button switches to Todo, keeps the typed query, and refocuses the search field", async () => {
+      stubFetch();
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("One Piece");
+
+      await user.click(screen.getByRole("button", { name: /abandonado/i }));
+      await user.type(screen.getByRole("searchbox", { name: "Buscar por título" }), "one piece");
+
+      const jump = await screen.findByRole("button", { name: "Buscar en toda la lista" });
+      await user.click(jump);
+
+      expect(screen.getByRole("button", { name: /^Todo/ })).toHaveClass("tab-active");
+      const searchInput = screen.getByRole("searchbox", { name: "Buscar por título" });
+      expect(searchInput).toHaveValue("one piece");
+      expect(searchInput).toHaveFocus();
+    });
+
+    it("shows the status pill only in Todo -- the same caught-up card shows Al día in its own tab, never both", async () => {
+      stubFetch();
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      await screen.findByText("One Piece");
+
+      // Vagabond (status "reading", behind: 0) is caught up.
+      const vagabondOwnTab = (await screen.findByText("Vagabond")).closest("article")!;
+      expect(within(vagabondOwnTab).getByText("Al día")).toBeInTheDocument();
+      expect(within(vagabondOwnTab).queryByText("Leyendo")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /^Todo/ }));
+
+      const vagabondInTodo = (await screen.findByText("Vagabond")).closest("article")!;
+      expect(within(vagabondInTodo).getByText("Leyendo")).toBeInTheDocument();
+      expect(within(vagabondInTodo).queryByText("Al día")).not.toBeInTheDocument();
     });
   });
 });
