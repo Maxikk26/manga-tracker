@@ -11,7 +11,7 @@ week. Read-only - adds no new state; job_runs already records every run."""
 from datetime import datetime, timedelta, timezone
 
 from manga_tracker.discovery import runs
-from manga_tracker.notifier.contracts import HeartbeatReport
+from manga_tracker.notifier.contracts import DegradedRun, HeartbeatReport
 
 JOB_NAME = "heartbeat"
 # onhold_sweep is deliberately NOT here, now that it exists. It notifies nothing,
@@ -23,7 +23,14 @@ JOB_NAME = "heartbeat"
 DETECTION_JOBS = ("feed_check", "active_sweep")
 # Reported alongside them, never counted among them. See ONHOLD_SWEEP_JOB below.
 ONHOLD_SWEEP_JOB = "onhold_sweep"
-DEGRADED_WINDOW_DAYS = 7
+# Governs both weekly aggregates below: degraded runs and detections.
+WEEK_WINDOW_DAYS = 7
+# How many degraded runs the message names. A bad week is dominated by one cause
+# repeating - four identical DNS failures in production, August 2026 - so the
+# newest few identify it, and the count line already carries the true total.
+# The cap exists because Telegram truncates at 4096 characters: an unbounded
+# list would let a bad week silently cut off the on-hold line under it.
+DEGRADED_DETAIL_LIMIT = 5
 
 
 def _last_successful_run_at(conn) -> str | None:
@@ -48,17 +55,65 @@ def _tracked_and_behind_counts(conn) -> tuple[int, int]:
     return row[0], row[1] or 0
 
 
-def _degraded_run_count(conn, now: str) -> int:
-    cutoff = (
+def _week_cutoff(now: str) -> str:
+    return (
         datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        - timedelta(days=DEGRADED_WINDOW_DAYS)
+        - timedelta(days=WEEK_WINDOW_DAYS)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _degraded_run_count(conn, now: str) -> int:
     row = conn.execute(
         "SELECT COUNT(*) FROM job_runs WHERE job_name IN (?, ?) AND status IN ('partial', 'error') "
         "AND started_at >= ?",
-        (*DETECTION_JOBS, cutoff),
+        (*DETECTION_JOBS, _week_cutoff(now)),
     ).fetchone()
     return row[0]
+
+
+def _degraded_runs(conn, now: str) -> tuple[DegradedRun, ...]:
+    """The newest degraded runs, named and dated, capped at DEGRADED_DETAIL_LIMIT.
+
+    Deliberately a second query rather than a widening of `_degraded_run_count`:
+    the count must stay uncapped so the message can say "3 of 12" honestly. A
+    single capped query would have silently redefined the number the owner has
+    been reading since v1.2.
+    """
+    rows = conn.execute(
+        "SELECT job_name, started_at, status, error_summary FROM job_runs "
+        "WHERE job_name IN (?, ?) AND status IN ('partial', 'error') AND started_at >= ? "
+        "ORDER BY started_at DESC LIMIT ?",
+        (*DETECTION_JOBS, _week_cutoff(now), DEGRADED_DETAIL_LIMIT),
+    ).fetchall()
+    return tuple(DegradedRun(job_name=r[0], started_at=r[1], status=r[2], error_summary=r[3]) for r in rows)
+
+
+def _detections_by_job(conn, now: str) -> tuple[tuple[str, int], ...]:
+    """Chapters detected per detection job over the window.
+
+    Sums `updates_found`, which every job has written since V1a and which no
+    query read until now. That is the hole: every other field in this message
+    reports that runs *happened*, never that they *found* anything, so a source
+    that changes shape - parsed fine, matched nothing - keeps the heartbeat
+    looking healthy while detection is dead.
+
+    Counts `partial` and `error` rows too, not just `ok`. A partial run really
+    did detect something (it wrote chapter_history; only the send failed), and
+    excluding it would under-report a real detection as zero - the exact
+    direction of error this line exists to prevent.
+
+    Returned in DETECTION_JOBS order with an explicit zero for a job that logged
+    nothing, so a job that stops running renders `0` instead of vanishing from
+    the message.
+    """
+    rows = dict(
+        conn.execute(
+            "SELECT job_name, SUM(IFNULL(updates_found, 0)) FROM job_runs "
+            "WHERE job_name IN (?, ?) AND started_at >= ? GROUP BY job_name",
+            (*DETECTION_JOBS, _week_cutoff(now)),
+        ).fetchall()
+    )
+    return tuple((job, int(rows.get(job) or 0)) for job in DETECTION_JOBS)
 
 
 def _last_onhold_sweep(conn) -> tuple[str | None, int, int]:
@@ -92,6 +147,8 @@ def heartbeat(conn, client, sender, *, now: str, logger) -> None:
         tracked_count=tracked,
         behind_count=behind,
         degraded_run_count=_degraded_run_count(conn, now),
+        detections_by_job=_detections_by_job(conn, now),
+        degraded_runs=_degraded_runs(conn, now),
         onhold_sweep_at=onhold_at,
         onhold_swept_count=onhold_swept,
         onhold_updates_count=onhold_updates,
