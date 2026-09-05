@@ -86,6 +86,71 @@ def _format_header(count: int, now: str, timezone_name: str) -> str:
     return f"\U0001F4EC {_plural(count, 'novedad', 'novedades')} — {_format_local(now, timezone_name)}"
 
 
+# Job names are schema values (CHECK-constrained, never translated); these are
+# the reader-facing words for them. An unmapped job falls back to its raw name
+# rather than disappearing, so widening DETECTION_JOBS degrades to ugly, not silent.
+JOB_LABELS_ES = {"feed_check": "feed", "active_sweep": "barrido"}
+# Telegram truncates the whole message at 4096 characters, and the source's
+# transient errors run long (a curl failure quotes a documentation URL). Cutting
+# each summary keeps a bad week from pushing the lines below it off the message.
+#
+# 140 rather than a rounder 90, and the difference is the whole feature: the
+# client prefixes ~75 characters of boilerplate ("Transient: transport failed
+# after one retry: Failed to perform, curl: (6) ") before the part that says
+# what actually broke. At 90 the real production DNS failure cut off mid-phrase
+# as "Could not resol…", which is exactly the ssh session this line exists to
+# avoid. Worst case is DEGRADED_DETAIL_LIMIT lines of ~160 characters - far
+# inside the Telegram ceiling.
+SUMMARY_MAX_CHARS = 140
+
+
+def _job_label(job_name: str) -> str:
+    return JOB_LABELS_ES.get(job_name, job_name)
+
+
+def _format_detections(report: HeartbeatReport) -> str:
+    """Chapters detected this week, per job.
+
+    The zero case gets its own sentence and a warning glyph instead of rendering
+    "0", and that asymmetry is the entire point of the line. Every other field
+    in this message reports that runs *happened*; a source that changes shape
+    still runs, still parses, and simply matches nothing - so it reads as
+    healthy everywhere else. Zero detections across a full week is the one
+    number that cannot be explained by a quiet week on a list this size.
+    """
+    detail = ", ".join(f"{_job_label(job)} {count}" for job, count in report.detections_by_job)
+    total = sum(count for _, count in report.detections_by_job)
+    if total == 0:
+        return f"⚠️ Sin capítulos detectados en 7 días ({detail})"
+    return f"Capítulos detectados esta semana: {total} ({detail})"
+
+
+def _format_degraded_detail(report: HeartbeatReport, timezone_name: str) -> str:
+    """The named runs behind the degraded count - empty string when there are none.
+
+    Until v1.8 the count was a bare integer, so acting on it meant an ssh session
+    and a SQL query. Naming the runs here is what makes the number actionable
+    without leaving Telegram.
+    """
+    lines = []
+    for run in report.degraded_runs:
+        when = _format_local(run.started_at, timezone_name)
+        # `partial` never carries an error_summary: the code sets that status
+        # only when a send failed, and that failure is logged, not stored. Saying
+        # what the status means beats rendering an empty field.
+        if run.error_summary:
+            reason = run.error_summary.replace("\n", " ").strip()
+            if len(reason) > SUMMARY_MAX_CHARS:
+                reason = reason[: SUMMARY_MAX_CHARS - 1].rstrip() + "…"
+        else:
+            reason = "envío fallido" if run.status == "partial" else "sin detalle"
+        lines.append(f"  · {_job_label(run.job_name)} {when} — {run.status}: {reason}")
+    hidden = report.degraded_run_count - len(report.degraded_runs)
+    if hidden > 0:
+        lines.append(f"  · … y {hidden} más")
+    return "\n" + "\n".join(lines) if lines else ""
+
+
 def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> str:
     """Weekly heartbeat (recorded spec deviation - see docs follow-up):
     proves the system is alive; silence between heartbeats stays normal."""
@@ -114,8 +179,12 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
         # divergence.
         f"\U0001F493 Heartbeat semanal — {_format_local(now, timezone_name)}\n\n"
         f"Última detección exitosa: {last_run}\n"
+        # Directly under the line above, because the two are a pair and only
+        # together answer the question: runs happened, AND they found something.
+        f"{_format_detections(report)}\n"
         f"Vigilados: {_plural(report.tracked_count, 'título', 'títulos')}, {behind}\n"
-        f"Corridas degradadas esta semana: {report.degraded_run_count} (partial/error)\n"
+        f"Corridas degradadas esta semana: {report.degraded_run_count} (partial/error)"
+        f"{_format_degraded_detail(report, timezone_name)}\n"
         f"{onhold_line}"
     )
 

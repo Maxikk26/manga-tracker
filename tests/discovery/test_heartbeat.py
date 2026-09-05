@@ -7,6 +7,7 @@ import logging
 
 from manga_tracker.discovery.heartbeat import (
     _degraded_run_count,
+    _detections_by_job,
     _last_successful_run_at,
     heartbeat,
 )
@@ -252,3 +253,207 @@ def test_degraded_run_count_never_counts_an_onhold_sweep_failure():
     conn.commit()
 
     assert _degraded_run_count(conn, NOW) == 1
+
+
+# --- v1.8: chapters detected this week, and named degraded runs -------------
+#
+# The heartbeat used to report only that runs *happened*. Everything below
+# covers the two lines that report what they *found* and what went wrong,
+# because a source that changes shape keeps running and stops matching - and
+# every pre-v1.8 field renders that as perfect health.
+
+DNS_FAILURE = (
+    "Transient: transport failed after one retry: Failed to perform, curl: (6) "
+    "Could not resolve host: www.manganato.gg. See "
+    "https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+)
+
+
+def _insert_run(conn, job, started_at, status, *, checked=10, found=0, summary=None):
+    conn.execute(
+        "INSERT INTO job_runs (job_name, started_at, finished_at, status, items_checked, "
+        "updates_found, notifications_sent, error_summary) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+        (job, started_at, started_at, status, checked, found, summary),
+    )
+    conn.commit()
+
+
+def _render(conn):
+    api = FakeApi()
+    heartbeat(conn, client=None, sender=TelegramSender("t", "c", api_call=api), now=NOW, logger=logger)
+    return api.calls[0]["text"]
+
+
+def test_heartbeat_reports_chapters_detected_split_by_job():
+    """The total plus the per-job split, because "which half died" is the
+    question a single number cannot answer: feed and sweep fail independently,
+    and the sweep alone still detects everything within 24 hours."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-24T10:00:00Z", "ok", found=7)
+    _insert_run(conn, "feed_check", "2026-07-25T10:00:00Z", "ok", found=2)
+    _insert_run(conn, "active_sweep", "2026-07-25T03:00:00Z", "ok", found=3)
+
+    assert "Capítulos detectados esta semana: 12 (feed 9, barrido 3)" in _render(conn)
+
+
+def test_zero_detections_is_flagged_even_though_every_run_closed_ok():
+    """THE regression this line exists for - and the reason it is a separate
+    line rather than a refinement of "última detección exitosa".
+
+    Every run here is `ok`, finished, and examined items, so it satisfies
+    FINISHED_WITH_EVIDENCE and the detection line reports a healthy, recent
+    timestamp. That is exactly what a source-shape change produces: the feed
+    still parses, the items simply stop matching the reading list
+    (`feed_check.py` discards a non-matching item silently), so `items_checked`
+    stays nonzero and the run closes green.
+
+    Both assertions together are the test. The first proves the warning fires;
+    the second proves the old line still says everything is fine - if a future
+    change made the detection timestamp go stale here too, this test would stop
+    covering the case it was written for.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-25T10:00:00Z", "ok", checked=24, found=0)
+    _insert_run(conn, "active_sweep", "2026-07-25T03:00:00Z", "ok", checked=60, found=0)
+
+    text = _render(conn)
+    assert "⚠️ Sin capítulos detectados en 7 días (feed 0, barrido 0)" in text
+    assert "Última detección exitosa: 25 jul" in text  # green, and wrong - hence the warning
+
+
+def test_detections_count_a_partial_run_that_really_detected_something():
+    """A `partial` means the *send* failed, never the detection: the run had
+    already written chapter_history. Excluding it would under-report a real
+    chapter as zero, which is the one direction of error this line must not
+    make - it would raise a false "source is dead" alarm on a working source.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-25T10:00:00Z", "partial", found=1)
+
+    assert _detections_by_job(conn, NOW) == (("feed_check", 1), ("active_sweep", 0))
+    assert "Capítulos detectados esta semana: 1 (feed 1, barrido 0)" in _render(conn)
+
+
+def test_a_job_that_never_ran_renders_zero_instead_of_vanishing():
+    """A job missing from the GROUP BY must still appear. If `feed_check` stops
+    firing entirely, "barrido 3" alone reads as a healthy week; "feed 0,
+    barrido 3" names the half that died."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "active_sweep", "2026-07-25T03:00:00Z", "ok", found=3)
+
+    assert _detections_by_job(conn, NOW) == (("feed_check", 0), ("active_sweep", 3))
+    assert "(feed 0, barrido 3)" in _render(conn)
+
+
+def test_detections_ignore_runs_older_than_the_window():
+    """Same 7-day window as the degraded count. A busy month followed by a dead
+    week must read as a dead week."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-10T10:00:00Z", "ok", found=40)  # 16 days before NOW
+
+    assert _detections_by_job(conn, NOW) == (("feed_check", 0), ("active_sweep", 0))
+    assert "⚠️ Sin capítulos detectados en 7 días" in _render(conn)
+
+
+def test_onhold_sweep_updates_never_count_as_detections():
+    """The same exclusion the detection timestamp and the degraded count already
+    enforce, pointed at the new line. The on-hold sweep applies silent updates
+    by design, so counting its `updates_found` would let 6 silent on-hold
+    updates mask a week in which nothing that notifies detected anything.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=9)
+    _insert_run(conn, "onhold_sweep", "2026-07-25T02:00:00Z", "ok", checked=141, found=6)
+
+    assert _detections_by_job(conn, NOW) == (("feed_check", 0), ("active_sweep", 0))
+    text = _render(conn)
+    assert "⚠️ Sin capítulos detectados en 7 días (feed 0, barrido 0)" in text
+    assert "6 silenciosas" in text  # still reported on its own line, never as detection
+
+
+def test_degraded_runs_are_named_dated_and_carry_their_cause():
+    """The count stays, and the detail lands under it. The bare integer was
+    unactionable: acting on "2" meant an ssh session and a SQL query, which is
+    friction that gets skipped - so the number went unread."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-24T10:00:00Z", "error", checked=0, summary=DNS_FAILURE)
+
+    text = _render(conn)
+    assert "Corridas degradadas esta semana: 1 (partial/error)" in text
+    # 10:00Z is 06:00 in Caracas - UTC in the database, local at presentation.
+    assert "· feed 24 jul, 06:00 — error:" in text
+    assert "Could not resolve host: www.manganato.gg" in text
+
+
+def test_a_partial_says_what_partial_means_because_it_stores_no_summary():
+    """`partial` is set only when a send failed, and that failure is logged
+    rather than written to error_summary - so the column is always NULL here.
+    Rendering an empty reason would read as a bug in the heartbeat; naming the
+    status tells the owner the chapter was detected and the message was not
+    delivered, which is the whole diagnosis."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-24T10:00:00Z", "partial", found=1, summary=None)
+
+    assert "— partial: envío fallido" in _render(conn)
+
+
+def test_degraded_detail_is_capped_and_the_count_still_tells_the_truth():
+    """A bad week is dominated by one cause repeating - four identical DNS
+    failures in production, August 2026. The cap keeps the list from pushing the
+    on-hold line past Telegram's 4096-character ceiling, and the uncapped count
+    above it is what keeps the message honest about the real total.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    for hour in range(8):  # 8 degraded runs, DEGRADED_DETAIL_LIMIT is 5
+        _insert_run(conn, "feed_check", "2026-07-24T0%d:00:00Z" % hour, "error", summary="boom")
+
+    text = _render(conn)
+    assert "Corridas degradadas esta semana: 8 (partial/error)" in text
+    assert text.count("· feed ") == 5
+    assert "· … y 3 más" in text
+
+
+def test_a_long_error_summary_is_truncated_but_keeps_the_cause():
+    """Truncation must not cut before the part that says what broke. The client
+    prefixes ~75 characters of boilerplate, so a tight cap turned the real DNS
+    failure into "Could not resol…" - the exact ssh session this line removes.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-24T10:00:00Z", "error", checked=0, summary=DNS_FAILURE)
+
+    line = next(ln for ln in _render(conn).splitlines() if "· feed" in ln)
+    assert "Could not resolve host: www.manganato.gg" in line
+    assert line.endswith("…")  # the documentation URL at the tail is dropped
+    assert len(line) < 200
+
+
+def test_degraded_detail_disappears_entirely_on_a_clean_week():
+    """No empty bullet, no "ninguna" filler. A clean week is the normal case and
+    must stay a compact message."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "A", status="reading", last_chapter_read=1, latest_chapter_num=2)
+    _insert_run(conn, "feed_check", "2026-07-25T10:00:00Z", "ok", found=4)
+
+    text = _render(conn)
+    assert "Corridas degradadas esta semana: 0 (partial/error)\n" in text
+    assert "·" not in text
