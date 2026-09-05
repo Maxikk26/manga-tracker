@@ -86,6 +86,13 @@ class HeartbeatReport:
     # required, so a caller that forgets one fails loudly at construction rather
     # than shipping a heartbeat that quietly omits a line.
     degraded_runs: tuple[DegradedRun, ...]
+    # Whether the most recent on-hold sweep of any status closed badly. The three
+    # fields above report the last *successful* run, so without this the message
+    # shows healthy numbers from last week while every attempt since has failed.
+    # Its failures stay out of `degraded_run_count` for the usual reason - that
+    # sweep notifies nothing, so its health proves nothing about detection - but
+    # staying out of the count is not the same as being reported nowhere.
+    onhold_sweep_degraded: bool
 
 
 class DigestSender(Protocol):
