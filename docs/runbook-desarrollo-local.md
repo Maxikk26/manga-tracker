@@ -1,6 +1,6 @@
 # Runbook: el ambiente de desarrollo local
 
-Versión 1.1 — 2026-08-21. Documento operativo. Depende de `spec-panel-v1b.md` (v1.5) y `runbook-deploy.md` (v1.6).
+Versión 1.1 — 2026-08-21. Documento operativo. Depende de `spec-panel-v1b.md` (v1.13) y `runbook-deploy.md` (v1.8).
 
 Cómo probar cambios en esta máquina sin tocar producción. Escrito porque el servidor se estaba usando como banco de pruebas, que es la forma conocida de perder datos que no se reconstruyen.
 

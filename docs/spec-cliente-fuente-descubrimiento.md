@@ -1,6 +1,6 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.9 — 2026-08-20. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.9), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.9 — 2026-08-20. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
 
 Cambios vs 1.8: **corrección de clasificación en la operación de detalles de la ficha.** `fetch_manga_details` clasificaba con `404` → no encontrado y cualquier otro estado distinto de 200 → inesperado, sin distinguir un 403/429/5xx transitorio del resto; un 403 caía a `parse_manga_details`, que devolvía un título vacío. Corregido: 403, 429 y los 5xx (el mismo `TRANSIENT_STATUS_CODES` que ya usa el transporte) se clasifican como transitorios, igual que en el resto de la taxonomía (§"Taxonomía de errores"); cualquier otro estado distinto de 200/404 sigue siendo inesperado. `fetch_cover` no cambia: su propia divergencia (cualquier estado distinto de 200 es inesperado, sin excepción para 403) es deliberada y queda documentada en su propio punto, arriba. Se corrige también la redacción de ese punto, que hasta la v1.8 leía como una regla general de la spec cuando describe solo el comportamiento de `fetch_cover`.
 
