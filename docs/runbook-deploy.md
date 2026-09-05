@@ -309,7 +309,7 @@ Y respalda tu `seed.csv` en otro lado. Un `.gitignore` evita que lo commitees; *
 | `seed` reporta errores raros en una fila | Un título con coma sin comillas dobles en el CSV |
 | El CLI local no encuentra la base | `DB_PATH` del `.env` sigue apuntando a `data/` del repo |
 | El barrido cierra en un segundo, `items_checked = 0` | La base está vacía o a medio sembrar. Vuelve a correr el paso 3 |
-| Todo verde y no llega nada | Correcto: no hay capítulos nuevos. Verifica con `job_runs` |
+| Todo verde y no llega nada | **No asumas que es correcto.** Es también lo que produce un cambio de forma de la fuente: el feed sigue parseando, los ítems dejan de matchear la lista, `items_checked` queda distinto de cero y la corrida cierra `ok`. Mira `updates_found` sobre varios días, no el estado de la corrida — o espera el heartbeat del domingo, que desde la v1.8 avisa cuando la semana cerró con cero detecciones |
 
 ### Si cortaste el seed con Ctrl+C
 
