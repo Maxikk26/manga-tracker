@@ -63,14 +63,14 @@ Requirements covered: "The card is the poster, with a single non-wrapping meta r
 - [x] 1.11 same file: new test — a caught-up bookmark (`behind: 0`) renders `data-done` on the `article` and, with `showStatus` unset/false, shows the `Al día` chip; a behind bookmark (`behind: 5`) shows neither
 - [x] 1.12 same file: `showStatus={true}` renders the status pill (Spanish label from `STATUS_LABELS`) instead of `Al día`, even when the bookmark is caught up — Requirement "Todo suppresses the Al día chip" (chip half only; `Todo` wiring itself is slice 3)
 - [x] 1.13 new `frontend/src/styles.contract.test.ts`: read `frontend/src/styles.css` as text (**via Vite's `?raw` import, not `fs.readFileSync`** — the frontend tsconfig has no `@types/node`, and `?raw` avoids adding one; `vite.config.ts` gained `test.css: true` so Vitest resolves real content instead of its default CSS stub) and assert (a) the `.meta` rule body contains `white-space: nowrap` — the jsdom-safe proxy for "the meta row must stay on one line" per the design's own jsdom caveat (no real layout in vitest); (b) the `.card-saving` opacity rule is written as the two-class selector `.card.card-saving` and the bare single-class `.card-saving {` selector does **not** appear — regression guard for D7
-- [ ] 1.14 keep the existing "progress"/"score"/"status" `describe` blocks in `BookmarkCard.test.tsx` unmodified this slice — the `~` glyph assertion and the em-dash assertion stay true until slices 2a/2b replace the editors that render them
+- [x] 1.14 keep the existing "progress"/"score"/"status" `describe` blocks in `BookmarkCard.test.tsx` unmodified this slice — the `~` glyph assertion and the em-dash assertion stay true until slices 2a/2b replace the editors that render them
 
 **Docs**
-- [ ] 1.15 `docs/spec-panel-v1b.md` → v1.11: record §El rumbo visual / §La tarjeta as implemented per this design; changelog entry naming the four slices
+- [x] 1.15 `docs/spec-panel-v1b.md` → v1.11: record §El rumbo visual / §La tarjeta as implemented per this design; changelog entry naming the four slices
 
 **Final**
-- [ ] 1.16 `cd frontend && npm test` and `npm run build` both green (the latter runs `tsc --noEmit` — catches the `showStatus` prop-shape drift `vitest` alone would miss)
-- [ ] 1.17 `./.venv/Scripts/python.exe -m pytest -q` untouched-green (no `manga_tracker/` file was touched)
+- [x] 1.16 `cd frontend && npm test` and `npm run build` both green (the latter runs `tsc --noEmit` — catches the `showStatus` prop-shape drift `vitest` alone would miss)
+- [x] 1.17 `./.venv/Scripts/python.exe -m pytest -q` untouched-green (no `manga_tracker/` file was touched)
 
 ## Slice 2a — Popover shell + chapter editor + write machinery (~700-780 lines), branch `feat/panel-v1b-fase-5-popover-chapter`, base PR1 branch
 
