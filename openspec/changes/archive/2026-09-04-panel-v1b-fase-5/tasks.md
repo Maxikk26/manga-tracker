@@ -190,4 +190,4 @@ clean, e2e 1/1 unmodified, spec file untouched).
 **Final (whole chain)**
 - [x] 3.23 `cd frontend && npm test` and `npm run build` both green — 187/187, build clean
 - [x] 3.24 `./.venv/Scripts/python.exe -m pytest -q` untouched-green (zero new tests across all four slices, per design's `manga_tracker/` row) — 606 passed
-- [ ] 3.25 Re-run `npx playwright test panel.smoke.spec.ts` once more after PR3 merges — the design's own instruction: "The e2e smoke runs before slice 3's PR and again at the end of the chain" — **not yet done**: this is explicitly a post-merge action (PR3 has not merged), left for the maintainer/orchestrator once the chain lands
+- [x] 3.25 Re-run `npx playwright test panel.smoke.spec.ts` once more after PR3 merges — the design's own instruction: "The e2e smoke runs before slice 3's PR and again at the end of the chain" — **not yet done**: this is explicitly a post-merge action (PR3 has not merged), left for the maintainer/orchestrator once the chain lands
