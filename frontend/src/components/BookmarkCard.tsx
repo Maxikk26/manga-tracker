@@ -114,10 +114,10 @@ function BookmarkCardComponent({
   ) : null;
 
   const hasTotal = bookmark.latest_chapter_num !== null;
-  // "Sin empezar" (fase 5 slice 3, design D13) is not wired yet -- until
-  // then this keeps the pre-existing null convention rather than ever
-  // interpolating the literal value `null`.
-  const chapterLabel = bookmark.last_chapter_read === null ? "—" : bookmark.last_chapter_read;
+  // A never-read bookmark renders "Sin empezar" (fase 5 slice 3, design
+  // D13), never the literal value `null` and never the rest/full swap --
+  // a ratio needs a real left side, so there is no hover swap either.
+  const neverRead = bookmark.last_chapter_read === null;
   const chapterAriaLabel = [
     `Editar capítulo leído de ${bookmark.title}.`,
     hasTotal && bookmark.last_chapter_read !== null
@@ -157,20 +157,22 @@ function BookmarkCardComponent({
             <button
               ref={chapterTriggerRef}
               type="button"
-              className={hasTotal ? "edit has-total" : "edit"}
+              className={hasTotal && !neverRead ? "edit has-total" : "edit"}
               data-approx={bookmark.progress_is_approx || undefined}
               aria-label={chapterAriaLabel}
               onClick={openChapterPopover}
             >
-              {hasTotal ? (
+              {neverRead ? (
+                "Sin empezar"
+              ) : hasTotal ? (
                 <>
-                  <span className="chapter-rest">cap. {chapterLabel}</span>
+                  <span className="chapter-rest">cap. {bookmark.last_chapter_read}</span>
                   <span className="chapter-full">
-                    {chapterLabel} / {bookmark.latest_chapter_num}
+                    {bookmark.last_chapter_read} / {bookmark.latest_chapter_num}
                   </span>
                 </>
               ) : (
-                `cap. ${chapterLabel}`
+                `cap. ${bookmark.last_chapter_read}`
               )}
             </button>
             <button

@@ -102,14 +102,78 @@ body {
   color: #fff;
 }
 
-/* --- Toolbar (status tabs + add-manga button) --- */
+/* --- Search row (fase 5 slice 3) -- field + the add-manga button, which
+   moves here from the retired `.panel-toolbar` (Q1: the tabs must stay a
+   filter, and a control that filters nothing has no `aria-current` to
+   carry). --- */
 
-.panel-toolbar {
+.search-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  margin: 0 0 0.8rem;
+}
+
+.search-field {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.search-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 2.2rem 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 1.05rem;
+  cursor: pointer;
+}
+
+.search-clear::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.search-clear:hover {
+  color: var(--text);
+}
+
+.search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .add-manga-button {
@@ -151,12 +215,19 @@ body {
   gap: 0.4rem;
 }
 
+/* "Todo" leads the row and is set apart from the five statuses (fase 5
+   slice 3): it is a place, not a sixth status. */
+.tab-all {
+  margin-right: 0.35rem;
+}
+
 .tab {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
   border-radius: 999px;
   padding: 0.3rem 0.85rem;
+  min-height: 44px;
   font-size: 0.88rem;
   cursor: pointer;
 }
@@ -632,10 +703,40 @@ body {
 
 /* --- States and errors --- */
 
+.result-count {
+  margin: 0 0 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .empty-state {
   color: var(--muted);
   padding: 2rem 0;
   text-align: center;
+}
+
+/* The scope-jump button in the "query matches nothing" empty state (fase 5
+   slice 3, Q3): switches to "Todo" while keeping the typed query. */
+.empty-state button {
+  margin-top: 0.6rem;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.empty-state button:hover {
+  border-color: var(--accent);
+}
+
+.empty-state button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .error-panel {

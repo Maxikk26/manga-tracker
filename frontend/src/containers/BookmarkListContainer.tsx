@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, fetchBookmarks, patchBookmark } from "../api/bookmarks";
-import type { Bookmark, BookmarkStatus } from "../domain/types";
+import { ALL_TAB, type Bookmark, type BookmarkStatus, type TabKey } from "../domain/types";
+import { STATUS_LABELS } from "../domain/statusLabels";
 import { StatusTabs } from "../components/StatusTabs";
 import { BookmarkGrid } from "../components/BookmarkGrid";
 import { AddMangaContainer } from "./AddMangaContainer";
-import { applyFrozenOrder, sortBookmarksForTab } from "../domain/sortBookmarks";
+import { filterBookmarks } from "../domain/filterBookmarks";
+import { applyFrozenOrder, sortBookmarksForAll, sortBookmarksForTab } from "../domain/sortBookmarks";
 
 type LoadState = "loading" | "ready" | "error";
+
+/** "Todo" for the sentinel, the Spanish status label otherwise -- used only
+ *  for the result count and the "Sin resultados" message (fase 5 slice 3). */
+function tabName(tab: TabKey): string {
+  return tab === ALL_TAB ? "Todo" : STATUS_LABELS[tab];
+}
 
 /**
  * Container: owns fetching, filtering and the PATCH flow.
@@ -17,10 +25,16 @@ type LoadState = "loading" | "ready" | "error";
 export function BookmarkListContainer() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [activeStatus, setActiveStatus] = useState<BookmarkStatus>("reading");
+  const [activeTab, setActiveTab] = useState<TabKey>("reading");
+  const [query, setQuery] = useState("");
   const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
+
+  // The search field's own node, so the scope-jump (Q3) and the clear
+  // button can return focus to it without a synthetic key or a ref prop
+  // threaded down through a child.
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // The ordering freeze (fase 5 slice 2a, design D3/D4): while any card's
   // popover is open, the list renders the sequence captured at the moment
@@ -125,7 +139,7 @@ export function BookmarkListContainer() {
   const handleAdded = useCallback(
     (added: Bookmark) => {
       setAddModalOpen(false);
-      setActiveStatus(added.status);
+      setActiveTab(added.status);
       void load(false);
     },
     [load],
@@ -133,13 +147,28 @@ export function BookmarkListContainer() {
 
   const handleViewExistingFromAdd = useCallback((status: BookmarkStatus) => {
     setAddModalOpen(false);
-    setActiveStatus(status);
+    setActiveTab(status);
   }, []);
 
   const handleCloseAddModal = useCallback(() => {
     setAddModalOpen(false);
   }, []);
 
+  // The scope jump (Q3, PROTO binding): switches to "Todo" but leaves the
+  // typed query untouched, and returns focus to the field it came from.
+  const handleScopeJump = useCallback(() => {
+    setActiveTab(ALL_TAB);
+    searchInputRef.current?.focus();
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setQuery("");
+    searchInputRef.current?.focus();
+  }, []);
+
+  // Per-status counts, always off the raw fetched list -- the tabs' own
+  // totals are not affected by the search query (design's diagram: counts
+  // come straight off `bookmarks`, before `filterBookmarks` ever runs).
   const counts = useMemo(() => {
     const result: Partial<Record<BookmarkStatus, number>> = {};
     for (const bookmark of bookmarks) {
@@ -148,17 +177,21 @@ export function BookmarkListContainer() {
     return result;
   }, [bookmarks]);
 
+  // The chain is filter -> scope -> sort (design D10): `filterBookmarks`
+  // never sees a status, so the identical function serves both a single
+  // tab and "Todo" -- only the rows handed to it differ.
+  const filtered = useMemo(() => filterBookmarks(bookmarks, query), [bookmarks, query]);
+
   // The tab's true current order -- always fresh, never frozen. This is
   // what the freeze snapshots *from* on open, and what every render falls
   // back to once no popover is open.
-  const sortedVisible = useMemo(
-    () =>
-      sortBookmarksForTab(
-        bookmarks.filter((bookmark) => bookmark.status === activeStatus),
-        activeStatus,
-      ),
-    [bookmarks, activeStatus],
-  );
+  const sortedVisible = useMemo(() => {
+    if (activeTab === ALL_TAB) return sortBookmarksForAll(filtered);
+    return sortBookmarksForTab(
+      filtered.filter((bookmark) => bookmark.status === activeTab),
+      activeTab,
+    );
+  }, [filtered, activeTab]);
 
   // A ref mirror so `handleEditingChange` (a stable callback, memoized with
   // no deps) can read the *current* order without becoming a new function
@@ -180,6 +213,20 @@ export function BookmarkListContainer() {
       ? applyFrozenOrder(sortedVisible, frozenIds)
       : sortedVisible;
 
+  // "Todo" is the only tab where a card could have come from any status,
+  // so it is the only one that ever shows the status pill (closes out
+  // slices 1/1.6's temporary `false` default, Q5).
+  const showStatus = activeTab === ALL_TAB;
+
+  const trimmedQuery = query.trim();
+  const resultCount = sortedVisible.length;
+  const resultCountText =
+    trimmedQuery === ""
+      ? activeTab === ALL_TAB
+        ? `${resultCount} título${resultCount === 1 ? "" : "s"} en toda la lista.`
+        : ""
+      : `${resultCount} resultado${resultCount === 1 ? "" : "s"} en «${tabName(activeTab)}».`;
+
   if (loadState === "loading") {
     return <p className="empty-state">Cargando…</p>;
   }
@@ -197,29 +244,77 @@ export function BookmarkListContainer() {
 
   return (
     <>
-      <div className="panel-toolbar">
-        <StatusTabs active={activeStatus} counts={counts} onSelect={setActiveStatus} />
-        <button
-          type="button"
-          className="add-manga-button"
-          onClick={() => setAddModalOpen(true)}
-        >
+      {/* Rendered unconditionally, never keyed: the search field must
+          survive every re-render this component makes while the owner is
+          mid-word, including one that flips the three-way empty state below
+          on or off (design D13's `mountShell()` hazard, restated as a React
+          rule). */}
+      <div className="search-row">
+        <div className="search-field">
+          <input
+            ref={searchInputRef}
+            type="search"
+            aria-label="Buscar por título"
+            placeholder="Buscar por título"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query !== "" && (
+            <button
+              type="button"
+              className="search-clear"
+              aria-label="Limpiar la búsqueda"
+              onClick={handleClearSearch}
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <button type="button" className="add-manga-button" onClick={() => setAddModalOpen(true)}>
           Agregar manga
         </button>
       </div>
+      <StatusTabs active={activeTab} counts={counts} onSelect={setActiveTab} />
+      <p className="result-count" role="status" aria-live="polite">
+        {resultCountText}
+      </p>
       {errorMessage && (
         <p className="error-banner" role="alert">
           {errorMessage}
         </p>
       )}
-      <BookmarkGrid
-        bookmarks={visible}
-        savingIds={savingIds}
-        onChangeProgress={handleChangeProgress}
-        onChangeStatus={handleChangeStatus}
-        onChangeScore={handleChangeScore}
-        onEditingChange={handleEditingChange}
-      />
+      {visible.length === 0 ? (
+        <div className="empty-state">
+          {trimmedQuery === "" ? (
+            <p>
+              {activeTab === ALL_TAB
+                ? "Todavía no hay mangas en tu lista."
+                : "No hay mangas en este estado."}
+            </p>
+          ) : (
+            <>
+              <p>
+                Sin resultados para «{trimmedQuery}» en «{tabName(activeTab)}».
+              </p>
+              {activeTab !== ALL_TAB && (
+                <button type="button" onClick={handleScopeJump}>
+                  Buscar en toda la lista
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <BookmarkGrid
+          bookmarks={visible}
+          savingIds={savingIds}
+          showStatus={showStatus}
+          onChangeProgress={handleChangeProgress}
+          onChangeStatus={handleChangeStatus}
+          onChangeScore={handleChangeScore}
+          onEditingChange={handleEditingChange}
+        />
+      )}
       {addModalOpen && (
         <AddMangaContainer
           onAdded={handleAdded}

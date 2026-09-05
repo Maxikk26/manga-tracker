@@ -29,10 +29,10 @@ export function BookmarkGrid({
   onChangeScore,
   onEditingChange,
 }: Props) {
-  if (bookmarks.length === 0) {
-    return <p className="empty-state">No hay mangas en este estado.</p>;
-  }
-
+  // The empty-state branch used to live here; the container now decides
+  // which of its three empty states to render (fase 5 slice 3), matching
+  // its existing loading/error pattern -- this component stays a layout and
+  // nothing else, per its own doc comment below.
   return (
     // `tabIndex={-1}` makes this a focus sink (design D6): when a popover
     // closes and its trigger has since unmounted (a status change removed
