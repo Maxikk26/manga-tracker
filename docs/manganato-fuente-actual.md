@@ -166,7 +166,7 @@ El módulo que hable con manganato.gg expone tres operaciones centrales (descrip
 2. **`fetch_chapters(slug, limit=50)`**: llama al endpoint JSON `/api/manga/{slug}/chapters`, devuelve lista de chapters `{num, slug, name, updated_at}`.
 3. **`fetch_manga_details(slug)`**: (uso mínimo, fallback) descarga la ficha HTML y devuelve `{title_source, cover_url, publication_status_text, last_updated_text}`.
 
-A esas tres, `spec-cliente-fuente-descubrimiento.md` (v1.9) le suma **dos operaciones auxiliares sobre el sitemap del §11**, y se nombran acá porque su insumo es este documento: `fetch_known_slugs` (el conjunto de slugs que la fuente publica — membresía, lo que usa el importador para no sondear) y `fetch_slug_update_times` (hora de última actualización por slug — el pre-filtro del `active_sweep`). Siguen siendo operaciones **de la fuente**; quién las llama y cuándo, no.
+A esas tres, `spec-cliente-fuente-descubrimiento.md` (v1.10) le suma **dos operaciones auxiliares sobre el sitemap del §11**, y se nombran acá porque su insumo es este documento: `fetch_known_slugs` (el conjunto de slugs que la fuente publica — membresía, lo que usa el importador para no sondear) y `fetch_slug_update_times` (hora de última actualización por slug — el pre-filtro del `active_sweep`). Siguen siendo operaciones **de la fuente**; quién las llama y cuándo, no.
 
 Cualquier lógica de "cuándo llamar cada una" vive en el módulo de descubrimiento, no aquí. El módulo de la fuente solo sabe hablar con manganato; no sabe qué mangas te importan ni cuándo notificar.
 

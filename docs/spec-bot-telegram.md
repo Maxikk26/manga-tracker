@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.8 — 2026-09-05. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.9).
+Versión 1.9 — 2026-09-05. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.10).
+
+Cambios vs 1.8: **la salud del barrido de pausados deja de ser invisible.** Su línea reporta la última corrida *exitosa*, así que un barrido que llevara un mes fallando en cada intento mostraba los números sanos del mes pasado y no decía nada. Ahora, cuando la corrida más reciente cerró `partial` o `error`, la línea lo agrega al final. Se agrega, no reemplaza: los números vienen de la última corrida que funcionó y la advertencia dice que el intento más nuevo no; reportar solo uno de los dos escondería el fallo o tiraría lo último que se sabe bueno. Sus fallos **siguen fuera** del conteo de corridas degradadas, por el motivo de siempre — ese barrido no notifica nada, así que su salud no prueba nada sobre la detección — pero quedar fuera de ese número no es lo mismo que no reportarse en ningún lado, que es lo que pasaba.
 
 Cambios vs 1.7: **el heartbeat pasa a reportar detecciones, y las corridas degradadas dejan de ser un entero pelado.** Dos líneas nuevas, ambas salidas de una auditoría del 2026-09-05 sobre datos reales de producción.
 
@@ -122,6 +124,8 @@ Un `partial` nunca trae causa almacenada: ese estado se fija solo cuando falló 
 
 Cuando todavía no ha corrido, la línea dice **"nunca"** y no ceros. En un servidor cuyo primer domingo no llegó eso es normal, y "corrió y no encontró nada" se lee muy distinto de "no ha corrido" cuando lo que estás decidiendo es si un título pausado se está reintentando.
 
+**Si la corrida más reciente cerró `partial` o `error`, la línea lo dice al final (v1.9).** Los números siguen siendo los de la última corrida *exitosa*, y esa asimetría es deliberada: son dos hechos distintos y ambos ciertos. Sin esto, un barrido que llevara un mes fallando en cada intento mostraba los números sanos del mes pasado y callaba. Y "nunca" acompañado de la advertencia tampoco es lo mismo que "nunca" solo: el primero dice que lo ha intentado y no lo ha logrado, el segundo que su primer domingo no llegó.
+
 **Ejemplo ilustrativo**:
 
 > 💓 Heartbeat semanal — 29 jul, 19:50
@@ -218,9 +222,11 @@ Por eso el contador se mantiene un paso por debajo del umbral hasta que el aviso
 
 ## Pendientes abiertos
 
-Abiertos por la auditoría de alertas del 2026-09-05. La v1.8 cierra el agujero de "no sé si está detectando"; estos cuatro siguen abiertos y **ninguno se decide por defecto**.
+Abiertos por la auditoría de alertas del 2026-09-05. Quedan dos, y **ninguno se decide por defecto**.
 
 1. **Un heartbeat que falla al enviarse no deja rastro alguno.** El job descarta el valor de retorno de `send_heartbeat`, y `heartbeat` no puede abrir fila en `job_runs` porque su nombre no está en la restricción CHECK de `job_name` (agregarlo con la base poblada obliga a migrar). La regla operativa del dueño es "si el lunes no llega el heartbeat, algo murió", y hoy esa ausencia no distingue un bot roto de un sistema muerto. Falla del lado seguro, pero no se puede diagnosticar.
-2. **`active_sweep` se traga los fallos por mapeo y la corrida igual cierra `ok`.** Contradice a `spec-cliente-fuente-descubrimiento.md`, que define `partial` como "fallos individuales (items con error, o digest fallido)": el código solo implementa la segunda mitad. Si la fuente cambia de forma para todos los mapeos activos, el barrido reporta `ok` con cero detecciones. La línea nueva de la v1.8 **expone** ese escenario, que es distinto de corregirlo — el estado de la corrida sigue mintiendo. Decidir si el barrido debe contar los `Unexpected` que descarta y cerrar `partial` sobre un umbral.
-3. **Los fallos de `onhold_sweep` son invisibles en todo el mensaje.** No entran en "última detección exitosa" ni en el conteo de degradadas, y eso es correcto por el mismo argumento de siempre. Pero entonces una corrida suya que cierre `error` no aparece en ningún lado. Falta decidir si su salud merece una mención propia en la línea que ya tiene.
-4. **Un job que nunca dispara no deja fila.** El scheduler solo escribe una línea de log cuando pierde una corrida, y `job_runs` no puede registrar lo que no ocurrió. En 16 días de producción se midieron ocho huecos de 47 a 60 minutos en el feed por reinicios del contenedor, cinco de ellos por encima de la ventana de 41 minutos: nada se perdió porque el barrido diario los recogió, pero el heartbeat no los menciona.
+2. **Un job que nunca dispara no deja fila.** El scheduler solo escribe una línea de log cuando pierde una corrida, y `job_runs` no puede registrar lo que no ocurrió. En 16 días de producción se midieron ocho huecos de 47 a 60 minutos en el feed por reinicios del contenedor, cinco de ellos por encima de la ventana de 41 minutos: nada se perdió porque el barrido diario los recogió, pero el heartbeat no los menciona.
+
+**Los dos se dejaron abiertos a propósito, no por falta de tiempo.** El primero exige una migración de esquema sobre la base poblada y su premio es distinguir dos causas de un silencio que ya obliga a mirar igual; el segundo exige un watchdog nuevo que infiera lo que no ocurrió, con sus propios modos de fallo. Ambos se evaluaron el 2026-09-05, justo antes de una pausa de un par de meses de uso desatendido, y ahí el cálculo se invierte: código nuevo corriendo sin nadie mirando es más riesgo que el que estos dos huecos representan.
+
+Resueltos en la v1.9: los fallos del `onhold_sweep` ya se reportan en su propia línea. La contradicción de `partial` en el `active_sweep` se cerró en `spec-cliente-fuente-descubrimiento.md` v1.10 — se anotó aquí porque la auditoría la destapó desde este documento, pero la definición de `partial` vive allá y ese es el documento que manda.
