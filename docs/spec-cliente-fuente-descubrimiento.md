@@ -1,6 +1,8 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.10 — 2026-09-05. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.11 — 2026-09-07. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+
+Cambios vs 1.10: se abre el **pendiente #4 — un slug que se estanca sin morir no lo detecta nada.** Solo documentación: ningún cambio de comportamiento. Se registra con la medición que hace inviable la solución obvia (mediana de 5.5 días sin capítulo nuevo, p90 de 34, máximo 39 sobre los 60 mapeos activos), y con la decisión previa que hay que resolver antes de implementarlo: si el cotejo por slug hermano es trabajo de V1 o alcance de V2.
 
 Cambios vs 1.9: **se cierra una contradicción que este documento llevaba describiendo desde V1a sin que el código la implementara.** La tabla de `job_runs` define `partial` como "fallos individuales (items con error, o digest fallido)", y solo la segunda mitad existía: el `active_sweep` se tragaba los `Transient` y `Unexpected` por mapeo y la corrida cerraba `ok` igual, aunque hubieran fallado todos. Una fuente que cambia de forma producía una corrida verde con cero actualizaciones — indistinguible de un día tranquilo. Ahora la corrida cierra `partial` por encima del **25% de los mapeos pedidos**, con el motivo en `error_summary`. El umbral, el denominador y la exclusión de `NotFound` están razonados en la fila `status` de esa tabla.
 
@@ -317,6 +319,18 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
 2. **La ventana de la clase `interactive`**: 1-2s se fijó por criterio, comparando contra lo que hace un navegador, no midiendo la tolerancia de la fuente. Lo que hay que vigilar es un 403 de la fuente durante un alta manual: sería la primera señal de que el ritmo molesta, y hoy nada la distingue de un 403 de Cloudflare por otra causa. Revisable tras uso real.
 
 3. **El umbral del 25% de fallos tragados**: fijado por criterio como los otros dos, sin evidencia empírica todavía. Lo que hay que vigilar es el caso contrario al que motivó la regla — que un puñado de títulos crónicamente rotos deje el barrido en `partial` todas las semanas. Si eso pasa, el problema son esos títulos, no el umbral. Revisable tras uso real.
+
+4. **Un slug que se estanca sin morir no lo detecta nada.** Abierto el 2026-09-07 por una pregunta del dueño, y es un hueco distinto del slug muerto, no una variante suyo.
+
+   El contador de fallos **solo avanza con `NotFound`**. Un slug abandonado que sigue respondiendo 200 con su lista vieja es un **éxito** en cada consulta, y cada éxito **resetea** el contador; una respuesta bien formada pero vacía también (D14). O sea que el mecanismo detecta que el slug *desapareció*, nunca que *dejó de moverse*. `manga_sites.cadence_days_estimate` existe en el esquema desde V1a para exactamente esto y **no la escribe ni la lee nadie**.
+
+   **El caso que lo motiva es concreto**: la fuente publica el mismo título bajo varios slugs — para *Second Life Ranker* hay tres (`second-life-ranker`, `dubeon-saneun-rankerr`, `ranker-who-lives-a-second-time`). Si abandona el que sigues y continúa en otro, recibes silencio, y ese silencio es indistinguible de un hiato del autor.
+
+   **Por qué no se resuelve con un aviso de "callado N días", que es la solución obvia**: desde `chapter_history` no se pueden separar los dos casos, y solo uno es accionable. Medición del 2026-09-07 sobre los 60 mapeos activos — mediana **5.5 días** sin capítulo nuevo, p90 **34**, máximo **39**, cero por encima de 45. Un umbral de 30 dispararía hoy tres avisos que casi con certeza son hiatos, y eso reintroduce el ruido que la v1.10 y `spec-bot-telegram.md` v1.8 se dedicaron a quitar.
+
+   **Lo que sí separa los dos casos** es preguntarle a la fuente si existe otro slug con el mismo título y más capítulos, y la pieza ya está: `fetch_known_slugs`. Eso lo convierte en la misma forma de problema que V2 multi-fuente — un título, varias fuentes candidatas, cuál manda — así que la decisión previa es si esto es trabajo de V1 o alcance de V2.
+
+   Aparte y sin decisión pendiente: mostrar en el panel los días desde el último capítulo es pasivo, no avisa nada y responde "¿hace cuánto no me llega X?" de un vistazo. No resuelve el pendiente; le quita la urgencia.
 
 Resuelto en la v1.1: el intervalo del chequeo por feed queda fijado por medición (ver `medicion-ventana-feed.md`); su valor vigente está en la tabla de parámetros.
 
