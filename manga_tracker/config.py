@@ -66,16 +66,26 @@ def load_config() -> AppConfig:
         # skip nearly everything.
         feed_check_minutes=int(os.environ.get("FEED_CHECK_MINUTES", "30")),
         active_sweep_hour=active_sweep_hour,
-        # HEARTBEAT_HOUR: defaults to active_sweep_hour ("same hour as the
-        # daily sweep") but stays independently configurable. It therefore moved
-        # to Sunday 22:00 with the sweep, which is left alone deliberately: a
-        # liveness signal is more useful at an hour its absence gets noticed than
-        # at 03:00, and it is unaffected by the source-refresh timing that forced the
-        # sweep's hour.
-        heartbeat_hour=int(os.environ.get("HEARTBEAT_HOUR", str(active_sweep_hour))),
-        # ONHOLD_SWEEP_HOUR: same default as the heartbeat, and the collision it
-        # implies is chosen rather than tolerated. On a Sunday all three cron
-        # jobs then fire at the same minute, and max_workers=1 turns that into a
+        # HEARTBEAT_HOUR: follows active_sweep_hour but one hour BEHIND it, and
+        # that offset is a correction, not a preference. It defaulted to the same
+        # hour until 2026-09-07, which put it in the same single-worker queue as
+        # the two sweeps - and because it is read-only and finishes in
+        # milliseconds, it always won that queue and ran BEFORE the on-hold
+        # sweep it reports on. Measured in production: the sweep started
+        # 02:07:05Z and closed 02:18:02Z, while the heartbeat sent at 02:07 read
+        # the previous week's row. Its on-hold line was therefore seven days
+        # stale every single week, and the degraded-run flag added in BOT v1.9
+        # inherited that - an on-hold failure would have surfaced a week late.
+        #
+        # Deliberately NOT a fixed hour: the reasoning that ties this to the
+        # sweep still holds - a liveness signal is more useful at an hour whose
+        # absence gets noticed than at 03:00, and moving the sweep must move it.
+        # Only the collision was wrong. `% 24` because active_sweep_hour is
+        # settable to 23, and 24 is not an hour.
+        heartbeat_hour=int(os.environ.get("HEARTBEAT_HOUR", str((active_sweep_hour + 1) % 24))),
+        # ONHOLD_SWEEP_HOUR: same default as the daily sweep, and the collision
+        # it implies is chosen rather than tolerated. Both sweeps then fire at
+        # the same minute on a Sunday, and max_workers=1 turns that into a
         # queue: the on-hold sweep waits for the daily one instead of running
         # beside it, which is the outcome the request policy wants - zero
         # concurrency against the source, whatever the schedule says. The wait
@@ -85,6 +95,12 @@ def load_config() -> AppConfig:
         # different hours are two windows in which requests could overlap if
         # max_workers ever grew. Move it only if the queueing itself becomes a
         # problem - that is what the variable is for.
+        #
+        # The heartbeat used to share this hour and no longer does (see above).
+        # That is not a retreat from this decision: the argument here is about
+        # concurrency against the source, and the heartbeat issues no requests
+        # at all, so it never contributed to the guarantee - it only read the
+        # table mid-write. The two sweeps still collide, on purpose.
         onhold_sweep_hour=int(os.environ.get("ONHOLD_SWEEP_HOUR", str(active_sweep_hour))),
         # LOCAL_TIMEZONE / HEARTBEAT_HOUR / ONHOLD_SWEEP_HOUR: not documented in .env.example -
         # that file is under a blanket .env* read/write restriction in this

@@ -1,6 +1,10 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.9 — 2026-09-05. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.10).
+Versión 1.10 — 2026-09-07. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.10).
+
+Cambios vs 1.9: **el heartbeat pasa a latir una hora después del barrido de activos, en vez de a la misma hora.** Lo destapó el primer heartbeat real con las líneas de la v1.8: reportaba un barrido de pausados de la semana anterior. La causa es una carrera, no un error de cálculo — los tres jobs compartían hora, `max_workers=1` los ponía en cola, y el heartbeat, al ser de solo lectura y terminar en milisegundos, siempre corría **antes** del barrido cuyos números publica. Detalle y evidencia medida en la sección del Mensaje 2. La colisión entre los dos barridos se conserva intacta: su razón es la concurrencia cero contra la fuente, y el heartbeat no emite peticiones.
+
+Corregido en producción el 2026-09-07 por `.env` (`HEARTBEAT_HOUR=23`) antes de tocar el código; el cambio de default solo evita que un despliegue nuevo repita la trampa.
 
 Cambios vs 1.8: **la salud del barrido de pausados deja de ser invisible.** Su línea reporta la última corrida *exitosa*, así que un barrido que llevara un mes fallando en cada intento mostraba los números sanos del mes pasado y no decía nada. Ahora, cuando la corrida más reciente cerró `partial` o `error`, la línea lo agrega al final. Se agrega, no reemplaza: los números vienen de la última corrida que funcionó y la advertencia dice que el intento más nuevo no; reportar solo uno de los dos escondería el fallo o tiraría lo último que se sabe bueno. Sus fallos **siguen fuera** del conteo de corridas degradadas, por el motivo de siempre — ese barrido no notifica nada, así que su salud no prueba nada sobre la detección — pero quedar fuera de ese número no es lo mismo que no reportarse en ningún lado, que es lo que pasaba.
 
@@ -108,7 +112,11 @@ La vista previa de enlaces se desactiva en el mensaje: con varias líneas enlaza
 
 ## Mensaje 2: heartbeat semanal
 
-**Cuándo**: domingo de madrugada, a hora configurable (por defecto la misma del barrido de activos). **Tiene su propio horario y no depende de ningún barrido.** Es señal de vida: su ausencia un lunes significa que algo murió.
+**Cuándo**: domingo de madrugada, a hora configurable (**por defecto una hora después del barrido de activos**, v1.10). **Tiene su propio horario y no depende de ningún barrido.** Es señal de vida: su ausencia un lunes significa que algo murió.
+
+**Esa hora de diferencia es una corrección, no una preferencia.** Hasta la v1.10 el heartbeat compartía hora con los dos barridos, lo que lo metía en la misma cola de un solo worker — y como es de solo lectura y termina en milisegundos, **siempre ganaba esa cola y corría antes del barrido de pausados sobre el que informa**. Medido en producción el 2026-09-07: el barrido corrió de 02:07:05Z a 02:18:02Z y el heartbeat, enviado a las 02:07, leyó la fila de la semana anterior. Su línea de pausados venía **siete días atrasada todas las semanas**, y la advertencia de corrida degradada que agregó la v1.9 heredaba lo mismo: un fallo del barrido habría aparecido una semana tarde.
+
+Lo que no cambia es que la hora **sigue atada** al barrido de activos en vez de ser fija: mover el barrido mueve el heartbeat, porque una señal de vida sirve más a una hora cuya ausencia se nota que a las 03:00. La colisión entre los **dos barridos** se mantiene a propósito — su motivo es la concurrencia cero contra la fuente, y el heartbeat no hace ni una petición, así que nunca aportó a esa garantía.
 
 **Contenido**: confirmación con fecha y hora local, cuándo fue la última corrida de detección exitosa, **cuántos capítulos se detectaron en la semana partidos por job**, cuántos títulos se vigilan, cuántos están atrasados, cuántas corridas cerraron degradadas (`partial` o `error`) en la última semana **con el detalle de las más recientes**, y **una línea final con el barrido de pausados**: cuándo corrió, cuántos mapeos revisó y cuántas actualizaciones silenciosas aplicó. Si hubo corridas degradadas el heartbeat lo indica; no se envía un mensaje de error aparte.
 
