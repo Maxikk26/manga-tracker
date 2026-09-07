@@ -1,6 +1,8 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.10 — 2026-09-07. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.10).
+Versión 1.11 — 2026-09-07. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.11).
+
+Cambios vs 1.10: solo documentación. Se registra que los dos pendientes que quedan aquí se cerrarán en una sola ronda junto con el #4 de `spec-cliente-fuente-descubrimiento.md`, y qué tendrá que separar esa ronda al entregarla.
 
 Cambios vs 1.9: **el heartbeat pasa a latir una hora después del barrido de activos, en vez de a la misma hora.** Lo destapó el primer heartbeat real con las líneas de la v1.8: reportaba un barrido de pausados de la semana anterior. La causa es una carrera, no un error de cálculo — los tres jobs compartían hora, `max_workers=1` los ponía en cola, y el heartbeat, al ser de solo lectura y terminar en milisegundos, siempre corría **antes** del barrido cuyos números publica. Detalle y evidencia medida en la sección del Mensaje 2. La colisión entre los dos barridos se conserva intacta: su razón es la concurrencia cero contra la fuente, y el heartbeat no emite peticiones.
 
@@ -234,6 +236,8 @@ Abiertos por la auditoría de alertas del 2026-09-05. Quedan dos, y **ninguno se
 
 1. **Un heartbeat que falla al enviarse no deja rastro alguno.** El job descarta el valor de retorno de `send_heartbeat`, y `heartbeat` no puede abrir fila en `job_runs` porque su nombre no está en la restricción CHECK de `job_name` (agregarlo con la base poblada obliga a migrar). La regla operativa del dueño es "si el lunes no llega el heartbeat, algo murió", y hoy esa ausencia no distingue un bot roto de un sistema muerto. Falla del lado seguro, pero no se puede diagnosticar.
 2. **Un job que nunca dispara no deja fila.** El scheduler solo escribe una línea de log cuando pierde una corrida, y `job_runs` no puede registrar lo que no ocurrió. En 16 días de producción se midieron ocho huecos de 47 a 60 minutos en el feed por reinicios del contenedor, cinco de ellos por encima de la ventana de 41 minutos: nada se perdió porque el barrido diario los recogió, pero el heartbeat no los menciona.
+
+**El dueño quiere cerrar estos dos junto con el pendiente #4 de `spec-cliente-fuente-descubrimiento.md`** (el slug que se estanca sin morir) en una sola ronda. Decidido el 2026-09-07. Los tres tocan la misma pregunta — cómo se enteran de que algo dejó de funcionar — así que agruparlos tiene sentido de diseño, no solo de conveniencia. Lo que la ronda tendrá que separar en la entrega: el #1 de esta lista toca el esquema y exige respaldo de la base, y el #4 de allá no se puede implementar sin resolver antes su decisión previa (V1 o V2).
 
 **Los dos se dejaron abiertos a propósito, no por falta de tiempo.** El primero exige una migración de esquema sobre la base poblada y su premio es distinguir dos causas de un silencio que ya obliga a mirar igual; el segundo exige un watchdog nuevo que infiera lo que no ocurrió, con sus propios modos de fallo. Ambos se evaluaron el 2026-09-05, justo antes de una pausa de un par de meses de uso desatendido, y ahí el cálculo se invierte: código nuevo corriendo sin nadie mirando es más riesgo que el que estos dos huecos representan.
 
