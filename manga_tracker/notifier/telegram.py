@@ -172,6 +172,12 @@ def _format_heartbeat(report: HeartbeatReport, now: str, timezone_name: str) -> 
             f"{_plural(report.onhold_swept_count, 'revisado', 'revisados')}, "
             f"{_plural(report.onhold_updates_count, 'silenciosa', 'silenciosas')}"
         )
+    # Appended rather than replacing the numbers, because both facts are true and
+    # they are different facts: the numbers come from the last run that worked,
+    # and this says the newest attempt did not. Reporting only one of them would
+    # either hide the failure or throw away the last thing known to be good.
+    if report.onhold_sweep_degraded:
+        onhold_line += " (⚠️ la corrida más reciente falló)"
     return (
         # BOT's illustration heads this "Weekly heartbeat" while every line under
         # it is Spanish - a leftover in an otherwise Spanish example. Normalised

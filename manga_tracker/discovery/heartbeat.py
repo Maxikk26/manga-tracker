@@ -137,6 +137,28 @@ def _last_onhold_sweep(conn) -> tuple[str | None, int, int]:
     return (None, 0, 0) if row is None else (row[0], row[1], row[2])
 
 
+def _onhold_sweep_is_degraded(conn) -> bool:
+    """Whether the *most recent* on-hold sweep - of any status - closed badly.
+
+    The line above deliberately reports the last `ok` run, so without this the
+    message would show healthy numbers from last week while every attempt since
+    has failed, and say nothing. Its failures are excluded from
+    `_degraded_run_count` for good reason (it notifies nothing, so its health
+    proves nothing about detection) - but excluded from that number is not the
+    same as reported nowhere, and until now it was reported nowhere at all.
+
+    A separate query rather than a status column on the row above, because the
+    two answer different questions: that one is "what did the last good run
+    find?", this one is "is it still working?".
+    """
+    row = conn.execute(
+        "SELECT status FROM job_runs WHERE job_name = ? AND finished_at IS NOT NULL "
+        "ORDER BY started_at DESC LIMIT 1",
+        (ONHOLD_SWEEP_JOB,),
+    ).fetchone()
+    return row is not None and row[0] != "ok"
+
+
 def heartbeat(conn, client, sender, *, now: str, logger) -> None:
     """Fired weekly or via `run-job heartbeat`. `client`/`logger` unused -
     matches every other job's signature so the wrapper needs no special case."""
@@ -152,5 +174,6 @@ def heartbeat(conn, client, sender, *, now: str, logger) -> None:
         onhold_sweep_at=onhold_at,
         onhold_swept_count=onhold_swept,
         onhold_updates_count=onhold_updates,
+        onhold_sweep_degraded=_onhold_sweep_is_degraded(conn),
     )
     sender.send_heartbeat(report, now=now)

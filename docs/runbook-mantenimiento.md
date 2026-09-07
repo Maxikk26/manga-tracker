@@ -1,6 +1,6 @@
 # Runbook: subir un cambio y mantener lo que corre
 
-Versión 1.11 — 2026-08-18. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.8).
+Versión 1.11 — 2026-08-18. Documento operativo. Depende de `one-pager-v1a.md` (v1.14) y `spec-bot-telegram.md` (v1.9).
 
 Qué hacer al llevar un cambio a `main` y al operar el sistema ya desplegado.
 

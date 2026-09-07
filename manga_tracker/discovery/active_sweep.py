@@ -26,6 +26,22 @@ DEAD_SLUG_THRESHOLD = 5
 # the promise holds for exactly the mappings this notice can be sent about -
 # which are all `reading`/`want_to_read`, since only this sweep sends it.
 DEAD_SLUG_RETRIES_WEEKLY = True
+# Above this share of *requested* mappings failing with Transient/Unexpected, the
+# run closes `partial` instead of `ok`. Closes the contradiction CD already
+# described and this module did not implement: CD defines `partial` as "fallos
+# individuales (items con error, o digest fallido)" and only the second half
+# existed, so a sweep in which every single mapping failed still closed `ok`.
+#
+# The two swallowed classes have no escalation of their own - `NotFound` feeds
+# the dead-slug counter and is deliberately excluded here, because that path
+# already ends in a notice. Transient and Unexpected end nowhere.
+#
+# 25% rather than "any failure" or "all of them": one broken title is ordinary
+# noise, and degrading the run on it would leave the heartbeat red every week
+# until it was fixed - retraining the owner to ignore it, which is the failure
+# this whole line of work exists to undo. "All of them" is the opposite mistake:
+# a source that changes shape for part of its catalogue would never be reported.
+SWALLOWED_FAILURE_RATIO = 0.25
 
 
 def _report_dead_slugs(conn, pending: list, sender, *, now: str, logger) -> bool:
@@ -107,11 +123,30 @@ def active_sweep(conn, client, sender, *, now: str, logger) -> None:
         raise
 
 
+def _failure_summary(swallowed: int, requested: int, send_failed: bool) -> str:
+    """What `partial` means for this run, in the row itself.
+
+    Until now `partial` never stored a reason - the status was only ever set on
+    a send failure, and that failure went to the log. The weekly heartbeat reads
+    this column, so a threshold breach that stored nothing would render as the
+    same bare "envío fallido" as a Telegram outage, pointing the owner at the
+    wrong system entirely.
+    """
+    threshold = f"{int(SWALLOWED_FAILURE_RATIO * 100)}%"
+    summary = (f"{swallowed}/{requested} mappings failed with transient/unexpected errors, "
+               f"over the {threshold} threshold: the source may have changed shape")
+    return f"send failed; {summary}" if send_failed else summary
+
+
 def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
     candidates = []
     pending_dead: list[tuple[int, str, str]] = []
     items_checked = 0
     skipped = 0
+    # Transient/Unexpected failures this run discarded. Not an error counter:
+    # discarding them per item is still correct, and the run still finishes. What
+    # was missing is that nothing anywhere recorded how many were discarded.
+    swallowed = 0
     # Not len(candidates): CD defines updates_found as "activos + silenciosos",
     # and a silent detection produces no candidate. This sweep's population is
     # reading/want_to_read, so a silent one only happens when a bookmark moves to
@@ -146,11 +181,16 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
                 conn.commit()
             continue
         except Transient:
+            swallowed += 1  # counted, not escalated - see SWALLOWED_FAILURE_RATIO
             continue  # a timeout says nothing about the slug's validity - counter untouched
         except Unexpected:
             # Third and last category of CD's taxonomy: the response arrived but
             # has the wrong shape, so the source probably changed. Log and move
             # on; the counter stays put because the slug may be perfectly valid.
+            # Counted too: on its own this is one odd mapping, but enough of them
+            # in one run is the signature of the source changing shape, and until
+            # v1.8 that produced a green run reporting zero updates.
+            swallowed += 1
             logger.exception("active_sweep: unexpected response shape for manga_sites.id=%s", ms_id)
             continue
 
@@ -179,10 +219,29 @@ def _sweep(conn, client, sender, run_id, *, now: str, logger) -> None:
             "active_sweep examined %s mapping(s), requested %s, skipped %s the source reports unchanged",
             items_checked, items_checked - skipped, skipped,
         )
+    if swallowed:
+        # WARNING, not INFO: individually these are ordinary, but the count is
+        # the first place a shape change shows up before the ratio trips.
+        logger.warning(
+            "active_sweep discarded %s of %s requested mapping(s) to transient/unexpected errors",
+            swallowed, items_checked - skipped,
+        )
     outcome = send_and_advance(conn, candidates, sender, now=now, client=client)
     dead_failed = _report_dead_slugs(conn, pending_dead, sender, now=now, logger=logger)
+    # Against what was actually requested, never against items_checked: the
+    # prefilter routinely skips most of the population, and a mapping nobody
+    # asked about cannot have failed. Using the wider denominator would dilute
+    # the ratio exactly when the prefilter is working hardest.
+    requested = items_checked - skipped
+    too_many_failed = requested > 0 and swallowed / requested > SWALLOWED_FAILURE_RATIO
+    send_failed = outcome.failed or dead_failed
     close_run(
-        conn, run_id, status="partial" if (outcome.failed or dead_failed) else "ok",
+        conn, run_id, status="partial" if (send_failed or too_many_failed) else "ok",
+        # English, like every other error_summary: this field is a diagnostic the
+        # developer reads, and the heartbeat quoting it verbatim is quoting a
+        # diagnostic. Its own Spanish copy for a send failure lives in the
+        # notifier, where product copy belongs.
+        error_summary=_failure_summary(swallowed, requested, send_failed) if too_many_failed else None,
         items_checked=items_checked, updates_found=recorded,
         # The same split the log line above reports, now in the table. It lived
         # only in the container log, which meant "did the prefilter skip these or

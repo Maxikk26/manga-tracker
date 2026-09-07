@@ -418,3 +418,176 @@ def test_an_exactly_equal_timestamp_is_unchanged_and_costs_no_request():
     client = FakeClient({}, update_times={"steady": STORED})  # identical, to the second
 
     assert _requested(conn, client) == []
+
+
+# --- Swallowed per-mapping failures degrade the run ------------------------
+#
+# CD defines `partial` as "fallos individuales (items con error, o digest
+# fallido)" and only the second half was implemented, so a sweep in which every
+# mapping failed closed `ok` with zero updates - a green run that detected
+# nothing, on top of a source that may have changed shape. The threshold is
+# proportional (SWALLOWED_FAILURE_RATIO) and measured against what was actually
+# *requested*, never against the whole population.
+
+
+def _run_row(conn):
+    """Named columns of the newest run. `connect()` sets no row_factory, and
+    positional unpacking here would silently reorder on the next column added."""
+    cols = ("status", "items_checked", "items_requested", "items_skipped", "error_summary")
+    row = conn.execute(
+        f"SELECT {', '.join(cols)} FROM job_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return dict(zip(cols, row))
+
+
+def _seed_many(conn, outcomes: dict):
+    """One mapping per entry, each with its own slug so FakeClient can steer it."""
+    for slug in outcomes:
+        _seed(conn, slug=slug, title=slug, latest=1)
+
+
+def _sweep_with(conn, outcomes: dict, **kw):
+    client = FakeClient(outcomes, **kw)
+    active_sweep(conn, client, FakeSender(), now=NOW, logger=LOGGER)
+    return client
+
+
+def test_a_minority_of_swallowed_failures_still_closes_ok():
+    """One broken title out of ten is ordinary noise, not a degraded run.
+
+    Degrading on any single failure would leave the heartbeat red every week
+    until that one title was fixed, which retrains the owner to ignore it - the
+    exact habit this whole line of work exists to undo.
+    """
+    conn = connect(":memory:")
+    outcomes = {f"m{i}": [Chapter(1, "u", None)] for i in range(9)}
+    outcomes["broken"] = Transient
+    _seed_many(conn, outcomes)
+
+    _sweep_with(conn, outcomes)
+
+    assert _run_row(conn)["status"] == "ok"
+
+
+def test_swallowed_failures_over_the_threshold_close_partial():
+    conn = connect(":memory:")
+    outcomes = {f"m{i}": [Chapter(1, "u", None)] for i in range(5)}
+    outcomes.update({f"bad{i}": Unexpected for i in range(5)})
+    _seed_many(conn, outcomes)
+
+    _sweep_with(conn, outcomes)
+
+    row = _run_row(conn)
+    assert row["status"] == "partial"
+    assert "5/10 mappings failed" in row["error_summary"]
+
+
+def test_exactly_at_the_threshold_is_not_over_it():
+    """25% of 20 is 5, and the rule is strictly greater than. Asserted because
+    a `>=` here would move the boundary by one mapping without any test noticing.
+    """
+    conn = connect(":memory:")
+    outcomes = {f"m{i}": [Chapter(1, "u", None)] for i in range(15)}
+    outcomes.update({f"bad{i}": Transient for i in range(5)})
+    _seed_many(conn, outcomes)
+
+    _sweep_with(conn, outcomes)
+
+    assert _run_row(conn)["status"] == "ok"
+
+
+def test_every_mapping_failing_no_longer_reports_a_green_run():
+    """THE regression. Before this change the sweep swallowed each Unexpected,
+    counted all of them in items_checked, found nothing, and closed `ok` - so
+    the source changing shape for the entire catalogue produced a run
+    indistinguishable from a quiet day.
+    """
+    conn = connect(":memory:")
+    outcomes = {f"m{i}": Unexpected for i in range(8)}
+    _seed_many(conn, outcomes)
+
+    _sweep_with(conn, outcomes)
+
+    row = _run_row(conn)
+    assert row["status"] == "partial"
+    assert row["items_checked"] == 8  # still examined them all
+    assert "8/8 mappings failed" in row["error_summary"]
+    assert "the source may have changed shape" in row["error_summary"]
+
+
+def test_not_found_never_counts_toward_the_ratio():
+    """`NotFound` is excluded on purpose: it already escalates on its own, via
+    the dead-slug counter and its notice. Counting it here would degrade every
+    run for five days while that mechanism does its job, and then degrade it
+    again for the notice - reporting one problem three ways.
+    """
+    conn = connect(":memory:")
+    outcomes = {f"gone{i}": NotFound for i in range(10)}
+    _seed_many(conn, outcomes)
+
+    _sweep_with(conn, outcomes)
+
+    assert _run_row(conn)["status"] == "ok"
+
+
+def test_a_fully_skipped_sweep_does_not_divide_by_zero():
+    """The prefilter routinely skips most of the population, and can skip all of
+    it. Zero requested must be a quiet `ok`, not a crash and not a false alarm:
+    nothing was asked, so nothing can have failed.
+    """
+    conn = connect(":memory:")
+    _seed(conn, slug="quiet", latest=50, latest_at=STORED)
+    _seed(conn, slug="quiet2", title="q2", latest=50, latest_at=STORED)
+    client = FakeClient({}, update_times={"quiet": "2026-07-19T09:00:00Z",
+                                          "quiet2": "2026-07-19T09:00:00Z"})
+
+    active_sweep(conn, client, FakeSender(), now=NOW, logger=LOGGER)
+
+    row = _run_row(conn)
+    assert row["status"] == "ok"
+    assert row["items_requested"] == 0 and row["items_skipped"] == 2
+    assert row["error_summary"] is None
+    assert client.calls == []
+
+
+def test_the_ratio_is_measured_against_requested_not_the_whole_population():
+    """With the prefilter working hardest, items_checked is dominated by skips.
+    Two failures out of three requested is a degraded run; against the full
+    population of eleven it would read as 18% and pass unnoticed.
+    """
+    conn = connect(":memory:")
+    times = {}
+    outcomes = {}
+    for i in range(8):  # skipped: the source reports them unchanged
+        _seed(conn, slug=f"quiet{i}", title=f"q{i}", latest=50, latest_at=STORED)
+        times[f"quiet{i}"] = "2026-07-19T09:00:00Z"
+    for i in range(3):  # requested, and two of them fail
+        _seed(conn, slug=f"live{i}", title=f"l{i}", latest=50, latest_at=STORED)
+        times[f"live{i}"] = "2026-07-27T09:00:00Z"
+        outcomes[f"live{i}"] = Unexpected if i < 2 else [Chapter(51, "u", None)]
+
+    active_sweep(conn, FakeClient(outcomes, update_times=times), FakeSender(), now=NOW, logger=LOGGER)
+
+    row = _run_row(conn)
+    assert row["items_checked"] == 11 and row["items_requested"] == 3
+    assert row["status"] == "partial"
+    assert "2/3 mappings failed" in row["error_summary"]
+
+
+def test_a_send_failure_and_a_threshold_breach_are_both_named():
+    """Two different systems are broken and the row must not hide either: the
+    owner reading "envío fallido" alone would go looking at Telegram while the
+    source is the thing that changed.
+    """
+    conn = connect(":memory:")
+    outcomes = {"good": [Chapter(9, "u", None)]}
+    outcomes.update({f"bad{i}": Unexpected for i in range(3)})
+    _seed_many(conn, outcomes)
+    client = FakeClient(outcomes)
+
+    active_sweep(conn, client, FakeSender(ok=False), now=NOW, logger=LOGGER)
+
+    row = _run_row(conn)
+    assert row["status"] == "partial"
+    assert row["error_summary"].startswith("send failed; ")
+    assert "3/4 mappings failed" in row["error_summary"]

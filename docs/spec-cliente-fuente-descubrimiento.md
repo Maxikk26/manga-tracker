@@ -1,6 +1,10 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.9 — 2026-08-20. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.10 — 2026-09-05. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+
+Cambios vs 1.9: **se cierra una contradicción que este documento llevaba describiendo desde V1a sin que el código la implementara.** La tabla de `job_runs` define `partial` como "fallos individuales (items con error, o digest fallido)", y solo la segunda mitad existía: el `active_sweep` se tragaba los `Transient` y `Unexpected` por mapeo y la corrida cerraba `ok` igual, aunque hubieran fallado todos. Una fuente que cambia de forma producía una corrida verde con cero actualizaciones — indistinguible de un día tranquilo. Ahora la corrida cierra `partial` por encima del **25% de los mapeos pedidos**, con el motivo en `error_summary`. El umbral, el denominador y la exclusión de `NotFound` están razonados en la fila `status` de esa tabla.
+
+Detectado el 2026-09-05 auditando por qué el heartbeat no podía avisar de una detección muerta. El propio código argumentaba en contra de tragarse errores en el comentario de su bloque `except` de nivel de corrida, y lo hacía tres líneas más abajo por mapeo.
 
 Cambios vs 1.8: **corrección de clasificación en la operación de detalles de la ficha.** `fetch_manga_details` clasificaba con `404` → no encontrado y cualquier otro estado distinto de 200 → inesperado, sin distinguir un 403/429/5xx transitorio del resto; un 403 caía a `parse_manga_details`, que devolvía un título vacío. Corregido: 403, 429 y los 5xx (el mismo `TRANSIENT_STATUS_CODES` que ya usa el transporte) se clasifican como transitorios, igual que en el resto de la taxonomía (§"Taxonomía de errores"); cualquier otro estado distinto de 200/404 sigue siendo inesperado. `fetch_cover` no cambia: su propia divergencia (cualquier estado distinto de 200 es inesperado, sin excepción para 403) es deliberada y queda documentada en su propio punto, arriba. Se corrige también la redacción de ese punto, que hasta la v1.8 leía como una regla general de la spec cuando describe solo el comportamiento de `fetch_cover`.
 
@@ -262,6 +266,16 @@ Todo mecanismo abre una fila al arrancar y la cierra al terminar:
 | `job_name` | `feed_check`, `active_sweep` u `onhold_sweep`. |
 | `started_at` / `finished_at` | Inicio y fin reales de la corrida. **`finished_at` se toma en el momento de cerrar, no del timestamp con que la corrida arrancó.** Una corrida propaga un solo `now` a todo lo que escribe —`detected_at`, `last_checked_at`— y eso es correcto: una corrida, un instante de observación. Pero `finished_at` significa *cuándo terminó*, y reusar el de apertura hacía que toda corrida reportara duración cero. Se detectó en vivo: un barrido de 166 segundos reales registró inicio y fin en el mismo segundo. Importa porque el caso para el que existe esta tabla es un barrido degradándose en timeouts —hasta ~35 minutos con 16 mapeos a 30s de timeout más reintentos— y eso es invisible si la duración siempre es cero. |
 | `status` | `ok` si todo salió bien; `partial` si hubo fallos individuales (items con error, o digest fallido) pero la corrida completó; `error` si la corrida abortó (excepción no controlada, feed inaccesible por completo). **`onhold_sweep` nunca cierra `partial`**: `partial` es el status de una corrida que completó y cuyo envío falló, y esta corrida no tiene envío que pueda fallar. Solo `ok` o `error`. |
+
+**"Fallos individuales" tiene umbral desde la v1.10, y hasta entonces no estaba implementado.** El `active_sweep` descarta por mapeo los fallos `Transient` y `Unexpected` —lo cual es correcto: la corrida debe terminar— pero nada contaba cuántos descartaba, así que **una corrida en la que fallaron los 60 mapeos cerraba `ok` con cero actualizaciones**. Esa es exactamente la firma de una fuente que cambió de forma, y se veía igual que un día tranquilo.
+
+Ahora la corrida cierra `partial` cuando los fallos tragados superan el **25% de los mapeos pedidos**, y el motivo queda en el resumen de error.
+
+Tres decisiones dentro de esa regla, todas con su razón:
+
+- **El denominador son los mapeos *pedidos*, no los revisados.** El prefiltro salta rutinariamente a la mayoría de la población, y un mapeo que nadie consultó no pudo fallar. Usar el denominador ancho diluiría la proporción justo cuando el prefiltro más trabaja.
+- **`NotFound` no cuenta.** Tiene su propia vía de escalada —el contador de slugs muertos y su aviso—, así que sumarlo aquí reportaría un mismo problema por tres caminos.
+- **25%, ni "cualquier fallo" ni "todos".** Un título roto es ruido ordinario, y degradar la corrida por él dejaría el heartbeat en rojo todas las semanas hasta arreglarlo, entrenando al dueño a ignorarlo. "Todos" es el error opuesto: una fuente que cambia de forma solo para parte de su catálogo nunca se reportaría.
 | `items_checked` | Items reales del feed procesados, o mangas consultados en el barrido. |
 | `items_requested` / `items_skipped` | Solo los barridos: de los examinados, cuántos costaron request y cuántos saltó el pre-filtro. Nulos en `feed_check`, que no tiene pre-filtro, y nulos también cuando el índice de la fuente no se pudo leer y el barrido pidió todo.  |
 | `updates_found` | Capítulos nuevos detectados (activos + silenciosos). |
@@ -302,7 +316,11 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
 1. **Umbral de fallos consecutivos**: fijado en 5 por criterio, sin evidencia empírica. Revisable tras uso real.
 2. **La ventana de la clase `interactive`**: 1-2s se fijó por criterio, comparando contra lo que hace un navegador, no midiendo la tolerancia de la fuente. Lo que hay que vigilar es un 403 de la fuente durante un alta manual: sería la primera señal de que el ritmo molesta, y hoy nada la distingue de un 403 de Cloudflare por otra causa. Revisable tras uso real.
 
+3. **El umbral del 25% de fallos tragados**: fijado por criterio como los otros dos, sin evidencia empírica todavía. Lo que hay que vigilar es el caso contrario al que motivó la regla — que un puñado de títulos crónicamente rotos deje el barrido en `partial` todas las semanas. Si eso pasa, el problema son esos títulos, no el umbral. Revisable tras uso real.
+
 Resuelto en la v1.1: el intervalo del chequeo por feed queda fijado por medición (ver `medicion-ventana-feed.md`); su valor vigente está en la tabla de parámetros.
+
+Resuelto en la v1.10: los fallos individuales por mapeo del `active_sweep` ya degradan la corrida, cerrando la contradicción entre la definición de `partial` de este documento y lo que el código hacía.
 
 ## Cambio requerido en la spec del modelo de datos
 

@@ -457,3 +457,76 @@ def test_degraded_detail_disappears_entirely_on_a_clean_week():
     text = _render(conn)
     assert "Corridas degradadas esta semana: 0 (partial/error)\n" in text
     assert "·" not in text
+
+
+# --- The on-hold sweep's own health ----------------------------------------
+#
+# Its failures stay out of `degraded_run_count` for the usual reason: it
+# notifies nothing, so its health proves nothing about detection. But excluded
+# from that number was being reported nowhere at all - a sweep that had failed
+# every attempt for a month showed last month's healthy figures and said nothing.
+
+
+def test_a_failed_latest_onhold_sweep_is_flagged_without_losing_the_last_good_numbers():
+    """Both facts are true and they are different facts.
+
+    The numbers come from the last run that worked; the warning says the newest
+    attempt did not. Reporting only one would either hide the failure or throw
+    away the last thing known to be good, and the owner needs both to decide
+    whether a paused title is still being retried at all.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=9)
+    _insert_run(conn, "onhold_sweep", "2026-07-19T02:00:00Z", "ok", checked=141, found=6)
+    _insert_run(conn, "onhold_sweep", "2026-07-26T02:00:00Z", "error", checked=0, summary="boom")
+
+    text = _render(conn)
+    assert "141 revisados" in text and "6 silenciosas" in text  # last good run, kept
+    assert "(⚠️ la corrida más reciente falló)" in text
+
+
+def test_a_healthy_onhold_sweep_carries_no_warning():
+    """Asserts the absence of the specific string, not of any warning glyph: this
+    scenario also has no detections, so a bare `"⚠️" not in text` would be
+    satisfied by the wrong line and prove nothing about the on-hold one.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=9)
+    _insert_run(conn, "feed_check", "2026-07-25T10:00:00Z", "ok", found=4)
+    _insert_run(conn, "onhold_sweep", "2026-07-19T02:00:00Z", "ok", checked=141, found=6)
+
+    text = _render(conn)
+    assert "la corrida más reciente falló" not in text
+    assert "Barrido de pausados: 18 jul, 22:00, 141 revisados, 6 silenciosas" in text
+
+
+def test_an_onhold_failure_is_flagged_without_inflating_the_degraded_count():
+    """The two halves must not be confused. The count means "detection is
+    degraded"; if an on-hold failure raised it, the owner would go looking at
+    healthy feed and sweep runs and the digit would stop meaning anything. It
+    still gets said - just on its own line, where it belongs.
+    """
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=9)
+    _insert_run(conn, "onhold_sweep", "2026-07-19T02:00:00Z", "ok", checked=141, found=6)
+    _insert_run(conn, "onhold_sweep", "2026-07-26T02:00:00Z", "error", checked=0, summary="boom")
+
+    text = _render(conn)
+    assert "Corridas degradadas esta semana: 0 (partial/error)" in text
+    assert "(⚠️ la corrida más reciente falló)" in text
+
+
+def test_a_sweep_that_has_only_ever_failed_says_never_and_flags_it():
+    """"nunca" plus the warning, not one or the other. "nunca" alone reads as a
+    server whose first Sunday has not arrived - which is normal - and would hide
+    that it has been trying and failing."""
+    conn = connect(":memory:")
+    site_id = ensure_site(conn, "manganato", "https://x")
+    _seed_manga(conn, site_id, "Paused", status="on_hold", last_chapter_read=1, latest_chapter_num=9)
+    _insert_run(conn, "onhold_sweep", "2026-07-26T02:00:00Z", "error", checked=0, summary="boom")
+
+    text = _render(conn)
+    assert "Barrido de pausados: nunca (⚠️ la corrida más reciente falló)" in text
