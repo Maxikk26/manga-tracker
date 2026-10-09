@@ -31,6 +31,12 @@ export interface Bookmark {
   latest_chapter_num: number | null;
   latest_chapter_url: string | null;
   latest_chapter_at: string | null;
+  /** When the tracker last detected a new chapter for this manga: the newest
+   *  `chapter_history.detected_at`, our own UTC clock. Read-only and derived.
+   *  Not `latest_chapter_at`, which is the source's own date — NULL on many
+   *  rows and re-bumped when the source edits a chapter. Null with no source
+   *  mapping or no recorded publication. Orders the "Leyendo" tab. */
+  latest_detected_at: string | null;
   behind: number | null;
   last_read_at: string | null;
   /** When `status` last actually changed. Null for every row that predates the

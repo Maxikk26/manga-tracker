@@ -6,7 +6,8 @@ import { BOOKMARK_STATUSES, type Bookmark, type BookmarkStatus } from "./types";
  * The API returns the whole list ordered by title (repositories.py), which is
  * the right default for the tabs you browse. Two tabs are not browsed, they are
  * worked, and each has a date that answers "which of these did I touch last":
- * "Leyendo" has `last_read_at`, "En pausa" has `status_changed_at`.
+ * "Leyendo" has `last_read_at`, "En pausa" has `status_changed_at`. "Leyendo"
+ * ranks its pending group by `latest_detected_at` first (see below).
  *
  * Sorting lives here rather than in SQL because the list is fetched whole and
  * filtered client-side, so the ordering is a property of the tab, not of the
@@ -35,16 +36,26 @@ function byDateDesc(field: keyof Bookmark) {
     if (left === null && right === null) {
       return a.title.localeCompare(b.title, "es");
     }
-    if (left === null) return 1;
-    if (right === null) return -1;
-    // Compared as plain strings, not parsed as dates. That is safe only because
-    // every writer in the backend emits the same fixed-width UTC format
-    // (`%Y-%m-%dT%H:%M:%SZ` — web/app.py, scheduler.py, db.py, the schema
-    // trigger, the importer), so lexicographic order is chronological order.
-    // Mix a SQLite-style "YYYY-MM-DD HH:MM:SS" into a column and this breaks
-    // silently, because a space sorts before "T".
-    return right.localeCompare(left);
+    return compareDatesDesc(left, right);
   };
+}
+
+/**
+ * Most recent first, null last, and 0 when both are null or equal — so a
+ * caller can chain a fallback comparison after it.
+ */
+function compareDatesDesc(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  // Compared as plain strings, not parsed as dates. That is safe only because
+  // every writer in the backend emits the same fixed-width UTC format
+  // (`%Y-%m-%dT%H:%M:%SZ` — web/app.py, scheduler.py, db.py, the schema
+  // trigger, the importer, and the detection jobs' `now` that stamps
+  // `chapter_history.detected_at`), so lexicographic order is chronological
+  // order. Mix a SQLite-style "YYYY-MM-DD HH:MM:SS" into a column and this
+  // breaks silently, because a space sorts before "T".
+  return right.localeCompare(left);
 }
 
 /**
@@ -80,10 +91,21 @@ export function sortBookmarksForTab(
   // "Leyendo" asks one question before any other: what do I still have to
   // read. A manga you are caught up on is not an item on that list, so it
   // sinks below every manga with chapters pending, whatever the dates say.
-  // Inside each group the date ordering still decides.
+  //
+  // Inside the pending group the freshest news comes first: the manga whose
+  // new chapter the tracker detected most recently (`latest_detected_at`),
+  // however long ago it was last read (owner request, 2026-10-08). An unknown
+  // detection sinks; ties and unknowns fall back to the reading date, then
+  // title. The caught-up group has no news to rank by, so it keeps ordering
+  // by the reading date alone.
   return copy.sort((a, b) => {
     const caughtUp = Number(isCaughtUp(a)) - Number(isCaughtUp(b));
-    return caughtUp !== 0 ? caughtUp : byDate(a, b);
+    if (caughtUp !== 0) return caughtUp;
+    if (!isCaughtUp(a)) {
+      const detected = compareDatesDesc(a.latest_detected_at, b.latest_detected_at);
+      if (detected !== 0) return detected;
+    }
+    return byDate(a, b);
   });
 }
 

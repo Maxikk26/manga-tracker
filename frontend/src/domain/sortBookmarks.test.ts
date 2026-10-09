@@ -20,6 +20,7 @@ function bookmark(
     latest_chapter_num: 1,
     latest_chapter_url: null,
     latest_chapter_at: null,
+    latest_detected_at: null,
     behind: null,
     last_read_at,
     status_changed_at,
@@ -211,6 +212,81 @@ describe("sortBookmarksForTab: reading puts what you owe first", () => {
       "reading",
     );
     expect(titlesOf(sorted)).toEqual(["Desconocido", "Al dia"]);
+  });
+
+  const pending = (
+    id: number,
+    title: string,
+    latest_detected_at: string | null,
+    last_read_at: string | null = null,
+    behind: number | null = 3,
+  ): Bookmark => ({ ...bookmark(id, title, last_read_at), behind, latest_detected_at });
+
+  it("puts the most recently updated pending manga first, whatever was read last", () => {
+    // The owner's question on 2026-10-08: a title that just got a chapter
+    // but was last opened weeks ago must not sink below ones read yesterday.
+    const sorted = sortBookmarksForTab(
+      [
+        pending(1, "Leida ayer, actualizada en septiembre", "2026-09-01T10:00:00Z", "2026-10-07T10:00:00Z"),
+        pending(2, "Leida hace meses, actualizada hoy", "2026-10-08T06:00:00Z", "2026-06-01T10:00:00Z"),
+        pending(3, "Actualizada la semana pasada", "2026-10-01T10:00:00Z", "2026-09-15T10:00:00Z"),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual([
+      "Leida hace meses, actualizada hoy",
+      "Actualizada la semana pasada",
+      "Leida ayer, actualizada en septiembre",
+    ]);
+  });
+
+  it("sinks pending titles with no detection below detected ones, then falls back to the reading date and title", () => {
+    const sorted = sortBookmarksForTab(
+      [
+        pending(1, "Zeta sin deteccion ni lectura", null, null),
+        pending(2, "Sin deteccion, leida ayer", null, "2026-10-07T10:00:00Z"),
+        pending(3, "Detectada hace meses", "2026-05-01T10:00:00Z", "2026-05-02T10:00:00Z"),
+        pending(4, "Alfa sin deteccion ni lectura", null, null),
+        pending(5, "Sin deteccion, leida en junio", null, "2026-06-01T10:00:00Z"),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual([
+      "Detectada hace meses",
+      "Sin deteccion, leida ayer",
+      "Sin deteccion, leida en junio",
+      "Alfa sin deteccion ni lectura",
+      "Zeta sin deteccion ni lectura",
+    ]);
+  });
+
+  it("breaks a tie on the detection date by the reading date", () => {
+    // One feed run stamps every publication it records with the same `now`,
+    // so equal detection dates are the ordinary case, not an edge.
+    const sorted = sortBookmarksForTab(
+      [
+        pending(1, "Misma corrida, leida en junio", "2026-10-08T06:00:00Z", "2026-06-01T10:00:00Z"),
+        pending(2, "Misma corrida, leida ayer", "2026-10-08T06:00:00Z", "2026-10-07T10:00:00Z"),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual(["Misma corrida, leida ayer", "Misma corrida, leida en junio"]);
+  });
+
+  it("orders the caught-up group by reading date only, ignoring the detection date", () => {
+    // Nothing is pending there, so a fresh detection is not news: the group
+    // still answers "which did I touch last".
+    const sorted = sortBookmarksForTab(
+      [
+        pending(1, "Al dia, actualizada hoy, leida en junio", "2026-10-08T06:00:00Z", "2026-06-01T10:00:00Z", 0),
+        pending(2, "Al dia, actualizada en mayo, leida ayer", "2026-05-01T10:00:00Z", "2026-10-07T10:00:00Z", 0),
+      ],
+      "reading",
+    );
+    expect(titlesOf(sorted)).toEqual([
+      "Al dia, actualizada en mayo, leida ayer",
+      "Al dia, actualizada hoy, leida en junio",
+    ]);
   });
 
   it("leaves the paused tab ordered by its own date, not by what is pending", () => {

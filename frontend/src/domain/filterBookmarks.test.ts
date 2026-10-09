@@ -14,6 +14,7 @@ function bookmark(id: number, title: string): Bookmark {
     latest_chapter_num: 1,
     latest_chapter_url: null,
     latest_chapter_at: null,
+    latest_detected_at: null,
     behind: null,
     last_read_at: null,
     status_changed_at: null,
