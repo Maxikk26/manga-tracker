@@ -280,8 +280,18 @@ body {
   opacity: 0.45;
 }
 
+/* Lit back up on hover, and on KEYBOARD focus only. It used to be
+   `:focus-within`, which also matched the programmatic focus the popover
+   returns to the chapter trigger on close -- so a card just marked caught
+   up stayed lit until focus left it, and the fade looked late. Browsers
+   match `:focus-visible` on that returned focus only when the popover was
+   being driven by keyboard (Enter/Escape in the field), where the lift is
+   the focus indicator a keyboard user needs; after a pointer close
+   (stepper, outside click) it does not match and the card fades at once.
+   jsdom has no `:focus-visible` heuristics, so this is verified by eye in a
+   real browser, not by a test. */
 .card[data-done]:hover,
-.card[data-done]:focus-within {
+.card[data-done]:has(:focus-visible) {
   opacity: 0.92;
 }
 
@@ -289,7 +299,7 @@ body {
    (0,1,0), and `.card[data-done]` is (0,1,1) -- a saving card that is also
    caught up would render at 0.45 and the "being written" signal would
    silently vanish. `.card.card-saving` is (0,2,0), which beats both
-   `.card[data-done]` and its :hover/:focus-within variant regardless of
+   `.card[data-done]` and its :hover/:focus-visible variant regardless of
    source order. */
 .card.card-saving {
   opacity: 0.55;
