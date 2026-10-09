@@ -58,15 +58,20 @@ export function Popover({ anchor, label, onDismiss, children }: Props) {
   // it still exists, otherwise to the grid (design D6) -- a status change
   // from inside the popover (fase 5 slice 2b) can remove the row the
   // anchor belonged to before this cleanup runs.
+  //
+  // Every focus here passes `preventScroll`: closing ends the ordering
+  // freeze, so the list re-sorts in the same commit and the anchor's card
+  // may now sit elsewhere on the page -- a plain `focus()` scrolled the
+  // viewport after it on every edit that moved the card.
   useEffect(() => {
     const field = panelRef.current?.querySelector<HTMLElement>("input, select, button");
-    field?.focus();
+    field?.focus({ preventScroll: true });
     if (field instanceof HTMLInputElement) field.select();
     return () => {
       if (anchor && document.contains(anchor)) {
-        anchor.focus();
+        anchor.focus({ preventScroll: true });
       } else {
-        document.querySelector<HTMLElement>(".bookmark-grid")?.focus();
+        document.querySelector<HTMLElement>(".bookmark-grid")?.focus({ preventScroll: true });
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

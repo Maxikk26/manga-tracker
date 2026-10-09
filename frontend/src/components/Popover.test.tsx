@@ -90,6 +90,61 @@ describe("Popover", () => {
     expect(screen.getByRole("button", { name: "abrir" })).toHaveFocus();
   });
 
+  describe("never scrolls the page when it moves focus", () => {
+    // Closing re-sorts the list (the freeze ends), so the anchor may now sit
+    // somewhere else on the page; a plain `focus()` would scroll the
+    // viewport to follow it. Every focus this component moves must pass
+    // `preventScroll`.
+    function focusCallsOn(spy: { mock: { contexts: unknown[]; calls: unknown[][] } }, element: Element) {
+      return spy.mock.calls.filter((_args, index) => spy.mock.contexts[index] === element);
+    }
+
+    it("on open, focusing the first field", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      const spy = vi.spyOn(HTMLElement.prototype, "focus");
+      await user.click(screen.getByRole("button", { name: "abrir" }));
+      const field = screen.getByRole("textbox", { name: "campo" });
+      expect(focusCallsOn(spy, field)).toContainEqual([{ preventScroll: true }]);
+      expect(focusCallsOn(spy, field)).not.toContainEqual([]);
+      spy.mockRestore();
+    });
+
+    it("on close, returning focus to the anchor", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      const anchor = screen.getByRole("button", { name: "abrir" });
+      await user.click(anchor);
+      const spy = vi.spyOn(HTMLElement.prototype, "focus");
+      await user.keyboard("{Escape}");
+      expect(anchor).toHaveFocus();
+      expect(focusCallsOn(spy, anchor)).toEqual([[{ preventScroll: true }]]);
+      spy.mockRestore();
+    });
+
+    it("on close, falling back to the grid when the anchor is gone", () => {
+      const detachedAnchor = document.createElement("button");
+      function Fallback({ open }: { open: boolean }) {
+        return (
+          <div className="bookmark-grid" tabIndex={-1} data-testid="grid">
+            {open && (
+              <Popover anchor={detachedAnchor} label="Panel de prueba" onDismiss={() => {}}>
+                <input aria-label="campo" />
+              </Popover>
+            )}
+          </div>
+        );
+      }
+      const { rerender } = render(<Fallback open />);
+      const spy = vi.spyOn(HTMLElement.prototype, "focus");
+      rerender(<Fallback open={false} />);
+      const grid = screen.getByTestId("grid");
+      expect(grid).toHaveFocus();
+      expect(focusCallsOn(spy, grid)).toEqual([[{ preventScroll: true }]]);
+      spy.mockRestore();
+    });
+  });
+
   it("does nothing on a focusout whose relatedTarget is null", async () => {
     // A native <select> dropdown, or a click outside the browser window,
     // both produce this -- closing here would kill the status row (design
