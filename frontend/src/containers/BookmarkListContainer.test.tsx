@@ -18,6 +18,7 @@ const payload: Bookmark[] = [
     latest_chapter_num: null,
     latest_chapter_url: null,
     latest_chapter_at: null,
+    latest_detected_at: null,
   }),
   makeBookmark({
     id: 3,

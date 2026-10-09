@@ -1,6 +1,6 @@
 # Runbook: cómo se decide el diseño de una pantalla
 
-Versión 1.2 — 2026-09-04. Depende de `spec-panel-v1b.md` (v1.14).
+Versión 1.2 — 2026-09-04. Depende de `spec-panel-v1b.md` (v1.15).
 
 Define cómo se elige el aspecto de una pantalla del panel: qué herramientas compiten, con qué prompt, y con qué criterio se decide cuál ganó. No define el aspecto de ninguna pantalla concreta — eso lo deciden las comparaciones que este documento gobierna.
 

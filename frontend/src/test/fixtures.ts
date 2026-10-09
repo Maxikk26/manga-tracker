@@ -20,6 +20,7 @@ export function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     latest_chapter_num: 1120,
     latest_chapter_url: "https://example.test/one-piece/chapter-1120",
     latest_chapter_at: "2026-08-15T10:00:00Z",
+    latest_detected_at: "2026-08-15T10:05:00Z",
     behind: 20,
     last_read_at: "2026-08-10T03:00:00Z",
     status_changed_at: null,

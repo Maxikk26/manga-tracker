@@ -376,7 +376,14 @@ def write_manual_add(
 _PANEL_BOOKMARK_SELECT = (
     "SELECT b.id, b.manga_id, m.title, b.status, b.last_chapter_read, b.progress_is_approx, "
     "ms.url, ms.latest_chapter_num, ms.latest_chapter_url, ms.latest_chapter_at, b.last_read_at, "
-    "b.status_changed_at, b.my_score "
+    "b.status_changed_at, b.my_score, "
+    # When the tracker last detected a new chapter for this manga -- our own
+    # `detected_at`, not the source's `latest_chapter_at`, which is NULL on
+    # many production rows and re-bumped whenever the source edits a chapter.
+    # A correlated MAX rather than a GROUP BY join so the list keeps exactly
+    # one row per bookmark; it is served by the UNIQUE (manga_site_id,
+    # chapter_num) index. NULL with no mapping or no history.
+    "(SELECT MAX(ch.detected_at) FROM chapter_history ch WHERE ch.manga_site_id = ms.id) "
     "FROM bookmarks b JOIN mangas m ON m.id = b.manga_id "
     # LEFT, not INNER: a manga can exist without a source mapping (a pending
     # Kitsu entry whose url was never pasted), and its bookmark must still
@@ -388,7 +395,7 @@ _PANEL_BOOKMARK_SELECT = (
 def _panel_bookmark_row(row) -> dict:
     (bookmark_id, manga_id, title, status, last_chapter_read, progress_is_approx,
      manga_url, latest_chapter_num, latest_chapter_url, latest_chapter_at, last_read_at,
-     status_changed_at, my_score) = row
+     status_changed_at, my_score, latest_detected_at) = row
     # NULL on either side means "behind is unknowable", not zero: a bookmark
     # with no recorded progress is not magically caught up.
     #
@@ -423,6 +430,10 @@ def _panel_bookmark_row(row) -> dict:
         "latest_chapter_num": latest_chapter_num,
         "latest_chapter_url": latest_chapter_url,
         "latest_chapter_at": latest_chapter_at,
+        # Read-only and derived (MAX over chapter_history), always in the fixed
+        # `%Y-%m-%dT%H:%M:%SZ` format every detection writer stamps, so the
+        # panel can order by it as a plain string (sortBookmarks.ts).
+        "latest_detected_at": latest_detected_at,
         "behind": behind,
         "last_read_at": last_read_at,
         "status_changed_at": status_changed_at,
