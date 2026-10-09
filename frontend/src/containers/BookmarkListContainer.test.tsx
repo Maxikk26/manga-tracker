@@ -393,6 +393,100 @@ describe("BookmarkListContainer", () => {
     });
   });
 
+  describe("the optimistic caught-up state", () => {
+    const almostDone = makeBookmark({
+      id: 201,
+      title: "Gamma Manga",
+      last_chapter_read: 99,
+      latest_chapter_num: 100,
+      behind: 1,
+    });
+
+    function deferredResponse() {
+      let resolve!: (value: Response) => void;
+      const promise = new Promise<Response>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    /** The PATCH is held open by the test; GETs return `initial` first and
+     *  `afterSave` for every refetch. */
+    function stubWithHeldPatch(afterSave: Bookmark) {
+      const patch = deferredResponse();
+      let getCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          if (init?.method === "PATCH") return patch.promise;
+          getCalls += 1;
+          return jsonResponse(getCalls === 1 ? [almostDone] : [afterSave]);
+        }),
+      );
+      return { patch, getCalls: () => getCalls };
+    }
+
+    async function commitLatestChapter() {
+      const user = userEvent.setup();
+      render(<BookmarkListContainer />);
+      const card = (await screen.findByText("Gamma Manga")).closest("article")!;
+      expect(card).not.toHaveAttribute("data-done");
+      await user.click(within(card).getByRole("button", { name: /^Editar capítulo leído/ }));
+      const input = screen.getByRole("textbox", { name: "Capítulo leído" });
+      await user.clear(input);
+      await user.type(input, "100{Enter}");
+      return card;
+    }
+
+    it("shows the card caught up as soon as the save is committed, before the PATCH or refetch resolve", async () => {
+      const { patch, getCalls } = stubWithHeldPatch({ ...almostDone, last_chapter_read: 100, behind: 0 });
+      const card = await commitLatestChapter();
+
+      // The PATCH is still in flight and no refetch has happened.
+      expect(getCalls()).toBe(1);
+      expect(card).toHaveAttribute("data-done");
+      expect(within(card).getByText("Al día")).toBeInTheDocument();
+
+      // The server confirms: still caught up once the refetch lands.
+      patch.resolve(jsonResponse({}));
+      await waitFor(() => expect(getCalls()).toBe(2));
+      await waitFor(() => expect(card).toHaveAttribute("data-done"));
+    });
+
+    it("reverts when the refetched server state says the row is not caught up", async () => {
+      // The server is the source of truth: a new chapter was detected
+      // meanwhile, so 100 is no longer the latest.
+      const { patch, getCalls } = stubWithHeldPatch({
+        ...almostDone,
+        last_chapter_read: 100,
+        latest_chapter_num: 101,
+        behind: 1,
+      });
+      const card = await commitLatestChapter();
+      expect(card).toHaveAttribute("data-done");
+
+      patch.resolve(jsonResponse({}));
+      await waitFor(() => expect(getCalls()).toBe(2));
+      await waitFor(() => expect(card).not.toHaveAttribute("data-done"));
+      expect(within(card).queryByText("Al día")).not.toBeInTheDocument();
+    });
+
+    it("reverts to the server state when the PATCH fails", async () => {
+      const { patch, getCalls } = stubWithHeldPatch(almostDone);
+      const card = await commitLatestChapter();
+      expect(card).toHaveAttribute("data-done");
+
+      patch.resolve(jsonResponse({ detail: "No se pudo guardar." }, 500));
+      expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo guardar.");
+      await waitFor(() => expect(card).not.toHaveAttribute("data-done"));
+      expect(
+        within(card).getByRole("button", { name: /^Editar capítulo leído/ }),
+      ).toHaveTextContent("cap. 99");
+      // A failed write never refetches.
+      expect(getCalls()).toBe(1);
+    });
+  });
+
   describe("search and Todo (fase 5 slice 3)", () => {
     it(
       "gives an empty tab with no query a message that never carries «» quoting, distinct from " +
