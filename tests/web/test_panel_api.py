@@ -22,7 +22,7 @@ NOW = "2026-08-17T12:00:00Z"
 
 BOOKMARK_KEYS = {
     "id", "manga_id", "title", "status", "last_chapter_read", "progress_is_approx",
-    "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "behind",
+    "manga_url", "latest_chapter_num", "latest_chapter_url", "latest_chapter_at", "latest_detected_at", "behind",
     "last_read_at", "status_changed_at", "my_score",
 }
 
@@ -191,6 +191,45 @@ def test_manga_url_is_served_for_a_mapped_title_with_no_detection_yet(client, db
 
     assert body[0]["manga_url"] == "https://www.manganato.gg/manga/just-added"
     assert body[0]["latest_chapter_url"] is None
+
+
+def _publication(conn, manga_id, chapter_num, detected_at):
+    ms_id = conn.execute("SELECT id FROM manga_sites WHERE manga_id = ?", (manga_id,)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO chapter_history (manga_site_id, chapter_num, chapter_url, source_published_at, "
+        "detected_at, detected_via) VALUES (?, ?, NULL, NULL, ?, 'feed')",
+        (ms_id, chapter_num, detected_at),
+    )
+    conn.commit()
+
+
+def test_latest_detected_at_is_the_newest_chapter_history_detection(client, db_path):
+    """The "Leyendo" tab orders pending titles by when the tracker last saw a
+    new chapter. That is `chapter_history.detected_at` -- our own clock -- and
+    not `latest_chapter_at`, which is the source's `updated_at`: NULL on many
+    production rows and re-bumped whenever the source edits a chapter. So the
+    field must ignore `latest_chapter_at` entirely, take the MAX across the
+    manga's history, and be null when there is no history or no mapping."""
+    conn = connect(db_path)
+    site_id = _site(conn)
+    detected, _ = _bookmark(conn, site_id, "A Detected", latest_chapter_num=12.0,
+                            latest_chapter_at="2026-09-30T00:00:00Z")
+    _publication(conn, detected, 10.0, "2026-09-01T08:00:00Z")
+    _publication(conn, detected, 12.0, "2026-09-20T08:00:00Z")
+    _publication(conn, detected, 11.0, "2026-09-10T08:00:00Z")
+    _bookmark(conn, site_id, "B Never Detected", latest_chapter_at="2026-09-30T00:00:00Z")
+    _bookmark(conn, site_id, "C Unmapped", mapped=False)
+
+    body = client.get("/api/bookmarks").json()
+
+    by_title = {item["title"]: item["latest_detected_at"] for item in body}
+    assert by_title == {
+        "A Detected": "2026-09-20T08:00:00Z",
+        "B Never Detected": None,
+        "C Unmapped": None,
+    }
+    # One row per bookmark: the history join must not fan the list out.
+    assert len(body) == 3
 
 
 def test_list_includes_my_score_for_scored_and_unscored_rows(client, db_path):
