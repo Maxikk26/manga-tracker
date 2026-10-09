@@ -7,6 +7,7 @@ import { BookmarkGrid } from "../components/BookmarkGrid";
 import { AddMangaContainer } from "./AddMangaContainer";
 import { filterBookmarks } from "../domain/filterBookmarks";
 import { applyFrozenOrder, sortBookmarksForAll, sortBookmarksForTab } from "../domain/sortBookmarks";
+import { applyOptimisticProgress } from "../domain/optimisticProgress";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -48,6 +49,15 @@ export function BookmarkListContainer() {
   // a burst counter, so a slow response can never overwrite a newer commit.
   const tails = useRef(new Map<number, Promise<void>>());
   const seqs = useRef(new Map<number, number>());
+
+  // Chapter saves still waiting on the server, by bookmark id: the value the
+  // owner committed. Rendered on top of the fetched rows so the caught-up
+  // state shows on commit, not after PATCH + refetch; dropped when the
+  // burst's last write settles, so the server always has the final word --
+  // the refetch confirms or reverts it, a failed PATCH reverts it.
+  const [pendingProgress, setPendingProgress] = useState<ReadonlyMap<number, number>>(
+    new Map(),
+  );
 
   const load = useCallback(async (initial: boolean) => {
     if (initial) setLoadState("loading");
@@ -109,6 +119,12 @@ export function BookmarkListContainer() {
               next.delete(id);
               return next;
             });
+            setPendingProgress((pending) => {
+              if (!pending.has(id)) return pending;
+              const next = new Map(pending);
+              next.delete(id);
+              return next;
+            });
           }
         }
       });
@@ -118,7 +134,10 @@ export function BookmarkListContainer() {
   );
 
   const handleChangeProgress = useCallback(
-    (id: number, value: number) => enqueuePatch(id, { last_chapter_read: value }),
+    (id: number, value: number) => {
+      setPendingProgress((pending) => new Map(pending).set(id, value));
+      enqueuePatch(id, { last_chapter_read: value });
+    },
     [enqueuePatch],
   );
 
@@ -180,7 +199,13 @@ export function BookmarkListContainer() {
   // The chain is filter -> scope -> sort (design D10): `filterBookmarks`
   // never sees a status, so the identical function serves both a single
   // tab and "Todo" -- only the rows handed to it differ.
-  const filtered = useMemo(() => filterBookmarks(bookmarks, query), [bookmarks, query]);
+  // Pending chapter saves are applied before anything else, so the card,
+  // its "Al día" chip and the sort all read the same optimistic row.
+  const effective = useMemo(
+    () => applyOptimisticProgress(bookmarks, pendingProgress),
+    [bookmarks, pendingProgress],
+  );
+  const filtered = useMemo(() => filterBookmarks(effective, query), [effective, query]);
 
   // The tab's true current order -- always fresh, never frozen. This is
   // what the freeze snapshots *from* on open, and what every render falls
