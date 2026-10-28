@@ -1,6 +1,6 @@
 # Spec: Bot de Telegram — manga-tracker V1a
 
-Versión 1.11 — 2026-09-07. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.11).
+Versión 1.11 — 2026-09-07. Documento 4 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14) y `spec-cliente-fuente-descubrimiento.md` (v1.12).
 
 Cambios vs 1.10: solo documentación. Se registra que los dos pendientes que quedan aquí se cerrarán en una sola ronda junto con el #4 de `spec-cliente-fuente-descubrimiento.md`, y qué tendrá que separar esa ronda al entregarla.
 

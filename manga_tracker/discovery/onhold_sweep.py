@@ -134,7 +134,11 @@ def _sweep(conn, client, run_id, *, now: str, logger) -> None:
         if not chapters:
             continue  # a well-formed empty response is a success; nothing else to do
 
-        for chapter in chapters[1:]:  # only the newest is compared; the rest are free data
+        # Only chapters[0], the newest, goes through the rule - and that is what
+        # makes it safe for the rule to lower an inflated latest_chapter_num
+        # (CD v1.12 step 2): an older chapter of this list never reaches the
+        # comparison, so it can never drag a correct stored value down to it.
+        for chapter in chapters[1:]:  # the rest are free data, straight to history
             conn.execute(
                 "INSERT OR IGNORE INTO chapter_history "
                 "(manga_site_id, chapter_num, chapter_url, source_published_at, detected_at, detected_via) "

@@ -1,7 +1,8 @@
 """The shared detection rule (CD Parte B v1.3, six steps) - implemented once,
 called by every mechanism. Never writes chapter_history for a terminal
-bookmark; never moves latest_chapter_num backward; the history write happens
-before, and independently of, any notify decision."""
+bookmark; only a sweep ever moves latest_chapter_num backward (CD v1.12 step
+2); the history write happens before, and independently of, any notify
+decision."""
 
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -35,8 +36,9 @@ class Detection:
 
     `recorded` is "a new chapter went into chapter_history"; `candidate` is set
     only when a reader has to be told about it. They are not the same fact, and
-    the difference is exactly the `on_hold` population, which records and never
-    notifies (step 5).
+    the difference is exactly the silent cases of step 5: the `on_hold`
+    population, and since CD v1.12 any chapter at or below my progress - both
+    record and never notify.
 
     The rule used to return `Candidate | None` alone, which made those two
     questions share one answer: `None` meant terminal, no-novelty *and* silent
@@ -58,6 +60,27 @@ class Detection:
 NOTHING_DETECTED = Detection(recorded=False)
 
 DETECTED_VIA_VALUES = frozenset({"feed", "active_sweep", "onhold_sweep", "seed_backfill"})
+
+# The mechanisms allowed to lower latest_chapter_num (CD v1.12 step 2). A sweep
+# reads the whole chapter list and hands the rule its newest entry, so that
+# entry being below the stored value means the stored value is wrong. Until
+# 2026-10-28 nothing could lower it, and production carried three titles muted
+# for months behind an inflated value (ms 93 at 373 against a source at 302).
+# The feed is left out on purpose: one row of a page that guarantees nothing is
+# too weak to overrule the store, and a bogus feed row is what inflated ms 93.
+LOWERING_DETECTED_VIA = frozenset({"active_sweep", "onhold_sweep"})
+
+
+def _already_read(mapping: Mapping, chapter) -> bool:
+    """A novelty at or below my progress (CD v1.12 step 5): I read it, here or
+    elsewhere - The Steward was read to 912 against a source at 804 - and the
+    digest announcing it is noise. Null progress means nothing was read yet.
+
+    This only *reads* last_chapter_read. Detection never writes bookmarks:
+    progress above the source means "read elsewhere" (V2 multi-source), not a
+    value to correct, and any write there would also fire the reading_history
+    trigger and invent a reading event."""
+    return mapping.last_chapter_read is not None and chapter.chapter_num <= mapping.last_chapter_read
 
 
 def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: str, logger) -> Detection:
@@ -81,7 +104,21 @@ def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: 
 
     latest = mapping.latest_chapter_num
     if latest is not None and chapter.chapter_num <= latest:
-        if chapter.chapter_num < latest:
+        if chapter.chapter_num < latest and detected_via in LOWERING_DETECTED_VIA:
+            # A correction, not a publication: no history row, nothing for the
+            # digest, and not counted in updates_found. The next chapter above
+            # the corrected value is then an ordinary novelty. No streak of
+            # sightings is required - that would need a column and a migration,
+            # and the worst a one-day truncated list can cost is one duplicated
+            # digest line, which notify-before-update already accepts.
+            conn.execute(
+                "UPDATE manga_sites SET latest_chapter_num = ?, latest_chapter_url = ?, latest_chapter_at = ? "
+                "WHERE id = ?", (chapter.chapter_num, chapter.url, chapter.published_at, mapping.id),
+            )
+            logger.warning("observed %s < stored %s for manga_sites.id=%s via %s; lowering the stored value "
+                           "%s -> %s", chapter.chapter_num, latest, mapping.id, detected_via, latest,
+                           chapter.chapter_num)
+        elif chapter.chapter_num < latest:
             logger.warning("observed %s < stored %s for manga_sites.id=%s; source renumbered/deleted, "
                             "not moving the stored value backward", chapter.chapter_num, latest, mapping.id)
         conn.commit()
@@ -94,15 +131,16 @@ def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: 
         (mapping.id, chapter.chapter_num, chapter.url, chapter.published_at, now, detected_via),
     )  # step 4: before any notify decision, independent of it - a publication is a fact
 
-    if mapping.bookmark_status == "on_hold":
+    if mapping.bookmark_status == "on_hold" or _already_read(mapping, chapter):
         conn.execute(
             "UPDATE manga_sites SET latest_chapter_num = ?, latest_chapter_url = ?, latest_chapter_at = ? "
             "WHERE id = ?", (chapter.chapter_num, chapter.url, chapter.published_at, mapping.id),
         )
         conn.commit()
-        # step 5: silent, immediate - on_hold never notifies. Recorded all the
-        # same: the history row above is a fact, and CD counts it in
-        # updates_found. No candidate, so nothing reaches the digest.
+        # step 5: silent, immediate - on_hold never notifies, and neither does
+        # a chapter I have already read (CD v1.12). Recorded all the same: the
+        # history row above is a fact, and CD counts it in updates_found. No
+        # candidate, so nothing reaches the digest.
         return Detection(recorded=True)
 
     conn.commit()

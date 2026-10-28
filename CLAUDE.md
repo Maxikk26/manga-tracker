@@ -63,7 +63,9 @@ A concrete consequence: building a chapter URL from a slug and a number is a **c
 
 **`chapter_history` is written regardless of notification.** A publication is a fact, independent of whether a message went out. It is recorded before any notification decision. Its uniqueness constraint on (`manga_site_id`, `chapter_num`) makes reprocessing idempotent.
 
-**The detection rule is one rule, implemented once**, shared by all three mechanisms: seal `last_checked_at` (always) → compare against `latest_chapter_num` → record the publication → decide by bookmark state. A number *lower* than stored means the source renumbered or deleted; log it and never move the stored value backwards.
+**The detection rule is one rule, implemented once**, shared by all three mechanisms: seal `last_checked_at` (always) → compare against `latest_chapter_num` → record the publication → decide by bookmark state. A number *lower* than stored means the stored value is wrong or the source renumbered: a **sweep** lowers `latest_chapter_num` to what it observed (WARNING, no history, no notification), the **feed** only logs it — one feed row is too weak to overrule the store, and a bogus feed row is what inflated it in the first place. Before 2026-10-28 nothing ever lowered it, and an inflated value muted titles for months (`spec-cliente-fuente-descubrimiento.md` v1.12, step 2).
+
+**Never notify what was already read.** An active novelty at or below `last_chapter_read` is recorded and advances silently, like `on_hold`. Detection never writes `bookmarks` at all: `last_chapter_read` above `latest_chapter_num` means "read elsewhere" (multi-source, V2), not something to correct.
 
 **Terminal states consume nothing.** `completed` and `dropped` receive zero requests, ever, and a match on them updates nothing and records no history. `on_hold` updates silently and immediately, and never notifies.
 

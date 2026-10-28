@@ -61,7 +61,7 @@ class FakeSender:
 
 
 def _seed(conn, *, status="reading", latest=None, consecutive_failures=0, slug="op", title="OP",
-          latest_at=None) -> int:
+          latest_at=None, last_read=None) -> int:
     """Get-or-create the site row: `sites.name` is UNIQUE, so a second call in
     the same test used to fail on the insert rather than on anything meaningful."""
     manga_id = conn.execute(
@@ -77,8 +77,9 @@ def _seed(conn, *, status="reading", latest=None, consecutive_failures=0, slug="
         (manga_id, site_id, slug, latest, consecutive_failures, latest_at, NOW, NOW),
     ).lastrowid
     conn.execute(
-        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) VALUES (?, ?, 'seed', ?, ?)",
-        (manga_id, status, NOW, NOW),
+        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, origin, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'seed', ?, ?)",
+        (manga_id, status, last_read, NOW, NOW),
     )
     conn.commit()
     return ms_id
@@ -591,3 +592,73 @@ def test_a_send_failure_and_a_threshold_breach_are_both_named():
     assert row["status"] == "partial"
     assert row["error_summary"].startswith("send failed; ")
     assert "3/4 mappings failed" in row["error_summary"]
+
+
+# --- an inflated stored value (CD v1.12 step 2) --------------------------------
+
+
+class RecordingSender(FakeSender):
+    def __init__(self):
+        super().__init__()
+        self.digests: list[list] = []
+
+    def send_digest(self, lines, *, now):
+        self.digests.append(list(lines))
+        return True
+
+
+def _latest_num(conn, ms_id):
+    return conn.execute("SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (ms_id,)).fetchone()[0]
+
+
+def test_a_sweep_lowers_an_inflated_value_and_the_next_chapter_is_notified():
+    """ms 199 in production: stored 231, the source at 164, so 158-164 were
+    never notified and nothing after them would have been either. The sweep
+    that sees the regression lowers the value silently; the sweep that sees the
+    next real chapter notifies it by the ordinary path."""
+    conn = connect(":memory:")
+    ms_id = _seed(conn, latest=231, slug="op")
+    sender = RecordingSender()
+
+    active_sweep(conn, FakeClient({"op": [Chapter(164, "u164", NOW), Chapter(163, "u163", NOW)]}), sender,
+                 now=NOW, logger=LOGGER)
+    assert _latest_num(conn, ms_id) == 164
+    assert sender.digests == []  # a correction is not a novelty
+
+    active_sweep(conn, FakeClient({"op": [Chapter(165, "u165", NOW), Chapter(164, "u164", NOW)]}), sender,
+                 now=NOW, logger=LOGGER)
+    assert [line.chapter_num for line in sender.digests[0]] == [165]
+    assert _latest_num(conn, ms_id) == 165
+
+
+def test_an_older_chapter_in_the_list_never_lowers_the_stored_value():
+    """Only the newest chapter the source lists is compared. The rest go
+    straight to chapter_history as free data, so a list that reaches back to
+    90 must not drag a correct 100 down to it."""
+    conn = connect(":memory:")
+    ms_id = _seed(conn, latest=100, slug="op")
+    chapters = [Chapter(100, "u100", NOW), Chapter(95, "u95", NOW), Chapter(90, "u90", NOW)]
+
+    active_sweep(conn, FakeClient({"op": chapters}), RecordingSender(), now=NOW, logger=LOGGER)
+
+    assert _latest_num(conn, ms_id) == 100
+
+
+def test_chapters_already_read_elsewhere_never_reach_the_digest():
+    """Return of the Mad Demon in production: read to 216 elsewhere, the
+    source at 202. Its next chapters were announced one by one although I had
+    read every one of them; they now advance silently, and only a chapter past
+    my progress makes the digest. updates_found still counts the silent one."""
+    conn = connect(":memory:")
+    read = _seed(conn, latest=202, last_read=216, slug="mad", title="Mad Demon")
+    unread = _seed(conn, latest=50, last_read=50, slug="op", title="OP")
+    sender = RecordingSender()
+    client = FakeClient({"mad": [Chapter(203, "u203", NOW)], "op": [Chapter(51, "u51", NOW)]})
+
+    active_sweep(conn, client, sender, now=NOW, logger=LOGGER)
+
+    assert [line.manga_title for line in sender.digests[0]] == ["OP"]
+    assert _latest_num(conn, read) == 203
+    assert _latest_num(conn, unread) == 51
+    updates = conn.execute("SELECT updates_found FROM job_runs WHERE job_name = 'active_sweep'").fetchone()[0]
+    assert updates == 2

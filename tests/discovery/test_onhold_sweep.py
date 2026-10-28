@@ -484,3 +484,18 @@ def test_an_uncontrolled_exception_closes_the_row_as_error_and_still_surfaces():
     assert row[0] == "error"
     assert row[1] is not None
     assert "KeyboardInterrupt" in row[2]
+
+
+def test_an_inflated_value_is_lowered_here_too_and_still_nothing_is_sent():
+    """ms 200 in production: 560 from the seed backfill against 145 at the
+    source. The weekly sweep reads the same full list the daily one does, so it
+    corrects the same way - and, being this sweep, says nothing about it."""
+    conn = connect(":memory:")
+    ms_id = _seed(conn, latest=560, slug="op")
+    sender = ExplodingSender()
+
+    onhold_sweep(conn, FakeClient({"op": [Chapter(145, "u145", NOW)]}), sender, now=NOW, logger=LOGGER)
+
+    assert _latest(conn, ms_id) == 145
+    assert sender.calls == []
+    assert _run(conn) == ("ok", 1, 0, 0)  # a correction is not counted as an update
