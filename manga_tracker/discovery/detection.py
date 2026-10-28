@@ -36,8 +36,9 @@ class Detection:
 
     `recorded` is "a new chapter went into chapter_history"; `candidate` is set
     only when a reader has to be told about it. They are not the same fact, and
-    the difference is exactly the `on_hold` population, which records and never
-    notifies (step 5).
+    the difference is exactly the silent cases of step 5: the `on_hold`
+    population, and since CD v1.12 any chapter at or below my progress - both
+    record and never notify.
 
     The rule used to return `Candidate | None` alone, which made those two
     questions share one answer: `None` meant terminal, no-novelty *and* silent
@@ -68,6 +69,18 @@ DETECTED_VIA_VALUES = frozenset({"feed", "active_sweep", "onhold_sweep", "seed_b
 # The feed is left out on purpose: one row of a page that guarantees nothing is
 # too weak to overrule the store, and a bogus feed row is what inflated ms 93.
 LOWERING_DETECTED_VIA = frozenset({"active_sweep", "onhold_sweep"})
+
+
+def _already_read(mapping: Mapping, chapter) -> bool:
+    """A novelty at or below my progress (CD v1.12 step 5): I read it, here or
+    elsewhere - The Steward was read to 912 against a source at 804 - and the
+    digest announcing it is noise. Null progress means nothing was read yet.
+
+    This only *reads* last_chapter_read. Detection never writes bookmarks:
+    progress above the source means "read elsewhere" (V2 multi-source), not a
+    value to correct, and any write there would also fire the reading_history
+    trigger and invent a reading event."""
+    return mapping.last_chapter_read is not None and chapter.chapter_num <= mapping.last_chapter_read
 
 
 def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: str, logger) -> Detection:
@@ -118,15 +131,16 @@ def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: 
         (mapping.id, chapter.chapter_num, chapter.url, chapter.published_at, now, detected_via),
     )  # step 4: before any notify decision, independent of it - a publication is a fact
 
-    if mapping.bookmark_status == "on_hold":
+    if mapping.bookmark_status == "on_hold" or _already_read(mapping, chapter):
         conn.execute(
             "UPDATE manga_sites SET latest_chapter_num = ?, latest_chapter_url = ?, latest_chapter_at = ? "
             "WHERE id = ?", (chapter.chapter_num, chapter.url, chapter.published_at, mapping.id),
         )
         conn.commit()
-        # step 5: silent, immediate - on_hold never notifies. Recorded all the
-        # same: the history row above is a fact, and CD counts it in
-        # updates_found. No candidate, so nothing reaches the digest.
+        # step 5: silent, immediate - on_hold never notifies, and neither does
+        # a chapter I have already read (CD v1.12). Recorded all the same: the
+        # history row above is a fact, and CD counts it in updates_found. No
+        # candidate, so nothing reaches the digest.
         return Detection(recorded=True)
 
     conn.commit()

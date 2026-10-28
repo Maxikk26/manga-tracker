@@ -61,7 +61,7 @@ class FakeSender:
 
 
 def _seed(conn, *, status="reading", latest=None, consecutive_failures=0, slug="op", title="OP",
-          latest_at=None) -> int:
+          latest_at=None, last_read=None) -> int:
     """Get-or-create the site row: `sites.name` is UNIQUE, so a second call in
     the same test used to fail on the insert rather than on anything meaningful."""
     manga_id = conn.execute(
@@ -77,8 +77,9 @@ def _seed(conn, *, status="reading", latest=None, consecutive_failures=0, slug="
         (manga_id, site_id, slug, latest, consecutive_failures, latest_at, NOW, NOW),
     ).lastrowid
     conn.execute(
-        "INSERT INTO bookmarks (manga_id, status, origin, created_at, updated_at) VALUES (?, ?, 'seed', ?, ?)",
-        (manga_id, status, NOW, NOW),
+        "INSERT INTO bookmarks (manga_id, status, last_chapter_read, origin, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'seed', ?, ?)",
+        (manga_id, status, last_read, NOW, NOW),
     )
     conn.commit()
     return ms_id
@@ -641,3 +642,23 @@ def test_an_older_chapter_in_the_list_never_lowers_the_stored_value():
     active_sweep(conn, FakeClient({"op": chapters}), RecordingSender(), now=NOW, logger=LOGGER)
 
     assert _latest_num(conn, ms_id) == 100
+
+
+def test_chapters_already_read_elsewhere_never_reach_the_digest():
+    """Return of the Mad Demon in production: read to 216 elsewhere, the
+    source at 202. Its next chapters were announced one by one although I had
+    read every one of them; they now advance silently, and only a chapter past
+    my progress makes the digest. updates_found still counts the silent one."""
+    conn = connect(":memory:")
+    read = _seed(conn, latest=202, last_read=216, slug="mad", title="Mad Demon")
+    unread = _seed(conn, latest=50, last_read=50, slug="op", title="OP")
+    sender = RecordingSender()
+    client = FakeClient({"mad": [Chapter(203, "u203", NOW)], "op": [Chapter(51, "u51", NOW)]})
+
+    active_sweep(conn, client, sender, now=NOW, logger=LOGGER)
+
+    assert [line.manga_title for line in sender.digests[0]] == ["OP"]
+    assert _latest_num(conn, read) == 203
+    assert _latest_num(conn, unread) == 51
+    updates = conn.execute("SELECT updates_found FROM job_runs WHERE job_name = 'active_sweep'").fetchone()[0]
+    assert updates == 2
