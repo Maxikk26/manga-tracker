@@ -1,6 +1,33 @@
 # Spec: Cliente de la fuente + descubrimiento — manga-tracker V1a
 
-Versión 1.11 — 2026-09-07. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+Versión 1.12 — 2026-10-28. Documento 3 del paquete SDD. Depende de `one-pager-v1a.md` (v1.14), `spec-modelo-de-datos.md` (v1.10), `manganato-fuente-actual.md` (v1.4) y `medicion-ventana-feed.md` (v1.2).
+
+## Resumen
+
+| Qué | Decisión | Costo / cifra | Dónde |
+|---|---|---|---|
+| **Dos capas** | El cliente sabe de manganato (URLs, HTML, JSON, ads, anti-bot); el descubrimiento sabe de la lista, los estados y cuándo notificar. Si cambia la fuente, cambia solo el cliente | — | §Separación en dos capas |
+| **Política de request** | curl-cffi con Chrome, secuencial, cero concurrencia, timeout 30s, un solo reintento. Clase `batch` (todo lo desatendido) 5-15s; clase `interactive` (solo el alta del panel) 1-2s | Alta manual ~2-5 s; un barrido paga el sorteo completo por request | §Política de request |
+| **Taxonomía de fallos** | No encontrado (alimenta slugs muertos), transitorio (no dice nada del slug), inesperado (la fuente cambió; se loguea el fragmento) | — | §Taxonomía de errores |
+| **Operaciones del cliente** | Feed (página 1, ads filtrados primero, cero items = error), capítulos (un request, límite 50, del más nuevo al más viejo), ficha, URL de capítulo sin request | — | §Operación 1 a §Operación auxiliar |
+| **Regla de detección** | Una sola, seis pasos, compartida por los tres mecanismos; la historia se escribe antes de decidir si se notifica | — | §La regla de detección |
+| **Retroceso (v1.12)** | Un **barrido** que observa un número más nuevo **menor** al guardado baja `latest_chapter_num` a lo observado, con un WARNING; el feed nunca lo baja | Peor caso: una línea de digest duplicada si la fuente entregó una lista truncada un día | §La regla de detección, paso 2 |
+| **Ya leído (v1.12)** | Un capítulo `<=` a mi progreso se registra y avanza en silencio, como `on_hold`; nunca se notifica. La detección no escribe nunca en `bookmarks` | — | §La regla de detección, paso 5 |
+| **Notificar antes de actualizar** | En activos, `latest_chapter_num` avanza solo tras un digest enviado; un envío fallido no avanza nada y se reintenta solo | Un aviso duplicado es aceptable; uno perdido no | §Orden de operaciones |
+| **Feed** | Cada 30 minutos, por debajo de la ventana medida de 41 | 1 request por corrida, 48 al día | §Mecanismo 1 |
+| **Barrido de activos** | Diario a las 22:00 local, con pre-filtro por hora de actualización y recuperación al arrancar. Es la única garantía de detección | ~10 requests en vez de ~89; latencia máxima ~24h | §Mecanismo 2 |
+| **Barrido de on-hold** | Semanal, domingo; on-hold más pausados por fallos; nunca notifica | Mismo pre-filtro | §Mecanismo 3 |
+| **Slugs muertos** | 5 "no encontrado" seguidos pausan el mapeo y mandan un solo aviso; el semanal reintenta | Reparación manual del slug | §Slugs muertos |
+| **`job_runs`** | Una fila por corrida; `partial` por envío fallido o por más del 25% de mapeos pedidos con fallos tragados | — | §Registro de corridas |
+| **Fuera de alcance** | No formatea mensajes, no escribe `reading_history`, no toca `publication_status`, no conoce Kitsu. El slug estancado y la búsqueda de slug hermano quedan para V2 | — | §Qué NO hace este módulo, §Pendientes abiertos |
+
+Cambios vs 1.11: **el valor guardado deja de ser un trinquete que solo sube, y lo que ya leí deja de notificarse.** Lo fuerza una auditoría de producción del 2026-10-28, no revisión de documentos.
+
+- **Un barrido baja `latest_chapter_num` cuando la fuente muestra menos.** La v1.11 decía "se registra en log y NO se retrocede el valor guardado", y con un valor guardado *equivocado* eso silencia el título para siempre: todo capítulo real por debajo del valor inflado se descartaba, con un WARNING diario que nadie leía. La auditoría encontró tres casos: ms 93 guardaba 373 (una fila espuria del feed del 2026-08-26) con la fuente en 302 y mi progreso en 288, así que del 298 al 302 no se notificó ninguno; ms 199 guardaba 231 con la fuente en 164 y mi progreso en 154, y del 158 al 164 tampoco; ms 200 guardaba 560 (del `seed_backfill`) con la fuente en 145. Ahora el primer barrido (`active_sweep` u `onhold_sweep`) que observa el retroceso baja el valor al observado. El feed no lo baja, y el motivo está en el paso 2.
+- **Sin cambio de esquema.** La corrección ocurre en la primera observación, no tras tres consecutivas: una racha exigiría una columna y una migración sobre la base poblada. El peor caso de una lista truncada por un día es una línea de digest duplicada, que es exactamente lo que este proyecto ya acepta.
+- **Un capítulo que ya leí no se notifica.** Leo algunos títulos en otro lado (*The Steward* 912 contra 804 en la fuente, *Return of the Mad Demon* 216 contra 202), y el digest me avisaba de capítulos por debajo de mi progreso. Ahora se registran y avanzan en silencio, igual que un `on_hold`. La detección nunca escribe mi progreso.
+- **Pendiente #4**: la parte del slug estancado queda en V2, con su decisión previa resuelta.
+- Se agrega el `## Resumen` inicial que este documento debía, y se corrige el costo del feed, que seguía diciendo 24 corridas diarias desde que el intervalo bajó a 30 minutos en la v1.7.
 
 Cambios vs 1.10: se abre el **pendiente #4 — un slug que se estanca sin morir no lo detecta nada.** Solo documentación: ningún cambio de comportamiento. Se registra con la medición que hace inviable la solución obvia (mediana de 5.5 días sin capítulo nuevo, p90 de 34, máximo 39 sobre los 60 mapeos activos), y con la decisión previa que hay que resolver antes de implementarlo: si el cotejo por slug hermano es trabajo de V1 o alcance de V2.
 
@@ -134,14 +161,23 @@ Todo capítulo observado —venga del feed o de un barrido— pasa por la misma 
 Dado un mapeo de `manga_sites` y un capítulo observado (número, URL, timestamp de publicación si lo hay):
 
 1. **Sellar el chequeo**: se actualiza `last_checked_at` del mapeo. Ocurre siempre, haya novedad o no.
-2. **Comparar**: si el número observado es menor o igual a `latest_chapter_num`, no hay novedad; fin. (Caso especial: si es *menor*, la fuente renumeró o borró capítulos; se registra en log y NO se retrocede el valor guardado.)
+2. **Comparar**: si el número observado es menor o igual a `latest_chapter_num`, no hay novedad; fin. Caso especial, si es *menor* (corregido en la v1.12):
+   - **Desde un barrido** (`active_sweep`, `onhold_sweep`): se **baja** `latest_chapter_num`, `latest_chapter_url` y `latest_chapter_at` a los valores observados, y se registra un WARNING con el valor viejo, el nuevo y el id del mapeo. Sin fila de historia y sin notificación: es una corrección del valor guardado, no una publicación. A partir de ahí, un capítulo más alto se detecta y se notifica por el camino normal. Nunca aplica a un terminal (`completed`, `dropped`): el paso 3 es absoluto y gana, así que un terminal no se toca ni para corregirlo.
+   - **Desde el feed**: se registra en log y **no** se toca el valor guardado.
+
+   **Por qué el barrido sí y el feed no.** El barrido lee la lista completa de capítulos de ese slug y compara su capítulo más nuevo: si ese máximo está por debajo de lo guardado, lo guardado es lo que está mal. El feed es una sola línea por título, de una página que no garantiza nada, y fue justo una fila espuria del feed la que infló ms 93. Solo el capítulo más nuevo que la fuente lista puede bajar el valor; los demás capítulos de la respuesta van directo a `chapter_history` y nunca pasan por esta comparación.
+
+   **Por qué hacía falta.** La v1.11 decía "se registra en log y NO se retrocede", y con un valor guardado equivocado eso silencia el título para siempre. La auditoría del 2026-10-28 encontró ms 93 en 373 con la fuente en 302 (mi progreso en 288: del 298 al 302 sin notificar), ms 199 en 231 con la fuente en 164 (progreso 154: del 158 al 164 sin notificar) y ms 200 en 560 con la fuente en 145. **Costo declarado**: bajar el valor no recupera lo que el silencio ya se tragó — esos capítulos quedan por debajo del valor corregido y no se notifican retroactivamente; lo que se arregla es que el título vuelve a avisar desde el siguiente. Y la corrección ocurre en la primera observación, sin racha, porque una racha necesita una columna y una migración: si la fuente entregó un día una lista truncada, el peor caso es una línea de digest duplicada al día siguiente, que este proyecto ya acepta.
 3. **Descartar los terminales primero**: si el bookmark está en `completed` o `dropped`, la secuencia termina aquí. No se registra historia y no se actualiza el mapeo. Solo el sello de `last_checked_at` del paso 1 ya ocurrió, porque el chequeo sí pasó.
 4. **Registrar la publicación**: el capítulo se inserta en `chapter_history` con su `detected_via` correspondiente. La restricción de unicidad hace la operación idempotente. Este paso ocurre **antes de la decisión de notificar** y es independiente de ella: la historia de publicaciones es un hecho, no depende de si el mensaje salió.
 
    Precisión de orden (corregida en la v1.3): "antes de cualquier decisión" se refiere a la decisión de **notificar**, no a la de estado terminal. El filtro de terminales del paso 3 va primero, porque la regla de estados terminales es absoluta — no consumen requests y su data no alimenta nada, `chapter_history` incluida. Redactado al revés, un match del feed contra un manga `dropped` habría escrito historia que la spec prohíbe.
 5. **Decidir según el estado del bookmark restante** (los terminales ya salieron en el paso 3):
-   - `reading` / `want_to_read` → **candidato a notificación**: se acumula en el lote de la corrida (paso 6).
+   - `reading` / `want_to_read` con el capítulo por encima de `last_chapter_read` (o con progreso nulo) → **candidato a notificación**: se acumula en el lote de la corrida (paso 6).
    - `on_hold` → **actualización silenciosa**: se actualiza `latest_chapter_num`, `latest_chapter_url` y `latest_chapter_at` de inmediato. Nunca notifica.
+   - `reading` / `want_to_read` con el capítulo **menor o igual a `last_chapter_read`** (v1.12) → **actualización silenciosa**, igual que `on_hold`: ya lo leí, en esta fuente o en otra, y avisarme de él es ruido. Se registra en el paso 4 como cualquier publicación y cuenta en `updates_found`. Con progreso nulo no aplica: todo capítulo es candidato.
+
+   **La detección nunca escribe en `bookmarks`**, y en particular nunca `last_chapter_read`: ese es mi progreso, no un dato de la fuente. Que mi progreso supere lo que la fuente tiene (912 leído contra 804 publicado) no es una alarma ni algo que corregir: significa que lo leí en otro lado, y reconciliar fuentes es trabajo de V2 multi-fuente.
 6. **Cierre de corrida para los candidatos** (ver orden de operaciones abajo).
 
 ## Orden de operaciones: notificar antes de actualizar
@@ -176,7 +212,7 @@ La v1.6 de esta spec decía "cada hora", y eso violaba la regla anterior: 60 > 4
 4. `source_published_at` en `chapter_history` queda **nulo** para detecciones por feed: la pista de fecha del feed es texto impreciso y no se interpreta. El timestamp real lo completará, si acaso, una detección posterior por barrido.
 5. Cierre con envío de digest si hubo novedades de activos.
 
-**Costo**: 1 request por corrida, 24 corridas diarias.
+**Costo**: 1 request por corrida, 48 corridas diarias.
 
 ## Mecanismo 2: barrido de activos (`active_sweep`)
 
@@ -199,7 +235,7 @@ Cuatro reglas, y las cuatro son de corrección, no de ahorro:
 
 **La hora del barrido queda acoplada al horario de la fuente.** Refresca esos datos una vez al día a las 01:30 UTC (medido sobre 32 muestras más una confirmación a 24h exactas). Las 22:00 locales son 02:00 UTC, media hora después; a las 03:00 locales se leería un índice de 5.5 horas y las publicaciones de esa ventana esperarían al día siguiente, estirando la garantía de ~24h a ~29.5h. Mover una hora obliga a revisar la otra.
 
-**Nota sobre la respuesta completa**: la llamada devuelve hasta 50 capítulos, pero solo el más nuevo se compara. Los demás se registran igualmente en `chapter_history` si no estaban (idempotencia mediante); es data gratis para la cadencia futura.
+**Nota sobre la respuesta completa**: la llamada devuelve hasta 50 capítulos, pero solo el más nuevo se compara. Los demás se registran igualmente en `chapter_history` si no estaban (idempotencia mediante); es data gratis para la cadencia futura. Por eso un capítulo viejo de la lista nunca puede bajar el valor guardado (paso 2 de la regla, v1.12): solo el más nuevo pasa por la comparación.
 
 **Costo**: menos de 20 requests, pocos minutos de corrida. Este mecanismo es la garantía de que la latencia máxima de detección es ~24h aunque el feed se desborde siempre.
 
@@ -331,6 +367,10 @@ Todos por variable de entorno o archivo de configuración, con los valores inici
    **Lo que sí separa los dos casos** es preguntarle a la fuente si existe otro slug con el mismo título y más capítulos, y la pieza ya está: `fetch_known_slugs`. Eso lo convierte en la misma forma de problema que V2 multi-fuente — un título, varias fuentes candidatas, cuál manda — así que la decisión previa es si esto es trabajo de V1 o alcance de V2.
 
    Aparte y sin decisión pendiente: mostrar en el panel los días desde el último capítulo es pasivo, no avisa nada y responde "¿hace cuánto no me llega X?" de un vistazo. No resuelve el pendiente; le quita la urgencia.
+
+   **Estado al 2026-10-28 (v1.12): la decisión previa está tomada — V2.** Las dos señales (el silencio de N días y el slug hermano con más capítulos) y el uso de `fetch_known_slugs` para buscarlo quedan como alcance de V2 multi-fuente, no de V1. Lo que la auditoría de producción de esa fecha sí cerró es un hueco vecino que se confundía con este: un título silenciado no porque el slug se estancara, sino porque `latest_chapter_num` estaba inflado por encima de la fuente. Ese caso ya lo corrige el paso 2 de la regla de detección.
+
+   Una señal que parece de este pendiente y **no** lo es: `last_chapter_read` mayor que `latest_chapter_num`. Significa que leí ese título en otra fuente, que es el problema de V2 multi-fuente, no una alarma de V1. No se avisa ni se corrige, y desde la v1.12 tampoco se notifica (paso 5).
 
 Resuelto en la v1.1: el intervalo del chequeo por feed queda fijado por medición (ver `medicion-ventana-feed.md`); su valor vigente está en la tabla de parámetros.
 
