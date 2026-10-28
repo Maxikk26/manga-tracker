@@ -32,7 +32,7 @@ Multi-source / sibling-slug lookup (`fetch_known_slugs`) stays V2. Heartbeat and
 ## Tasks
 
 - [x] T1 Spec: `spec-cliente-fuente-descubrimiento.md` detection rule (step 2 special case), Pendientes #4 status, changelog + version bump, dependent pins; `spec-bot-telegram.md` if it states what gets notified.
-- [ ] T2 Ratchet exit in the detection rule, sweeps only, with tests (RED first).
+- [x] T2 Ratchet exit in the detection rule, sweeps only, with tests (RED first).
 - [ ] T3 Read-progress silence with tests (RED first), including the `last_chapter_read` never-written guard.
 
 Route: delegated direct, one writer (writer trigger: 2+ non-trivial files across docs, `detection.py`, sweep callers, tests).
@@ -43,4 +43,5 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files across
 
 ## Progress
 
-- T1 (route: delegated writer). `spec-cliente-fuente-descubrimiento.md` v1.12: step 2 split (sweeps lower, feed logs), step 5 read-progress silence + "detection never writes `bookmarks`", Pendientes #4 status (stalled slug stays V2; read > latest = read elsewhere), new `## Resumen` (debt the doc owed; runbook-mantenimiento v1.12 lowers the debt count 5 -> 4), feed cost 24 -> 48 runs/day fixed. Pins v1.11 -> v1.12 updated in place in 6 docs (precedent: pins are updated without bumping the pinning doc). `CLAUDE.md` rule rewritten. RED/GREEN: n/a (passive docs). Check: `uv run pytest -q` 632 passed (no code touched). `spec-bot-telegram.md`: pin only — it delegates "what is a novelty" to CD.
+- T1 — commit `54859d3` (route: delegated writer). `spec-cliente-fuente-descubrimiento.md` v1.12: step 2 split (sweeps lower, feed logs), step 5 read-progress silence + "detection never writes `bookmarks`", Pendientes #4 status (stalled slug stays V2; read > latest = read elsewhere), new `## Resumen` (debt the doc owed; runbook-mantenimiento v1.12 lowers the debt count 5 -> 4), feed cost 24 -> 48 runs/day fixed. Pins v1.11 -> v1.12 updated in place in 6 docs (precedent: pins are updated without bumping the pinning doc). `CLAUDE.md` rule rewritten. RED/GREEN: n/a (passive docs). Check: `uv run pytest -q` 632 passed (no code touched). `spec-bot-telegram.md`: pin only — it delegates "what is a novelty" to CD.
+- T2 (route: delegated writer). `detection.py`: `LOWERING_DETECTED_VIA = {active_sweep, onhold_sweep}`; a lower newest chapter from a sweep rewrites `latest_chapter_num/url/at`, logs WARNING old -> new with `manga_sites.id`, returns `NOTHING_DETECTED` (no history, no candidate, not in `updates_found`). Feed keeps the old warning. Terminal untouched (returns before the comparison). Verified the sweeps pass only `chapters[0]` to the rule; `chapters[1:]` go straight to history, so an older listed chapter never triggers a lowering (test added). RED: `tests/discovery/test_detection.py` 6 failed (`373.0 != 302`), sweep tests 2 failed (active 231->164, onhold 560->145). GREEN: discovery 148 passed; full suite 644 passed. Guard broken on purpose: adding `feed` to the set fails `test_the_feed_never_moves_the_stored_value_backward`.

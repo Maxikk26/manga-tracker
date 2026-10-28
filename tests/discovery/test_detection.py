@@ -61,17 +61,74 @@ def test_terminal_bookmark_writes_no_history_and_no_update(status):
     assert row == (100, NOW)  # step 1's seal still happened; nothing else did
 
 
-def test_lower_observed_number_never_moves_stored_value_backward(caplog):
+def _latest_row(conn, manga_site_id: int):
+    return conn.execute(
+        "SELECT latest_chapter_num, latest_chapter_url, latest_chapter_at FROM manga_sites WHERE id = ?",
+        (manga_site_id,),
+    ).fetchone()
+
+
+def test_the_feed_never_moves_the_stored_value_backward(caplog):
+    """One feed row is too weak to overrule the store - a bogus feed row is
+    what inflated ms 93 to 373 in the first place (CD v1.12 step 2)."""
     conn = connect(":memory:")
     mapping = seed_mapping(conn, status="reading", latest=100)
     chapter = Chapter(chapter_num=90, url="x", published_at=None)
 
     with caplog.at_level(logging.WARNING):
-        detection = apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
+        detection = apply_detection(conn, mapping, chapter, detected_via="feed", now=NOW, logger=LOGGER)
 
     assert detection == NOTHING_DETECTED and "renumbered/deleted" in caplog.text
     stored = conn.execute("SELECT latest_chapter_num FROM manga_sites WHERE id = ?", (mapping.id,)).fetchone()[0]
     assert stored == 100
+
+
+@pytest.mark.parametrize("detected_via", ["active_sweep", "onhold_sweep"])
+@pytest.mark.parametrize("status", ["reading", "want_to_read", "on_hold"])
+def test_a_sweep_lowers_an_inflated_stored_value_to_what_the_source_lists(caplog, detected_via, status):
+    """The production case (audit 2026-10-28): ms 93 stored 373 while the
+    source listed 302, so every real chapter below 373 was dropped with a daily
+    warning. A sweep reads the whole list, so its newest chapter being lower
+    means the stored value is the wrong one. It is a correction, not a
+    publication: no history row and nothing for the digest."""
+    conn = connect(":memory:")
+    mapping = seed_mapping(conn, status=status, latest=373)
+    chapter = Chapter(chapter_num=302, url="https://x/302", published_at="2026-10-27T10:00:00Z")
+
+    with caplog.at_level(logging.WARNING):
+        detection = apply_detection(conn, mapping, chapter, detected_via=detected_via, now=NOW, logger=LOGGER)
+
+    assert detection == NOTHING_DETECTED  # not recorded, not a candidate
+    assert _latest_row(conn, mapping.id) == (302, "https://x/302", "2026-10-27T10:00:00Z")
+    assert _history_count(conn, mapping.id) == 0
+    warning = next(r for r in caplog.records if r.levelno == logging.WARNING)
+    assert all(str(part) in warning.getMessage() for part in (373, 302, f"manga_sites.id={mapping.id}"))
+
+
+@pytest.mark.parametrize("status", ["completed", "dropped"])
+def test_a_sweep_never_lowers_a_terminal_mapping(status):
+    """Terminal is absolute (step 3): not even a correction touches it."""
+    conn = connect(":memory:")
+    mapping = seed_mapping(conn, status=status, latest=373)
+    chapter = Chapter(chapter_num=302, url="https://x/302", published_at=NOW)
+
+    apply_detection(conn, mapping, chapter, detected_via="active_sweep", now=NOW, logger=LOGGER)
+
+    assert _latest_row(conn, mapping.id) == (373, None, None)
+
+
+def test_after_lowering_the_next_real_chapter_is_a_normal_candidate():
+    """The point of lowering: the title speaks again from the next chapter on."""
+    conn = connect(":memory:")
+    mapping = seed_mapping(conn, status="reading", latest=373)
+    apply_detection(conn, mapping, Chapter(302, "https://x/302", None), detected_via="active_sweep",
+                    now=NOW, logger=LOGGER)
+
+    lowered = mapping._replace(latest_chapter_num=302)
+    detection = apply_detection(conn, lowered, Chapter(303, "https://x/303", None), detected_via="feed",
+                                now=NOW, logger=LOGGER)
+
+    assert detection.candidate is not None and detection.candidate.chapter_num == 303
 
 
 @pytest.mark.parametrize("status", ["reading", "want_to_read"])

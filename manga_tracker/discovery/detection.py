@@ -1,7 +1,8 @@
 """The shared detection rule (CD Parte B v1.3, six steps) - implemented once,
 called by every mechanism. Never writes chapter_history for a terminal
-bookmark; never moves latest_chapter_num backward; the history write happens
-before, and independently of, any notify decision."""
+bookmark; only a sweep ever moves latest_chapter_num backward (CD v1.12 step
+2); the history write happens before, and independently of, any notify
+decision."""
 
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -59,6 +60,15 @@ NOTHING_DETECTED = Detection(recorded=False)
 
 DETECTED_VIA_VALUES = frozenset({"feed", "active_sweep", "onhold_sweep", "seed_backfill"})
 
+# The mechanisms allowed to lower latest_chapter_num (CD v1.12 step 2). A sweep
+# reads the whole chapter list and hands the rule its newest entry, so that
+# entry being below the stored value means the stored value is wrong. Until
+# 2026-10-28 nothing could lower it, and production carried three titles muted
+# for months behind an inflated value (ms 93 at 373 against a source at 302).
+# The feed is left out on purpose: one row of a page that guarantees nothing is
+# too weak to overrule the store, and a bogus feed row is what inflated ms 93.
+LOWERING_DETECTED_VIA = frozenset({"active_sweep", "onhold_sweep"})
+
 
 def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: str, logger) -> Detection:
     # chapter_history is written with INSERT OR IGNORE, which the spec requires
@@ -81,7 +91,21 @@ def apply_detection(conn, mapping: Mapping, chapter, *, detected_via: str, now: 
 
     latest = mapping.latest_chapter_num
     if latest is not None and chapter.chapter_num <= latest:
-        if chapter.chapter_num < latest:
+        if chapter.chapter_num < latest and detected_via in LOWERING_DETECTED_VIA:
+            # A correction, not a publication: no history row, nothing for the
+            # digest, and not counted in updates_found. The next chapter above
+            # the corrected value is then an ordinary novelty. No streak of
+            # sightings is required - that would need a column and a migration,
+            # and the worst a one-day truncated list can cost is one duplicated
+            # digest line, which notify-before-update already accepts.
+            conn.execute(
+                "UPDATE manga_sites SET latest_chapter_num = ?, latest_chapter_url = ?, latest_chapter_at = ? "
+                "WHERE id = ?", (chapter.chapter_num, chapter.url, chapter.published_at, mapping.id),
+            )
+            logger.warning("observed %s < stored %s for manga_sites.id=%s via %s; lowering the stored value "
+                           "%s -> %s", chapter.chapter_num, latest, mapping.id, detected_via, latest,
+                           chapter.chapter_num)
+        elif chapter.chapter_num < latest:
             logger.warning("observed %s < stored %s for manga_sites.id=%s; source renumbered/deleted, "
                             "not moving the stored value backward", chapter.chapter_num, latest, mapping.id)
         conn.commit()
